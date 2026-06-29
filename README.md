@@ -10,7 +10,7 @@ This is a simple test project for demonstrating our first PR workflow.
 
 ## Getting Started
 
-Run `npm install` to get started with this project.
+Clone this repository and run `npm install` to get started with this project.
 
 ## License
 
