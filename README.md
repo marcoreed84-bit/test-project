@@ -1,6 +1,6 @@
 # Test Project
 
-This is a simple test project for demostrating our first PR workflow.
+This is a simple test project for demonstrating our first PR workflow.
 
 ## Features
 
