@@ -33,6 +33,8 @@ P = dict(
     use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
     trail_give_back_atr=3.0,
     use_slope_sr_block=False, slope_sr_block_slope=1.00, slope_sr_block_sr=6.00,
+    use_stale_exit=False, stale_bars=48, stale_min_loss_atr=0.5,
+    use_momentum=False, macd_fast=12, macd_slow=26, macd_signal=9, macd_signal_method="sma",
 )
 
 # ---- Aurelius_M15_EA.mq5 v1.51 true shipped defaults - genuinely different
@@ -57,6 +59,8 @@ P15 = dict(
     allow_buys=True, allow_sells=True,
     use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
     trail_give_back_atr=3.0,
+    use_stale_exit=False, stale_bars=48, stale_min_loss_atr=0.5,
+    use_momentum=False, macd_fast=12, macd_slow=26, macd_signal=9, macd_signal_method="sma",
 )
 
 
@@ -381,6 +385,23 @@ def build_context(df, h4, params=None):
         sr_dist_buy = np.abs(sr_hi - c) / atr
         sr_dist_sell = np.abs(c - sr_lo) / atr
 
+    # --- MACD histogram, for InpUseMomentum / MomentumShiftOK()
+    # (Aurelius_EA.mq5 ~1905). The EA reads iMACD(_Symbol, PERIOD_CURRENT,
+    # 12, 26, 9, PRICE_CLOSE): buffer 0 = MAIN = EMA(fast) - EMA(slow),
+    # buffer 1 = SIGNAL. NOTE/ASSUMPTION: MetaTrader's own bundled MACD
+    # smooths the signal line with a SIMPLE MA of the main buffer, not an
+    # EMA (unlike most non-MT platforms) - macd_signal_method="sma"
+    # reproduces that, "ema" is kept as a sensitivity check since this is
+    # a platform convention, not something verifiable from the CSV data. ---
+    macd_main = ma(c, p.get("macd_fast", 12), "ema") - ma(c, p.get("macd_slow", 26), "ema")
+    valid = ~np.isnan(macd_main)
+    macd_sig = np.full(n, np.nan)
+    if valid.any():
+        first = int(np.argmax(valid))
+        macd_sig[first:] = ma(macd_main[first:], p.get("macd_signal", 9),
+                              p.get("macd_signal_method", "sma"))
+    macd_hist = macd_main - macd_sig
+
     # --- session VWAP + spread (real column) ---
     vwap = session_vwap(df)
     spread = df["spread"].values.astype(float)
@@ -420,7 +441,7 @@ def build_context(df, h4, params=None):
         pullback_ok_buy=pullback_ok_buy, pullback_ok_sell=pullback_ok_sell,
         vol_ratio=vol_ratio, sr_dist_buy=sr_dist_buy, sr_dist_sell=sr_dist_sell,
         sr_hi=sr_hi, sr_lo=sr_lo,
-        vwap=vwap, spread=spread,
+        vwap=vwap, spread=spread, macd_hist=macd_hist,
         near_daily_close=near_daily_close, no_entry_near_close=no_entry_near_close,
         is_market_holiday=is_market_holiday,
         friday_flatten=friday_flatten, friday_no_entry=friday_no_entry,

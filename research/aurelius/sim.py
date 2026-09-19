@@ -85,9 +85,36 @@ def simulate(ctx, extra_filter=None, params=None):
                 if not still_aligned:
                     fired = "ALIGN_BREAK"
 
+            # --- stale losing trade (InpUseStaleExit, Aurelius_EA.mq5 ~2899).
+            # Real EA order: this sits AFTER the ALIGN_BREAK check and after
+            # ManageBreakeven/scale/bank/MAXBARS, and closes at market - i.e.
+            # it fills at the open of bar fill_i, which is BEFORE the resting
+            # stop can be hit anywhere inside fill_i, so it belongs in this
+            # `fired` chain (last) rather than after the stop block below.
+            # Bar count: the EA's g_entryBarCount is incremented once per new
+            # bar while a position is open and zeroed on the entry tick, so at
+            # the moment it decides from bar i (shift=1) it equals
+            # i - entry_i + 1 - reproduced exactly here, not approximated.
+            if fired is None and p.get("use_stale_exit") and entry_atr > 0:
+                bars_open = i - entry_i + 1
+                if bars_open >= p.get("stale_bars", 48):
+                    prof = (close[i] - entry_px) * (1 if is_buy else -1)
+                    # p["stale_rule"] is a RESEARCH HOOK ONLY, never part of
+                    # the EA: it replaces the still-losing condition with an
+                    # arbitrary callable so a permutation null can fire the
+                    # same number of stale exits on the same eligible bars
+                    # by a rule that carries no information. Absent (the
+                    # normal case) the real InpStaleMinLossATR test is used.
+                    rule = p.get("stale_rule")
+                    hit = (rule(bars_open, prof, entry_atr) if rule is not None
+                           else prof < -p.get("stale_min_loss_atr", 0.5) * entry_atr)
+                    if hit:
+                        fired = "STALE"
+
             if fired is not None:
                 trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
-                                    entry_px=entry_px, exit_px=px_fill, reason=fired))
+                                    entry_px=entry_px, exit_px=px_fill,
+                                    entry_atr=entry_atr, reason=fired))
                 in_pos = 0
                 bars_since_close = 0
                 price21_bad = 0
@@ -123,7 +150,8 @@ def simulate(ctx, extra_filter=None, params=None):
                 hit = (low[fill_i] <= stop_px) if is_buy else (high[fill_i] >= stop_px)
                 if hit:
                     trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
-                                        entry_px=entry_px, exit_px=stop_px, reason="STOP"))
+                                        entry_px=entry_px, exit_px=stop_px,
+                                        entry_atr=entry_atr, reason="STOP"))
                     in_pos = 0
                     bars_since_close = 0
                     price21_bad = 0
@@ -170,6 +198,23 @@ def simulate(ctx, extra_filter=None, params=None):
         if not pb_ok:
             continue
 
+        # --- momentum shift (InpUseMomentum / MomentumShiftOK(),
+        # Aurelius_EA.mq5 ~1905): MACD histogram at shifts 1/2/3 - i.e.
+        # bars i, i-1, i-2 - must have just turned in the trade's favour.
+        # Placed here to match the real OnTick order (after PullbackOK,
+        # before the volume filter); order doesn't change the outcome,
+        # only which reason a rejected bar is attributed to. A bar whose
+        # MACD is unreadable is rejected, matching MomentumShiftOK()'s
+        # own `return(false)` on a failed BufVal read. ---
+        if p.get("use_momentum"):
+            hist = ctx["macd_hist"]
+            h0, h1, h2 = hist[i], hist[i - 1], hist[i - 2]
+            if np.isnan(h0) or np.isnan(h1) or np.isnan(h2):
+                continue
+            ok_mom = (h0 > h1 and h1 <= h2) if is_buy else (h0 < h1 and h1 >= h2)
+            if not ok_mom:
+                continue
+
         if p["use_volume"]:
             vr = ctx["vol_ratio"][i]
             if not np.isnan(vr) and vr < p["min_vol_ratio"]:
@@ -214,7 +259,8 @@ def simulate(ctx, extra_filter=None, params=None):
             hit = (low[fill_i] <= stop_px) if is_buy else (high[fill_i] >= stop_px)
             if hit:
                 trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
-                                    entry_px=entry_px, exit_px=stop_px, reason="STOP"))
+                                    entry_px=entry_px, exit_px=stop_px,
+                                    entry_atr=entry_atr, reason="STOP"))
                 in_pos = 0
                 bars_since_close = 0
                 price21_bad = 0
@@ -239,3 +285,82 @@ def stats(trades):
         avg_loss=losses.mean() if len(losses) else 0.0,
         gross_win=gross_win, gross_loss=gross_loss,
     )
+
+
+def risk_stats(trades, ctx):
+    """The drawdown side, which stats() above cannot see at all (it only
+    reads closed entry/exit prices). Three separate numbers, because the
+    real MT5 report that started this whole line of work had a 9.76%
+    BALANCE drawdown next to a 27.69% EQUITY drawdown - i.e. the closed-
+    trade curve was NOT where the risk was:
+
+      closed_dd   - max drawdown of the closed-trade equity curve, in
+                    price units. The BALANCE-drawdown analogue.
+      float_dd    - max drawdown of a bar-by-bar equity curve that marks
+                    the open position to each bar's own adverse/favourable
+                    extreme. The EQUITY-drawdown analogue, and the number
+                    InpUseStaleExit is actually aimed at.
+      worst_mae   - worst single-trade adverse excursion (price, and in
+                    units of that trade's entry ATR). The "~$1,184
+                    underwater" incident, per-trade.
+
+    APPROXIMATION: MT5 computes equity drawdown tick by tick; this uses one
+    adverse and one favourable extreme per M5 bar, and assumes the bar's
+    favourable extreme precedes its adverse one when setting the running
+    peak (the conservative ordering). It is a like-for-like comparison
+    between baseline and candidate, not a reproduction of MT5's own number.
+    Everything is in price units (1 lot-equivalent, no compounding), so
+    percentages of an account balance are not comparable to a real report.
+    """
+    if not trades:
+        return dict(closed_dd=0.0, float_dd=0.0, worst_mae=0.0, worst_mae_atr=0.0)
+    high, low = ctx["high"], ctx["low"]
+
+    # --- closed-trade curve ---
+    eq = 0.0
+    peak = 0.0
+    closed_dd = 0.0
+    for t in trades:
+        eq += (t["exit_px"] - t["entry_px"]) * t["dir"]
+        peak = max(peak, eq)
+        closed_dd = max(closed_dd, peak - eq)
+
+    # --- bar-marked curve (trades are non-overlapping: one position at a
+    # time, enforced by simulate()) ---
+    eq = 0.0
+    peak = 0.0
+    float_dd = 0.0
+    worst_mae = 0.0
+    worst_mae_atr = 0.0
+    for t in trades:
+        d = t["dir"]
+        a, b = t["entry_i"], t["exit_i"]
+        mae = 0.0
+        # Bars a..b-1 are held in full. Bar b is NOT: every exit either
+        # fills at that bar's OPEN (every signal/session/stale exit) or at
+        # the resting stop inside it, so the position is gone before the
+        # rest of bar b happens. Counting bar b's full range here credited
+        # the trade with excursion it was never exposed to - which on the
+        # first bar back after the daily settlement break (a real gap on
+        # this broker's data) produced single "excursions" of 60+ price
+        # units on trades whose stop was 9 units wide. Bar b contributes
+        # exactly the realized exit instead.
+        for k in range(a, b):
+            # d=+1: fav=high-entry, adv=low-entry;  d=-1: fav=entry-low, adv=entry-high
+            fav = ((high[k] if d > 0 else low[k]) - t["entry_px"]) * d
+            adv = ((low[k] if d > 0 else high[k]) - t["entry_px"]) * d
+            peak = max(peak, eq + fav)
+            float_dd = max(float_dd, peak - (eq + adv))
+            mae = min(mae, adv)
+        realized = (t["exit_px"] - t["entry_px"]) * d
+        mae = min(mae, realized)
+        float_dd = max(float_dd, peak - (eq + realized))
+        eq += realized
+        peak = max(peak, eq)
+        float_dd = max(float_dd, peak - eq)
+        worst_mae = min(worst_mae, mae)
+        atr0 = t.get("entry_atr", 0.0)
+        if atr0 > 0:
+            worst_mae_atr = min(worst_mae_atr, mae / atr0)
+    return dict(closed_dd=closed_dd, float_dd=float_dd,
+                worst_mae=worst_mae, worst_mae_atr=worst_mae_atr)
