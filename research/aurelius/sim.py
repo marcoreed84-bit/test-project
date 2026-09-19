@@ -177,6 +177,16 @@ def simulate(ctx, extra_filter=None, params=None):
             if not np.isnan(sd) and sd < p["min_sr_dist_atr"]:
                 continue
 
+        # --- combined slope x S/R block (M15 only, InpUseSlopeSRBlock -
+        # Aurelius_M15_EA.mq5 ~3209): blocks when slope is steep AND far
+        # from the nearest S/R level, simultaneously - neither threshold
+        # alone catches this, checked with the SAME sd/sl already computed
+        # above rather than InpMaxSlopeATR's own gate ---
+        if p.get("use_slope_sr_block"):
+            sd2 = ctx["sr_dist_buy"][i] if is_buy else ctx["sr_dist_sell"][i]
+            if (not np.isnan(sd2)) and sl >= p["slope_sr_block_slope"] and sd2 >= p["slope_sr_block_sr"]:
+                continue
+
         if extra_filter is not None and not extra_filter(ctx, i, is_buy):
             continue
 

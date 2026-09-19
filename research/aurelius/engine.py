@@ -32,7 +32,48 @@ P = dict(
     allow_buys=True, allow_sells=True,
     use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
     trail_give_back_atr=3.0,
+    use_slope_sr_block=False, slope_sr_block_slope=1.00, slope_sr_block_sr=6.00,
 )
+
+# ---- Aurelius_M15_EA.mq5 v1.51 true shipped defaults - genuinely different
+# from M5, not just rescaled periods: different pullback MA (21, not 50),
+# much stricter S/R distance (1.50 ATR vs M5's 0.50, real-MT5-confirmed),
+# and a filter that doesn't exist in the M5 file at all (InpUseSlopeSRBlock,
+# Python-only per its own header, NOT yet real-tested). ----
+P15 = dict(
+    p21=30, p50=50, p150=150, p600=200, p2400=1200,
+    m21="ema", m50="ema", m150="ema", m600="smma", m2400="ema",
+    align_mode="MID",
+    pullback_ma="21", pullback_tol_atr=0.25, pullback_bars=10,
+    use_slope=True, slope_ma="50", slope_bars=20, min_slope_atr=0.20, max_slope_atr=1.25,
+    use_cross_filter=True, cross_window=10, max_crosses=1,
+    cooldown_bars=5,
+    use_volume=True, vol_avg_bars=100, min_vol_ratio=1.30,
+    use_sr_dist=True, sr_days=3, min_sr_dist_atr=1.50,
+    use_slope_sr_block=True, slope_sr_block_slope=1.00, slope_sr_block_sr=6.00,
+    use_stop=True, stop_atr=2.5,
+    use_price21_exit=True, price21_buffer_atr=0.7, price21_confirm_bars=8,
+    use_vwap_exit=True, vwap_buffer_atr=0.2, vwap_confirm_bars=8,
+    allow_buys=True, allow_sells=True,
+    use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
+    trail_give_back_atr=3.0,
+)
+
+
+def resample_m15_from_m5(df5):
+    """M15 = exactly 3 M5 bars - lossless resample, no new MT5 export needed.
+    tick_volume/spread aggregated the natural way (sum volume, mean spread);
+    spread is only used as a >60-points entry-block check either way."""
+    d = df5.set_index("time")
+    o = d["open"].resample("15min").first()
+    h = d["high"].resample("15min").max()
+    l = d["low"].resample("15min").min()
+    c = d["close"].resample("15min").last()
+    v = d["tick_volume"].resample("15min").sum()
+    sp = d["spread"].resample("15min").mean()
+    out = pd.DataFrame(dict(open=o, high=h, low=l, close=c, tick_volume=v, spread=sp)).dropna()
+    out = out.reset_index()
+    return out
 
 # ---- exact settings actually used in the 2026-09-10 M5 real report
 # (Aurelius_M5.xlsx) before the caching bug was caught and fixed - kept
