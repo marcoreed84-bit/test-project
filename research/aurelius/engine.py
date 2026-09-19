@@ -104,6 +104,98 @@ def load_h4():
     return df
 
 
+def easter_sunday(year):
+    """Anonymous Gregorian algorithm (Meeus/Jones/Butcher), ported verbatim
+    from EasterSunday() (Aurelius_EA.mq5 ~2130)."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return pd.Timestamp(year=year, month=month, day=day)
+
+
+def nth_weekday_of_month(year, month, weekday, n):
+    """weekday: 0=Sunday..6=Saturday (MQL5 day_of_week convention), matching
+    NthWeekdayOfMonth() (~2159)."""
+    first = pd.Timestamp(year=year, month=month, day=1)
+    first_dow = (first.dayofweek + 1) % 7  # pandas Mon=0 -> MQL5 Sun=0 convention
+    offset = (weekday - first_dow + 7) % 7
+    return first + pd.Timedelta(days=offset + (n - 1) * 7)
+
+
+def last_weekday_of_month(year, month, weekday):
+    nm, ny = (1, year + 1) if month == 12 else (month + 1, year)
+    last_day = pd.Timestamp(year=ny, month=nm, day=1) - pd.Timedelta(days=1)
+    last_dow = (last_day.dayofweek + 1) % 7
+    back = (last_dow - weekday + 7) % 7
+    return last_day - pd.Timedelta(days=back)
+
+
+def observed_fixed_holiday(year, month, day):
+    d = pd.Timestamp(year=year, month=month, day=day)
+    dow = (d.dayofweek + 1) % 7  # MQL5 convention: Sun=0..Sat=6
+    if dow == 6:
+        return d - pd.Timedelta(days=1)  # Saturday -> observed Friday
+    if dow == 0:
+        return d + pd.Timedelta(days=1)  # Sunday -> observed Monday
+    return d
+
+
+def us_market_holidays(year):
+    """Ports IsMarketHoliday() (~2193) - every date self-computed, no table."""
+    dates = [
+        observed_fixed_holiday(year, 1, 1),
+        nth_weekday_of_month(year, 1, 1, 3),      # MLK: 3rd Mon Jan
+        nth_weekday_of_month(year, 2, 1, 3),      # Presidents: 3rd Mon Feb
+        easter_sunday(year) - pd.Timedelta(days=2),  # Good Friday
+        last_weekday_of_month(year, 5, 1),        # Memorial: last Mon May
+        observed_fixed_holiday(year, 6, 19),      # Juneteenth
+        observed_fixed_holiday(year, 7, 4),       # Independence Day
+        nth_weekday_of_month(year, 9, 1, 1),      # Labor: 1st Mon Sep
+        nth_weekday_of_month(year, 11, 4, 4),     # Thanksgiving: 4th Thu Nov
+        observed_fixed_holiday(year, 12, 25),     # Christmas
+    ]
+    return {d.date() for d in dates}
+
+
+def market_holiday_mask(times):
+    """Per-bar bool array - is this bar's own calendar date a US market
+    holiday, per IsMarketHoliday()."""
+    dates = pd.DatetimeIndex(times).date
+    years = pd.DatetimeIndex(times).year
+    holiday_by_year = {y: us_market_holidays(int(y)) for y in np.unique(years)}
+    return np.array([d in holiday_by_year[y] for d, y in zip(dates, years)])
+
+
+def dst_gap_adjustment(times):
+    """Per-bar int array (-1 during a DST-gap week, 0 otherwise), ports
+    DSTGapHourAdjustment() (~2239) - this broker's server clock follows EU
+    DST dates while gold's true session follows US DST dates."""
+    idx = pd.DatetimeIndex(times)
+    years = np.unique(idx.year)
+    out = np.zeros(len(idx), dtype=int)
+    for y in years:
+        y = int(y)
+        us_spring = nth_weekday_of_month(y, 3, 0, 2) + pd.Timedelta(days=1)
+        eu_spring = last_weekday_of_month(y, 3, 0) + pd.Timedelta(days=1)
+        eu_autumn = last_weekday_of_month(y, 10, 0) + pd.Timedelta(days=1)
+        us_autumn = nth_weekday_of_month(y, 11, 0, 1) + pd.Timedelta(days=1)
+        in_spring_gap = (idx >= us_spring) & (idx < eu_spring)
+        in_autumn_gap = (idx >= eu_autumn) & (idx < us_autumn)
+        out[np.asarray(in_spring_gap | in_autumn_gap)] = -1
+    return out
+
+
 def derive_d1_from_h4(h4):
     """D1 OHLC reconstructed from H4 bars grouped by calendar date - H4 bars
     tile exactly 00/04/08/12/16/20 server time within a day on this broker,
@@ -308,8 +400,17 @@ def build_context(df, h4, params=None):
     mins_to_midnight = (23 - hour) * 60 + (60 - minute)
     near_daily_close = mins_to_midnight <= 5           # InpCloseMinsBefore
     no_entry_near_close = mins_to_midnight <= 30        # InpNoEntryMinsBefore
-    friday_flatten = (dow == 4) & (hour >= 22)          # InpFridayCloseHour
-    friday_no_entry = (dow == 4) & (hour >= 20)         # InpNoEntryAfterHourFri
+
+    # --- DST-gap adjustment (DSTGapHourAdjustment, ~2239) and US market
+    # holiday block (IsMarketHoliday, ~2193) - real, purpose-built EA logic,
+    # ported exactly rather than left out as "approximation noise". DST
+    # only corrects the FIXED Friday-hour thresholds in the real code (the
+    # daily near-close check above uses SymbolInfoSessionTrade() dynamically,
+    # which doesn't need it). ---
+    dst_adj = dst_gap_adjustment(df["time"].values)
+    friday_flatten = (dow == 4) & (hour >= 22 + dst_adj)    # InpFridayCloseHour
+    friday_no_entry = (dow == 4) & (hour >= 20 + dst_adj)   # InpNoEntryAfterHourFri
+    is_market_holiday = market_holiday_mask(df["time"].values)
 
     return dict(
         n=n, close=c, high=h, low=l, time=df["time"].values,
@@ -321,5 +422,6 @@ def build_context(df, h4, params=None):
         sr_hi=sr_hi, sr_lo=sr_lo,
         vwap=vwap, spread=spread,
         near_daily_close=near_daily_close, no_entry_near_close=no_entry_near_close,
+        is_market_holiday=is_market_holiday,
         friday_flatten=friday_flatten, friday_no_entry=friday_no_entry,
     )

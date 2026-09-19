@@ -137,6 +137,8 @@ def simulate(ctx, extra_filter=None, params=None):
             continue
         if ctx["no_entry_near_close"][i] or ctx["friday_no_entry"][i]:
             continue
+        if ctx["is_market_holiday"][fill_i]:
+            continue
         if ctx["spread"][i] > 60:  # InpMaxSpreadPoints, points == this column's own units
             continue
         if atr[i] <= 0 or np.isnan(atr[i]):
