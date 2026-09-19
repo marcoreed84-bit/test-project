@@ -259,6 +259,7 @@ def build_context(df, h4):
         slope_buy=slope_buy, slope_sell=slope_sell, crisscross=crisscross,
         pullback_ok_buy=pullback_ok_buy, pullback_ok_sell=pullback_ok_sell,
         vol_ratio=vol_ratio, sr_dist_buy=sr_dist_buy, sr_dist_sell=sr_dist_sell,
+        sr_hi=sr_hi, sr_lo=sr_lo,
         vwap=vwap, spread=spread,
         near_daily_close=near_daily_close, no_entry_near_close=no_entry_near_close,
         friday_flatten=friday_flatten, friday_no_entry=friday_no_entry,
