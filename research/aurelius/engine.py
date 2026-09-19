@@ -29,6 +29,22 @@ P = dict(
     use_price21_exit=True, price21_buffer_atr=0.7, price21_confirm_bars=8,
     use_vwap_exit=True, vwap_buffer_atr=0.2, vwap_confirm_bars=8,
     allow_buys=True, allow_sells=True,
+    use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
+    trail_give_back_atr=3.0,
+)
+
+# ---- exact settings actually used in the 2026-09-10 M5 real report
+# (Aurelius_M5.xlsx) before the caching bug was caught and fixed - kept
+# here so that report can still be used as a real validation target for
+# the simulator's mechanics, even though these are NOT the true v1.46
+# shipped defaults (see SESSION_NOTES.md 2026-09-19 incident / chat record
+# of the caching bug catch). ----
+STALE_M5_REPORT_PARAMS = dict(P)
+STALE_M5_REPORT_PARAMS.update(
+    p150=150, p600=600,
+    m21="ema", m50="ema", m150="ema", m600="ema", m2400="ema",
+    min_slope_atr=0.5, min_vol_ratio=1.3,
+    use_breakeven=True, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
 )
 
 

@@ -38,6 +38,8 @@ def simulate(ctx, extra_filter=None, params=None):
     bars_since_close = 10 ** 9
     price21_bad = 0
     vwap_bad = 0
+    be_done = False
+    peak_fav_px = 0.0
 
     warmup = max(p["p2400"], p["p600"]) + 50
 
@@ -88,7 +90,28 @@ def simulate(ctx, extra_filter=None, params=None):
                 bars_since_close = 0
                 price21_bad = 0
                 vwap_bad = 0
+                be_done = False
                 continue
+
+            # --- breakeven / trail (ManageBreakeven, Aurelius_EA.mq5 ~2325) -
+            # only reached when the position survives this bar's signal exits,
+            # uses bar i's close as "shift=1", moves stop_px (never loosens) ---
+            if p["use_breakeven"] and entry_atr > 0:
+                prof = (close[i] - entry_px) * (1 if is_buy else -1)
+                if not be_done:
+                    if prof >= p["breakeven_atr"] * entry_atr:
+                        lock = p["breakeven_lock_atr"] * entry_atr
+                        new_sl = entry_px + lock if is_buy else entry_px - lock
+                        stop_px = new_sl
+                        be_done = True
+                        peak_fav_px = close[i]
+                elif p["use_trail_after_be"]:
+                    if (is_buy and close[i] > peak_fav_px) or ((not is_buy) and close[i] < peak_fav_px):
+                        peak_fav_px = close[i]
+                    give = p["trail_give_back_atr"] * entry_atr
+                    trail_sl = peak_fav_px - give if is_buy else peak_fav_px + give
+                    if (is_buy and trail_sl > stop_px) or ((not is_buy) and trail_sl < stop_px):
+                        stop_px = trail_sl
 
             # --- stop-loss: resting order, checked against the NEXT bar's
             # (fill_i's) own high/low, which is why this runs after the
@@ -103,6 +126,7 @@ def simulate(ctx, extra_filter=None, params=None):
                     bars_since_close = 0
                     price21_bad = 0
                     vwap_bad = 0
+                    be_done = False
             continue
 
         # --- flat: entry gates, in the real OnTick's order ---
@@ -162,6 +186,8 @@ def simulate(ctx, extra_filter=None, params=None):
         stop_px = (entry_px - p["stop_atr"] * entry_atr) if is_buy else (entry_px + p["stop_atr"] * entry_atr)
         price21_bad = 0
         vwap_bad = 0
+        be_done = False
+        peak_fav_px = entry_px
 
     return trades
 
