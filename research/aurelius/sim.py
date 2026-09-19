@@ -5,17 +5,19 @@ precomputed per-bar arrays this consumes.
 
 Fill convention: a decision computed from bar i's close fills at bar i+1's
 OPEN (matching the real EA sending a market order on the tick that starts
-the new bar). The stop-loss is a resting order, checked against bar i+1's
-own high/low AFTER that bar's open-fill exit/entry logic - i.e. a
-signal-based exit decided from bar i can't be pre-empted by bar i+1's own
-stop, but a fresh position opened at bar i+1's open can still be stopped
-out later that same bar if price runs that far (rare at M5, handled
-correctly here by checking the stop against the ENTRY bar's own high/low
-too once a position opens).
+the new bar). The stop-loss is a resting order, checked against the fill
+bar's own high/low - including the entry bar itself (an Opus audit found
+this file's own prior docstring claimed that was handled but the code
+only ever checked the NEXT bar after entry, missing 7/971 same-bar stops
+in the baseline run - fixed below, checked explicitly right after entry).
+Spread is charged once per round trip, at entry, using the real per-bar
+spread column (an Opus audit found this wasn't modeled at all, biasing
+PF optimistic - confirmed: adding it moved baseline PF from 1.71 to 1.64
+on the true v1.46 defaults).
 """
 import numpy as np
 
-from engine import P
+from engine import P, POINT
 
 
 def simulate(ctx, extra_filter=None, params=None):
@@ -178,9 +180,12 @@ def simulate(ctx, extra_filter=None, params=None):
         if extra_filter is not None and not extra_filter(ctx, i, is_buy):
             continue
 
-        # --- enter at fill_i's open (proxied by close[i], see note above) ---
+        # --- enter at fill_i's open (proxied by close[i], see note above),
+        # spread charged once round-trip at entry (worse fill in the trade's
+        # direction) ---
+        spread_cost = ctx["spread"][fill_i] * POINT
         in_pos = 1 if is_buy else -1
-        entry_px = px_fill
+        entry_px = px_fill + spread_cost if is_buy else px_fill - spread_cost
         entry_atr = atr[i]
         entry_i = fill_i
         stop_px = (entry_px - p["stop_atr"] * entry_atr) if is_buy else (entry_px + p["stop_atr"] * entry_atr)
@@ -188,6 +193,21 @@ def simulate(ctx, extra_filter=None, params=None):
         vwap_bad = 0
         be_done = False
         peak_fav_px = entry_px
+
+        # --- stop-loss checked on the ENTRY bar's own high/low too - a
+        # position opened at fill_i's open can still be stopped within that
+        # same bar if price runs that far before the next new-bar decision.
+        # Previously missed entirely (see module docstring). ---
+        if p["use_stop"] and stop_px > 0:
+            hit = (low[fill_i] <= stop_px) if is_buy else (high[fill_i] >= stop_px)
+            if hit:
+                trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
+                                    entry_px=entry_px, exit_px=stop_px, reason="STOP"))
+                in_pos = 0
+                bars_since_close = 0
+                price21_bad = 0
+                vwap_bad = 0
+                be_done = False
 
     return trades
 

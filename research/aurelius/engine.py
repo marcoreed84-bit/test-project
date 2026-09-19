@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 DATA_DIR = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data"
+POINT = 0.01  # GOLD# meta_point from the CSV header (meta_digits=2)
 
 # ---- shipped v1.46 defaults (Aurelius_EA.mq5, M5) ----
 P = dict(
@@ -159,20 +160,30 @@ def session_vwap(df):
     return (cum_pv / cum_v).values
 
 
-def build_context(df, h4):
+def build_context(df, h4, params=None):
     """Precomputes every array the signal/exit/filter functions need, once,
-    vectorized. Returns a dict of aligned numpy arrays, one value per M5 bar."""
+    vectorized. Returns a dict of aligned numpy arrays, one value per M5 bar.
+
+    params defaults to the module-global P (true v1.46 shipped defaults) -
+    MUST be passed explicitly (and match whatever's passed to sim.simulate())
+    when testing a different parameter set, e.g. STALE_M5_REPORT_PARAMS.
+    Previously this silently ignored its params argument entirely and always
+    built off P regardless of what simulate() was called with - found by an
+    Opus audit; that bug was the actual cause of the earlier 911-vs-1098
+    (83%) trade-count mismatch against the real stale-params report, not a
+    genuine Python/MT5 fidelity gap. Fixed."""
+    p = params or P
     c = df["close"].values
     h = df["high"].values
     l = df["low"].values
     v = df["tick_volume"].values.astype(float)
     n = len(df)
 
-    m21 = ma(c, P["p21"], P["m21"])
-    m50 = ma(c, P["p50"], P["m50"])
-    m150 = ma(c, P["p150"], P["m150"])
-    m600 = ma(c, P["p600"], P["m600"])
-    m2400 = ma(c, P["p2400"], P["m2400"])
+    m21 = ma(c, p["p21"], p["m21"])
+    m50 = ma(c, p["p50"], p["m50"])
+    m150 = ma(c, p["p150"], p["m150"])
+    m600 = ma(c, p["p600"], p["m600"])
+    m2400 = ma(c, p["p2400"], p["m2400"])
     atr = wilder_atr(h, l, c, 14)
 
     # --- Aligned(shift=1, isBuy) - ALIGN_MID: c vs 2400, 21>50>150>600 ---
@@ -180,8 +191,8 @@ def build_context(df, h4):
     aligned_sell = (c < m2400) & (m21 < m50) & (m50 < m150) & (m150 < m600)
 
     # --- SlopeATR(isBuy) - SLOPE_50 default ---
-    slope_ma_arr = {"21": m21, "50": m50, "150": m150, "600": m600}[P["slope_ma"]]
-    sb = P["slope_bars"]
+    slope_ma_arr = {"21": m21, "50": m50, "150": m150, "600": m600}[p["slope_ma"]]
+    sb = p["slope_bars"]
     slope_raw = np.full(n, np.nan)
     slope_raw[sb:] = (slope_ma_arr[sb:] - slope_ma_arr[:-sb]) / atr[sb:]
     slope_buy = slope_raw
@@ -191,34 +202,41 @@ def build_context(df, h4):
     # cross_window+1 bars (shifts 1..cross_window vs shifts 2..cross_window+1) ---
     sign = np.sign(m21 - m50)
     changed = (sign[1:] != sign[:-1]).astype(float)
-    cw = P["cross_window"]
+    cw = p["cross_window"]
     crisscross = np.full(n, np.nan)
     # crisscross[i] counts changes over the cw pairs ending at i (i.e. changed[i-cw:i])
     changed_cum = np.concatenate(([0.0], np.cumsum(changed)))  # changed_cum[k] = sum(changed[:k])
     for i in range(cw, n):
         crisscross[i] = changed_cum[i] - changed_cum[i - cw]
 
-    # --- PullbackOK(isBuy) - PB_50 default ---
-    pb_ma_arr = {"21": m21, "50": m50, "150": m150}[P["pullback_ma"]]
-    tol = P["pullback_tol_atr"] * atr
-    pb = P["pullback_bars"]
-    touch_buy = (l - (pb_ma_arr + tol)) <= 0  # low touched at/below line+tol
-    touch_sell = (h - (pb_ma_arr - tol)) >= 0  # high touched at/above line-tol
-    # "touched within the last pb bars (shifts 1..pb, inclusive of the bar itself)"
-    touched_recently_buy = pd.Series(touch_buy).rolling(pb, min_periods=1).max().values.astype(bool)
-    touched_recently_sell = pd.Series(touch_sell).rolling(pb, min_periods=1).max().values.astype(bool)
+    # --- PullbackOK(isBuy) - PB_50 default. Real MQL5 (Aurelius_EA.mq5:1877)
+    # computes tol ONCE from the DECISION bar's own ATR and applies it across
+    # the whole lookback window - NOT a per-historical-bar ATR (an Opus audit
+    # caught this file previously using tol=pullback_tol_atr*atr[k] for each
+    # historical bar k, a regime-dependent bias). Fixed via a rolling-min of
+    # the raw (low - line) / (line - high) distance, compared against a
+    # single per-decision-bar threshold atr[i]*pullback_tol_atr. ---
+    pb_ma_arr = {"21": m21, "50": m50, "150": m150}[p["pullback_ma"]]
+    pb = p["pullback_bars"]
+    diff_buy = l - pb_ma_arr    # touch condition: diff_buy[k] <= tol_i for some k in window
+    diff_sell = pb_ma_arr - h   # touch condition: diff_sell[k] <= tol_i for some k in window
+    roll_min_buy = pd.Series(diff_buy).rolling(pb, min_periods=1).min().values
+    roll_min_sell = pd.Series(diff_sell).rolling(pb, min_periods=1).min().values
+    tol_i = p["pullback_tol_atr"] * atr
+    touched_recently_buy = roll_min_buy <= tol_i
+    touched_recently_sell = roll_min_sell <= tol_i
     pullback_ok_buy = (c > pb_ma_arr) & touched_recently_buy
     pullback_ok_sell = (c < pb_ma_arr) & touched_recently_sell
 
     # --- VolumeRatio(): current bar's tick_volume vs the mean of the PRECEDING
     # vol_avg_bars bars (excludes the current bar itself) ---
-    vab = P["vol_avg_bars"]
+    vab = p["vol_avg_bars"]
     prev_avg = pd.Series(v).shift(1).rolling(vab, min_periods=vab).mean().values
     vol_ratio = v / prev_avg
 
     # --- SRDistanceATR(isBuy): previous InpSRDays completed D1 bars' hi/lo ---
     daily = derive_d1_from_h4(h4).sort_values("date").reset_index(drop=True)
-    sd = P["sr_days"]
+    sd = p["sr_days"]
     daily["roll_hi"] = daily["high"].rolling(sd).max().shift(1)
     daily["roll_lo"] = daily["low"].rolling(sd).min().shift(1)
     date_map_hi = dict(zip(daily["date"], daily["roll_hi"]))

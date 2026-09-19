@@ -8,6 +8,18 @@ one (which InpUseSRDist already tests, in the opposite direction - it
 requires distance AWAY from a level; this tests for a recent BOUNCE off
 one instead).
 
+FIXED (Opus audit caught this): originally used the WRONG side of the
+level - sr_lo for buys, sr_hi for sells. SRDistanceATR() (Aurelius_EA.mq5
+~2029) does the opposite: a buy's relevant level is the resistance
+(prior 3-day HIGH, since a confirmed-uptrend pullback entry sits above a
+prior high it broke through - a breakout/retest pattern), a sell's is the
+support (prior 3-day LOW). The bug made the "touch" condition nearly
+impossible (comparing an uptrend entry's recent lows against the 3-day
+LOW instead of the 3-day HIGH it had already broken above), producing a
+false "structurally never happens" result - the first run found 0/971
+entries ever within 1.0 ATR of the (wrong) level; the corrected level
+puts ~26.6% of entries within 1.0 ATR, a real, testable population.
+
 Rigor matches this project's standing rule: chronological 70/30 IS/OOS
 split, tail-concentration check (top-5 trades / negative years), and a
 permutation-null control drawn from the BASE model's own entered trades
@@ -35,7 +47,7 @@ def make_sr_reject_filter(ctx):
             return False
         tol = TOUCH_TOL_ATR * atr[i]
         rej = REJECT_ATR * atr[i]
-        lvl = sr_lo_level[i] if is_buy else sr_hi_level[i]
+        lvl = sr_hi_level[i] if is_buy else sr_lo_level[i]
         if np.isnan(lvl):
             return False
         touched = False
