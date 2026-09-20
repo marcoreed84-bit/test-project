@@ -201,10 +201,10 @@
 //|    entry, volume, floating P/L, bars held vs InpMinHoldBars, the real stop, whether         |
 //|    ShouldExit() is true right now, and whether g_exitPending is retrying a failed close)    |
 //|    and ACCOUNT (balance/equity/this EA's own floating P/L/magic).                           |
-//|  - Family chart theme (neon-blue/white candles on black), an "ICHIMOKU" watermark, and      |
-//|    an InpBackgroundBMP input that ships EMPTY: no wallpaper asset exists for this EA, the   |
-//|    same situation Zenith was in, so the input is present and inert rather than pointing at  |
-//|    an invented file.                                                                        |
+//|  - Family chart theme (neon-blue/white candles on black) and an "ICHIMOKU" watermark. No    |
+//|    background-image (wallpaper) support - the cloud fill already covers most of the chart   |
+//|    body, so a wallpaper has no clear space left to sit in on this EA; left out entirely      |
+//|    rather than shipped as a dead input, unlike Zenith/Aurelius where the chart stays clear.  |
 //|                                                                                             |
 //|  ADX IS A PANEL READOUT, NOT A SUB-WINDOW PLOT - deliberately. An EA cannot create plot     |
 //|  buffers, so a sub-window ADX would have to be a ChartIndicatorAdd() of MT5's BUILT-IN      |
@@ -371,12 +371,6 @@ input color  InpNoCol          = C'255,61,90';    // Not met - hot red
 input color  InpShadowCol      = C'6,8,14';       // Drop shadow
 input string InpPanelFont      = "Consolas";      // Font
 input int    InpPanelSize      = 8;               // Font size
-input string InpBackgroundBMP  = "";              // Background image (.bmp in MQL5\Images). Ships EMPTY: no wallpaper
-                                                   // asset exists for Ichimoku (same situation as Zenith_EA.mq5 when
-                                                   // it got this treatment) - PBackground() is a clean no-op while
-                                                   // this is blank, and no image is invented to fill the gap.
-input int    InpBgWidth        = 1290;            // Image width (px) - for centring only
-input int    InpBgHeight       = 720;             // Image height (px) - for centring only
 
 input group "=== Chart theme ==="
 input bool   InpApplyTheme     = true;            // Recolour the chart to the family scheme
@@ -448,8 +442,6 @@ bool     g_skipCosmeticDraws = false;
 bool     g_panelReclaim = true;
 int      g_panelMinW = 0;     // self-learning panel width, applied on the NEXT draw
 int      g_panX = -1, g_panY = -1;
-bool     g_bgOK = false;
-int      g_bgTries = 0;
 //--- once-per-bar snapshot of everything the panel displays. The panel is
 //--- refreshed up to once per second; ComputeADX alone copies 3 x 144 bars
 //--- and runs two Wilder passes, and CheckEntry() can add RSI/CMF on top,
@@ -479,7 +471,6 @@ bool     g_snapExitSig = false;
 //--- some MQL5/C++-family compilers, and Aurelius v1.38 had to fix exactly
 //--- that, so the risk is simply avoided here rather than managed.
 void   PTheme();
-void   PBackground();
 void   PWatermark();
 void   DrawPanel(const bool reclaim);
 void   BackfillIchiLines();
@@ -1186,54 +1177,6 @@ void PSection(const string id, const int x, const int y, const int w,
    PText(id + "t", x + 10, y, title, InpSectionCol, InpPanelSize, false, "Arial Bold");
   }
 //+------------------------------------------------------------------+
-//| Wallpaper. InpBackgroundBMP ships EMPTY for this EA - no image     |
-//| asset exists for Ichimoku - so this is a clean no-op by default    |
-//| and only does anything if someone drops a .bmp into MQL5\Images    |
-//| and names it here. The retry counter exists because the terminal   |
-//| can refuse the load while the chart is still initialising; it is   |
-//| retried from OnTimer(), which (unlike Zenith) this file has.       |
-//+------------------------------------------------------------------+
-void PBackground()
-  {
-   string nm = g_pw + "bmp";
-   if(InpBackgroundBMP == "")
-     { if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm); g_bgOK = true; return; }
-   if(g_bgOK) return;
-   if(g_bgTries > 40) return;
-
-   g_bgTries++;
-   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
-   if(!ObjectCreate(0, nm, OBJ_BITMAP_LABEL, 0, 0, 0))
-     { Print("Ichimoku_EA BG: ObjectCreate failed, error ", GetLastError()); return; }
-
-   string path = "\\Images\\" + InpBackgroundBMP;
-   ResetLastError();
-   bool okSet = ObjectSetString(0, nm, OBJPROP_BMPFILE, 0, path);
-   int err = GetLastError();
-   if(!okSet || err != 0)
-     {
-      if(g_bgTries <= 3)
-         PrintFormat("Ichimoku_EA BG try %d: failed to load \"%s\" set=%s error=%d"
-                     " -> file must be at <data folder>\\MQL5\\Images\\%s",
-                     g_bgTries, path, (okSet ? "true" : "false"), err, InpBackgroundBMP);
-      ObjectDelete(0, nm);
-      return;
-     }
-   int cw  = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int chh = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, MathMax(0, (cw  - InpBgWidth)  / 2));
-   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, MathMax(0, (chh - InpBgHeight) / 2));
-   ObjectSetInteger(0, nm, OBJPROP_BACK, true);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   g_bgOK = true;
-   //--- the bitmap is now the newest background object - rebuild the
-   //--- watermark once so it sits back on top of it
-   if(ObjectFind(0, g_pw + "wm") >= 0) ObjectDelete(0, g_pw + "wm");
-   PWatermark();
-   ChartRedraw(0);
-  }
 //+------------------------------------------------------------------+
 //| Watermark, drawn BEHIND the candles so it tints the empty space    |
 //| rather than obscuring price.                                       |
@@ -1700,7 +1643,6 @@ void DrawPanel(const bool reclaim)
    if(!InpShowPanel) { ObjectsDeleteAll(0, g_pp); return; }
    g_panelReclaim = reclaim;
 
-   PBackground();
    PWatermark();
 
    bool isBuy = false;
@@ -1958,7 +1900,6 @@ void CosmeticNewBar()
 void OnTimer()
   {
    if(g_skipCosmeticDraws) return;
-   PBackground();                  // retries until the image loads, if one is set
    if(!InpShowPanel) return;
    //--- reclaim = false: update the existing objects' values in place. A full
    //--- delete-and-recreate once a second is what made the panel visibly
@@ -1996,8 +1937,6 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam,
       if(nw != lastW || nh != lastH)
         {
          lastW = nw; lastH = nh;
-         g_bgOK = false; g_bgTries = 0;
-         PBackground();
          PWatermark();
          if(InpPanelBottom)
            {
