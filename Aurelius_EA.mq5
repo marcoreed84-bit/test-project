@@ -1056,6 +1056,40 @@ void OnDeinit(const int reason)
 //| so filtering on SL specifically here means every close is handled  |
 //| exactly once, from exactly one place, never both.                  |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Push notification on trade open/close, via MT5's own               |
+//| SendNotification() - requires this terminal's MetaQuotes ID under   |
+//| Tools>Options>Notifications with "Enable Notifications" checked;     |
+//| a silent false return otherwise, and SendNotification() does         |
+//| nothing at all inside the Strategy Tester regardless of that          |
+//| setting, so it's skipped there rather than logged as a failure.        |
+//+------------------------------------------------------------------+
+void NotifyPush(const string text)
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return;
+   if(!SendNotification(text))
+      PrintFormat("Aurelius_EA: SendNotification failed (err %d) - check Tools>Options>Notifications", GetLastError());
+  }
+void NotifyTradeOpen(ulong ticket)
+  {
+   double vol  = HistoryDealGetDouble(ticket, DEAL_VOLUME);
+   double px   = HistoryDealGetDouble(ticket, DEAL_PRICE);
+   bool isBuy  = (ENUM_DEAL_TYPE)HistoryDealGetInteger(ticket, DEAL_TYPE) == DEAL_TYPE_BUY;
+   NotifyPush(StringFormat("Aurelius OPEN %s %.2f %s @ %.2f", isBuy ? "BUY" : "SELL", vol, _Symbol, px));
+  }
+void NotifyTradeClose(ulong ticket)
+  {
+   double px = HistoryDealGetDouble(ticket, DEAL_PRICE);
+   double pl = HistoryDealGetDouble(ticket, DEAL_PROFIT)
+             + HistoryDealGetDouble(ticket, DEAL_SWAP)
+             + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+   //--- a CLOSING deal's own DEAL_TYPE is the opposite side of the position
+   //--- it closed (closing a BUY position is itself a SELL deal) - invert it
+   //--- to report the position's real direction, not the closing action.
+   bool wasBuy = (ENUM_DEAL_TYPE)HistoryDealGetInteger(ticket, DEAL_TYPE) == DEAL_TYPE_SELL;
+   NotifyPush(StringFormat("Aurelius CLOSE %s @ %.2f  P/L: %s$%.2f",
+              wasBuy ? "BUY" : "SELL", px, pl >= 0 ? "+" : "-", MathAbs(pl)));
+  }
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
@@ -1073,7 +1107,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(!HistoryDealSelect(ticket)) return;
    if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != InpMagic) return;
    if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) return;
-   if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) return;
+
+   ENUM_DEAL_ENTRY dealEntry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(ticket, DEAL_ENTRY);
+   if(dealEntry == DEAL_ENTRY_IN)
+     {
+      NotifyTradeOpen(ticket);
+      return;
+     }
+   if(dealEntry != DEAL_ENTRY_OUT) return;
+   NotifyTradeClose(ticket);
 
    //--- every real close (SL or EA-initiated) reaches here exactly once,
    //--- per the comment above - accumulate this EA's own realized P&L

@@ -564,6 +564,54 @@ void OnDeinit(const int reason)
    ChartRedraw(0);
   }
 //+------------------------------------------------------------------+
+//| Push notification on trade open/close, via MT5's own               |
+//| SendNotification() - requires this terminal's MetaQuotes ID under   |
+//| Tools>Options>Notifications with "Enable Notifications" checked;     |
+//| a silent false return otherwise, and SendNotification() does         |
+//| nothing at all inside the Strategy Tester regardless of that          |
+//| setting, so it's skipped there rather than logged as a failure.        |
+//| Purely a notification hook - reads closed deal history only, never    |
+//| touches CheckEntry/ShouldExit/ManagePosition/TryEnter or any of the    |
+//| g_snap*/g_exitPending/g_barsInTrade state those functions depend on.    |
+//+------------------------------------------------------------------+
+void NotifyPush(const string text)
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return;
+   if(!SendNotification(text))
+      PrintFormat("Ichimoku_EA: SendNotification failed (err %d) - check Tools>Options>Notifications", GetLastError());
+  }
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+  {
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   ulong ticket = trans.deal;
+   if(ticket == 0) return;
+   if(!HistoryDealSelect(ticket)) return;
+   if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)InpMagic) return;
+   if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) return;
+
+   ENUM_DEAL_ENTRY dealEntry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(ticket, DEAL_ENTRY);
+   double px = HistoryDealGetDouble(ticket, DEAL_PRICE);
+   if(dealEntry == DEAL_ENTRY_IN)
+     {
+      bool isBuy = (ENUM_DEAL_TYPE)HistoryDealGetInteger(ticket, DEAL_TYPE) == DEAL_TYPE_BUY;
+      NotifyPush(StringFormat("Ichimoku OPEN %s %.2f %s @ %.2f",
+                 isBuy ? "BUY" : "SELL", HistoryDealGetDouble(ticket, DEAL_VOLUME), _Symbol, px));
+      return;
+     }
+   if(dealEntry != DEAL_ENTRY_OUT && dealEntry != DEAL_ENTRY_OUT_BY) return;
+   double pl = HistoryDealGetDouble(ticket, DEAL_PROFIT)
+             + HistoryDealGetDouble(ticket, DEAL_SWAP)
+             + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+   //--- a CLOSING deal's own DEAL_TYPE is the opposite side of the position
+   //--- it closed (closing a BUY position is itself a SELL deal) - invert it
+   //--- to report the position's real direction, not the closing action.
+   bool wasBuy = (ENUM_DEAL_TYPE)HistoryDealGetInteger(ticket, DEAL_TYPE) == DEAL_TYPE_SELL;
+   NotifyPush(StringFormat("Ichimoku CLOSE %s @ %.2f  P/L: %s$%.2f",
+              wasBuy ? "BUY" : "SELL", px, pl >= 0 ? "+" : "-", MathAbs(pl)));
+  }
+//+------------------------------------------------------------------+
 //| v1.01: guards against thin/not-yet-loaded history returning 0.0   |
 //| from iHigh/iLow, which would silently make "price above the cloud"|
 //| trivially true. CloudTop/Bot(1) reaches back to bar 1+2*Displacement|
