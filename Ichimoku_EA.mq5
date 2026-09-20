@@ -546,6 +546,18 @@ int OnInit()
       //--- of waiting for the first tick (the missing-panel-at-attach bug this
       //--- project has already found in Fulcrum, Tailwind and Slipstream).
       RefreshPanelSnapshot();
+      //--- PBackground() must run BEFORE any cloud/line object is created:
+      //--- MT5 stacks same-layer (OBJPROP_BACK) objects by CREATION ORDER,
+      //--- not z-order, so a wallpaper bitmap created AFTER the cloud would
+      //--- become the newest back-object and render on top of it, blotting
+      //--- the fill out everywhere the bitmap covers - exactly the bug a
+      //--- real screenshot caught (cloud only visible at the far edges,
+      //--- outside the bitmap's width). DrawPanel() also calls PBackground()
+      //--- internally, but only reaches it AFTER BackfillIchiLines() ran -
+      //--- too late for the very first draw. Calling it explicitly here
+      //--- first is a safe no-op on every call after this one (PBackground()
+      //--- returns immediately once g_bgOK is true).
+      PBackground();
       BackfillIchiLines();
       UpdateLevelLines();
       DrawPanel(true);
