@@ -609,6 +609,8 @@ void BackfillMALines();
 void UpdateLevelLines();                    // OnInit draws the price levels at attach time too
 bool SRLevels(double &hi, double &lo);      // extracted from SRDistanceATR - the same levels the filter tests
 bool FindOwnPosition(ulong &ticket);        // symbol+magic scoped, per item 16's ticket-scoping rule
+double LotSize(const double stopDistance);  // OnInit's reward:risk warning needs the EFFECTIVE lot size,
+                                            // i.e. after this function's own broker-volume clamping
 bool GetATR(double &out);
 void ComputeWilderATR(const MqlRates &arr[], double &out[], int period);   // BackfillMALines needs a per-bar
                                                                            // ATR series for the stop band
@@ -660,6 +662,32 @@ int OnInit()
                   "scale the take-profit's price distance by 0.01/%.2f, changing this system's "
                   "reward:risk ratio, not just its position size. This is UNVALIDATED at any lot "
                   "size other than 0.01.", InpLots, InpLots);
+
+   // 2026-09-20 (Opus review): both warnings above test the INPUT, but the
+   // geometry actually traded depends on what LotSize() RETURNS - and
+   // LotSize() raises anything below the broker's SYMBOL_VOLUME_MIN up to it
+   // (MathMax(mn, ...)), and floors to SYMBOL_VOLUME_STEP. On a broker whose
+   // minimum gold volume is 0.10 - normal on "standard" (non-micro) accounts -
+   // InpLots=0.01 is silently traded as 0.10, TargetDistance() shrinks the
+   // take-profit's price distance to 0.01/0.10 = one tenth of the validated
+   // $45, and the ATR-based structural stop does NOT shrink with it. That is
+   // roughly a 1:1 reward:risk on a system whose edge needs ~11.8:1 at a ~17%
+   // win rate - a guaranteed loser - and BOTH warnings above stay silent,
+   // because InpLots itself is still exactly 0.01. Check the effective size,
+   // not the requested one. LotSize(0.0) is the right probe: its
+   // LOT_RISK_PCT branch is gated on stopDistance > 0.0, so this returns
+   // exactly the clamping the fixed path would apply.
+   double effLots = LotSize(0.0);
+   if(MathAbs(effLots - InpLots) > 0.0001)
+      PrintFormat("Fulcrum EA WARNING: this broker's volume constraints turn InpLots=%.2f into an "
+                  "EFFECTIVE %.2f lots (SYMBOL_VOLUME_MIN=%.2f, SYMBOL_VOLUME_STEP=%.2f, InpMaxLots=%.2f). "
+                  "TargetDistance() scales the take-profit's price distance by 0.01/%.2f while the "
+                  "structural stop does not scale at all, so the ~11.8:1 reward:risk this system is "
+                  "validated on does NOT hold on this account.",
+                  InpLots, effLots,
+                  SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN),
+                  SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP),
+                  InpMaxLots, effLots);
 
    UpdateATRManual();   // initial seed - also refreshed once per new bar
 
