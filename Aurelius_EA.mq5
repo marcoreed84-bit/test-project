@@ -647,25 +647,27 @@ input double  InpMinVolRatio  = 1.25;      // Min volume vs that average - 1.30-
 input group "=== S/R proximity filter ==="
 input bool    InpUseSRDist    = true;      // Skip entries sitting on a previous-days level
 input int     InpSRDays       = 3;         // Previous days used for the level
-input double  InpMinSRDistATR = 1.00;      // Min distance from the level (x ATR) - 0.50->1.00,
-                                            // CANDIDATE UNDER TEST (2026-09-20, Python-only, needs a real
-                                            // MT5 run). 0.50 was never swept on M5; Aurelius_M15_EA.mq5
-                                            // ships 1.50 REAL-MT5-CONFIRMED (its v1.46: net +26.4%, PF
-                                            // 1.666->2.070, Balance DD 8.21%->3.31%). Same sweep re-run on
-                                            // real M5 data (research/aurelius/, 2023-2026, v1.46 defaults
-                                            // held fixed): PF is monotone 1.700/1.739/1.755/1.775/1.806
-                                            // over 0.50/0.75/1.00/1.25/1.50, falling again at 2.00 - a real
-                                            // plateau, permutation 92.4-96.5th pct across ALL of it, and
-                                            // the same shape holds at InpSRDays 2/3/5. 1.00 is the only
-                                            // point that improves net (+2.4%), PF (+3.2%), closed-equity DD
-                                            // (-13.6%) AND floating-equity DD (-4.3%) at once; 1.50 gives
-                                            // better PF (1.806) and floatDD (-9.0%) and halves the worst
-                                            // single adverse excursion, but closed DD rises 8.8% - set to
-                                            // 1.50 instead if matching M15 exactly is preferred. HONEST:
-                                            // the M5 effect is ~10x smaller than M15's, IS net is slightly
-                                            // WORSE (703.0->686.7) with the gain OOS-only, and it wins only
-                                            // 5 of 7 half-year folds. Small, real, not free - test both
-                                            // 1.00 and 1.50 against 0.50 in one MT5 pass if possible.
+input double  InpMinSRDistATR = 1.50;      // Min distance from the level (x ATR) - 0.50->1.50,
+                                            // REAL MT5 CONFIRMED (2026-09-20). Python found a monotone PF
+                                            // plateau 0.50-1.50 (92-96th pct) and flagged 1.00 vs 1.50 as a
+                                            // real trade-off (1.00: all 4 metrics improve together but only
+                                            // slightly; 1.50: bigger PF/floatDD gain but closed DD +8.8% in
+                                            // the Python model). A real 3-pass MT5 backtest (2023.01-
+                                            // 2026.09, same-day comparison, GOLD M5) resolved it - NO
+                                            // trade-off in reality: 0.50 -> net $28,986/PF 1.441/Balance DD
+                                            // $2,853/Equity DD $2,861/Sharpe 4.62/920 trades; 1.00 -> net
+                                            // $29,299 (+1.1%)/PF 1.470/Balance DD $2,512 (-12.0%)/Equity DD
+                                            // $2,520 (-11.9%)/Sharpe 4.96/877 trades; 1.50 -> net $30,954
+                                            // (+6.8%)/PF 1.525/Balance DD $1,986 (-30.4%)/Equity DD $1,992
+                                            // (-30.4%)/Sharpe 5.50/841 trades. Every metric improved
+                                            // monotonically 0.50->1.00->1.50 with no exceptions - 1.50 wins
+                                            // outright, matching Aurelius_M15_EA.mq5's own real-confirmed
+                                            // value. CAVEAT: these 3 runs had InpMinSlopeATR stuck at the
+                                            // stale pre-v1.46 cached value (0.5, not this file's real 0.40
+                                            // default) - identical across all 3 runs, so the InpMinSRDistATR
+                                            // comparison itself is still a fair like-for-like test, but the
+                                            // absolute numbers above are not on the exact true-default
+                                            // baseline. Re-confirm at InpMinSlopeATR=0.40 when convenient.
 
 input group "=== Scale in (optional) ==="
 input bool    InpUseScale     = false;     // Add to a position that is winning  [tested in the Python model: net profit improves on BOTH train/hold splits at every setting tried (e.g. +130/+68% at 3.0 ATR) - but every setting also raises max drawdown 1.2-2.4x and cuts win rate from 34% to 23-29%. It does this by adding size right as a trade "confirms the trend" - which is often close to the local top - so it specifically makes the profit-give-back pattern WORSE, not better, on the trades that reverse after the add. Left OFF: this system's give-back problem is the whole reason for this session's testing, and scale-in trades raw return for exactly the risk being managed away.]
