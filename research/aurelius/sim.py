@@ -43,6 +43,58 @@ def simulate(ctx, extra_filter=None, params=None):
     be_done = False
     peak_fav_px = 0.0
 
+    # --- consecutive-loss circuit breaker (candidate, OFF by default -
+    # p["use_consec_breaker"] absent/False leaves every existing baseline
+    # byte-identical). Ported from Zenith_EA.mq5's real mechanism
+    # (InpMaxConsecLosses / InpPauseBars, OnTradeTransaction ~2252 +
+    # AdvanceWatchAndOrders ~1946): every closed trade with profit <= 0
+    # increments the streak, any win resets it to 0, and once the streak
+    # reaches max_consec_losses NEW ENTRIES are blocked for pause_bars bars
+    # from that close. Like Zenith's, it never touches an already-open
+    # position - exits, breakeven, trail and the stop all run untouched
+    # during a pause.
+    #
+    # APPROXIMATION vs the real EA: "loss" here is price-unit pnl <= 0 with
+    # the entry spread already charged, but with NO swap or commission,
+    # which the MQL5 version does include. A handful of near-scratch trades
+    # would therefore be classified win-here / loss-there. Zenith's pause is
+    # also wall-clock seconds (pause_bars * PeriodSeconds) where this is a
+    # bar count, so the real EA's pause is ~30% shorter than the tested one
+    # across any span containing a weekend - the same known imprecision
+    # documented in Zenith's own entry gate.
+    consec_breaker = bool(p.get("use_consec_breaker"))
+    max_consec = int(p.get("max_consec_losses", 0))
+    pause_bars = int(p.get("pause_bars", 0))
+    consec_losses = 0
+    paused_until = -1   # bar index; new entries blocked while i < paused_until
+
+    def register_close(trade_pnl, exit_i):
+        """mirrors OnTradeTransaction's DEAL_ENTRY_OUT branch"""
+        nonlocal consec_losses, paused_until
+        if not consec_breaker or max_consec <= 0:
+            return
+        # p["breaker_rule"] is a RESEARCH HOOK ONLY, never part of the EA:
+        # it replaces the "streak has reached max_consec" trigger with an
+        # arbitrary callable, so a permutation null can fire the SAME number
+        # of pauses of the SAME length at trade closes chosen by a rule that
+        # carries no information. Absent (the normal case) the real
+        # consecutive-loss test is used.
+        rule = p.get("breaker_rule")
+        if rule is not None:
+            if trade_pnl <= 0:
+                consec_losses += 1
+            else:
+                consec_losses = 0
+            if rule(consec_losses, trade_pnl, exit_i):
+                paused_until = exit_i + pause_bars
+            return
+        if trade_pnl <= 0:
+            consec_losses += 1
+            if consec_losses >= max_consec:
+                paused_until = exit_i + pause_bars
+        else:
+            consec_losses = 0
+
     warmup = max(p["p2400"], p["p600"]) + 50
 
     for i in range(warmup, n - 1):
@@ -115,6 +167,7 @@ def simulate(ctx, extra_filter=None, params=None):
                 trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
                                     entry_px=entry_px, exit_px=px_fill,
                                     entry_atr=entry_atr, reason=fired))
+                register_close((px_fill - entry_px) * in_pos, fill_i)
                 in_pos = 0
                 bars_since_close = 0
                 price21_bad = 0
@@ -152,6 +205,7 @@ def simulate(ctx, extra_filter=None, params=None):
                     trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
                                         entry_px=entry_px, exit_px=stop_px,
                                         entry_atr=entry_atr, reason="STOP"))
+                    register_close((stop_px - entry_px) * in_pos, fill_i)
                     in_pos = 0
                     bars_since_close = 0
                     price21_bad = 0
@@ -161,6 +215,14 @@ def simulate(ctx, extra_filter=None, params=None):
 
         # --- flat: entry gates, in the real OnTick's order ---
         bars_since_close += 1
+        # circuit-breaker pause gate. Position matches Zenith's real gate
+        # (Zenith_EA.mq5 ~1946): checked before the cooldown/spread/session
+        # gates, and only ever blocks a NEW entry - nothing else in this
+        # loop is skipped by it. Order within this gate chain cannot change
+        # the outcome here (none of these gates has a side effect), only
+        # which reason a rejected bar would be attributed to.
+        if consec_breaker and max_consec > 0 and i < paused_until:
+            continue
         if bars_since_close < p["cooldown_bars"]:
             continue
         if ctx["no_entry_near_close"][i] or ctx["friday_no_entry"][i]:
@@ -261,6 +323,7 @@ def simulate(ctx, extra_filter=None, params=None):
                 trades.append(dict(entry_i=entry_i, exit_i=fill_i, dir=in_pos,
                                     entry_px=entry_px, exit_px=stop_px,
                                     entry_atr=entry_atr, reason="STOP"))
+                register_close((stop_px - entry_px) * in_pos, fill_i)
                 in_pos = 0
                 bars_since_close = 0
                 price21_bad = 0
