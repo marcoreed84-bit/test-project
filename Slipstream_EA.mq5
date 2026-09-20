@@ -200,9 +200,31 @@
 //|      - Deliberately NOT drawn: anything from CheckConfluenceDir()/hStochConf. Those are       |
 //|        internal replicas of Tailwind's and AuRebound's conditions, not Slipstream's own       |
 //|        trading decision - charting them would misrepresent what this EA trades on.            |
+//|                                                                                               |
+//|  v1.08 (2026-09-20, independent Python re-validation of this header's own numbers):           |
+//|   - IsNewBar() was called TWICE per tick - once inside ManageOpenPosition(), once in           |
+//|     OnTick() - and it latches g_lastBarTime on its FIRST success in a bar. So whenever a       |
+//|     position was open at a bar's first tick, ManageOpenPosition() swallowed that bar's flag    |
+//|     and everything below it in OnTick() was skipped for the whole bar: UpdateLines() (the      |
+//|     EMA50/EMA200/midline/pullback rails from v1.07 stopped being drawn for the entire          |
+//|     duration of every trade) and CheckForEntry(). Now resolved once in OnTick() and passed     |
+//|     down. The ENTRY half was masked at the shipped defaults by InpCooldown=2 - re-confirmed    |
+//|     against a full 2013-2026 H4 replica, identical trade list in all 32 convention cells -     |
+//|     but not at InpCooldown=0, and the drawing half was never masked. No signal/exit change.    |
+//|   - Re-derivation notes on the numbers claimed above, for whoever reads them next:             |
+//|     the "full n=554 PF=1.56 net=$1620" block is the InpRequireConfluence=FALSE configuration,  |
+//|     NOT the shipped default (which is ON). On the same data the shipped default trades         |
+//|     n=478 PF=1.58 net=$1700. The claimed triple is also not internally consistent -            |
+//|     394+155=549, not 554, and $632+$1024=$1656, not $1620 - so the full row and the            |
+//|     train/holdout rows cannot both come from one run. n reproduces exactly (554 / 467) once    |
+//|     the data is truncated at ~2026-05-15, i.e. the numbers above describe an export roughly    |
+//|     three months shorter than the current one. The maxdd pair ($132.8 -> $121.2) does NOT      |
+//|     reconcile with any end date tested: a fixed-0.01-lot equity curve that includes the        |
+//|     August-2025 drawdown shows $238.7 -> $209.7. Everything else (PF, net, win rate,           |
+//|     the confluence deltas, "max-hold never triggers") reproduced within a few percent.         |
 //+------------------------------------------------------------------+
 #property copyright "Slipstream"
-#property version   "1.07"
+#property version   "1.08"
 
 #include <Trade/Trade.mqh>
 CTrade trade;
@@ -1237,7 +1259,11 @@ double LotsFromRisk(double slDistance)
    return(lots);
   }
 //+------------------------------------------------------------------+
-void ManageOpenPosition()
+// v1.08: takes the new-bar flag from OnTick() instead of calling IsNewBar()
+// itself - see the OnTick() note. IsNewBar() latches g_lastBarTime on its
+// FIRST success within a bar, so whoever called it first used to swallow that
+// bar's flag for everyone else.
+void ManageOpenPosition(const bool isNewBar)
   {
    if(g_ticket==0 || !PositionSelectByTicket(g_ticket)) { g_ticket=0; return; }
 
@@ -1296,7 +1322,7 @@ void ManageOpenPosition()
      }
 
    //--- trend-break and max-hold checks only need to happen once per closed bar
-   if(!IsNewBar()) return;
+   if(!isNewBar) return;
 
    double ema50Buf[];
    ArraySetAsSeries(ema50Buf,true);
@@ -1556,8 +1582,26 @@ void OnTick()
          DrawPanel(false);
         }
      }
-   ManageOpenPosition();
-   if(!IsNewBar()) return;
+   //--- v1.08: the new-bar flag is now resolved ONCE per tick here and passed
+   //--- down, instead of ManageOpenPosition() and OnTick() each calling
+   //--- IsNewBar() separately. IsNewBar() latches g_lastBarTime on its first
+   //--- success in a bar, so while a position was open ManageOpenPosition()
+   //--- consumed the flag and every per-bar step below it was skipped for that
+   //--- whole bar: UpdateLines() (so the EMA50/EMA200/midline/pullback-rail
+   //--- segments this file's v1.07 note advertises simply stopped being drawn
+   //--- for the entire duration of every trade - exactly when a trader is most
+   //--- likely to be looking at the chart) and CheckForEntry(). The entry side
+   //--- was masked at the shipped defaults, because the only way to be flat by
+   //--- the time CheckForEntry() would run is for ManageOpenPosition() to have
+   //--- just closed the position, and that sets g_cooldownUntilBar = g_barsSeen
+   //--- + InpCooldown (2), which blocks the entry anyway - re-confirmed with a
+   //--- full 2013-2026 H4 replica: allowing the entry produces a byte-identical
+   //--- trade list in all 32 modelling-convention cells tested. It was NOT
+   //--- masked at InpCooldown=0, and it was never masked for the drawing.
+   //--- g_barsSeen still advances exactly once per bar either way.
+   bool isNewBar = IsNewBar();
+   ManageOpenPosition(isNewBar);
+   if(!isNewBar) return;
    //--- v1.07: one new segment per line per bar, from the same hEMA50/hEMA200/
    //--- hBBMid/hATR handles CheckForEntry() reads on the line below. Once per H4
    //--- bar, not per tick - this sits AFTER the IsNewBar() gate deliberately.
