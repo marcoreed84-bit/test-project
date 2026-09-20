@@ -16,10 +16,10 @@
 //+------------------------------------------------------------------+
 #property script_show_inputs
 
-input string          InpSymbol    = "";          // Symbol (blank = current chart's symbol)
-input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M5;    // Timeframe to export
-input int             InpBars      = 300000;       // How many bars back (0 = all available history)
-input string          InpFileName  = "";           // Output filename (blank = auto: <symbol>_<period>.csv)
+input string          InpSymbol    = "";               // Symbol (blank = current chart's symbol)
+input ENUM_TIMEFRAMES InpTimeframe = PERIOD_CURRENT;    // Timeframe to export (CURRENT = whatever chart this is attached to)
+input int             InpBars      = 300000;            // How many bars back (0 = all available history)
+input string          InpFileName  = "";                // Output filename (blank = auto: <symbol>_<period>.csv)
 
 int      g_emaHandle3, g_emaHandle21, g_emaHandle150, g_atrHandle, g_macdHandle;
 
@@ -27,21 +27,36 @@ int      g_emaHandle3, g_emaHandle21, g_emaHandle150, g_atrHandle, g_macdHandle;
 int OnStart()
   {
    string sym = (InpSymbol == "") ? _Symbol : InpSymbol;
+   // Resolve PERIOD_CURRENT to the ACTUAL timeframe up front, once - every
+   // MT5 API call below (iMA/iATR/iMACD/CopyRates) treats PERIOD_CURRENT as
+   // "whatever timeframe the CHART this script is attached to is showing",
+   // not the symbol's own bars in some fixed sense - resolving it into a
+   // concrete ENUM_TIMEFRAMES here means the exported filename and the
+   // log message both show the real period, instead of the ambiguous
+   // literal "PERIOD_CURRENT" string. This is also the actual fix for the
+   // bug that shipped in v1: the Timeframe input previously defaulted to
+   // the LITERAL constant PERIOD_M5, not PERIOD_CURRENT, so running the
+   // script without touching that dropdown silently exported M5 regardless
+   // of which chart it was dragged onto - confirmed by a real user-supplied
+   // "4H" export that was byte-identical to the M5 one.
+   ENUM_TIMEFRAMES tf = (InpTimeframe == PERIOD_CURRENT) ? (ENUM_TIMEFRAMES)_Period : InpTimeframe;
 
    if(!SymbolSelect(sym, true))
      {
       PrintFormat("ExportBarData: symbol \"%s\" not found/not selectable in Market Watch.", sym);
       return(-1);
      }
+   PrintFormat("ExportBarData: exporting %s %s (resolved from input=%s, chart period=%s)",
+               sym, EnumToString(tf), EnumToString(InpTimeframe), EnumToString((ENUM_TIMEFRAMES)_Period));
 
    // --- indicator handles for the chk_* reference columns - these are
    // MT5's OWN built-in computations, the same ones every engine.py in
    // this project validates its manual Python port against.
-   g_emaHandle3   = iMA(sym, InpTimeframe, 3,   0, MODE_EMA, PRICE_CLOSE);
-   g_emaHandle21  = iMA(sym, InpTimeframe, 21,  0, MODE_EMA, PRICE_CLOSE);
-   g_emaHandle150 = iMA(sym, InpTimeframe, 150, 0, MODE_EMA, PRICE_CLOSE);
-   g_atrHandle    = iATR(sym, InpTimeframe, 14);
-   g_macdHandle   = iMACD(sym, InpTimeframe, 12, 26, 9, PRICE_CLOSE);
+   g_emaHandle3   = iMA(sym, tf, 3,   0, MODE_EMA, PRICE_CLOSE);
+   g_emaHandle21  = iMA(sym, tf, 21,  0, MODE_EMA, PRICE_CLOSE);
+   g_emaHandle150 = iMA(sym, tf, 150, 0, MODE_EMA, PRICE_CLOSE);
+   g_atrHandle    = iATR(sym, tf, 14);
+   g_macdHandle   = iMACD(sym, tf, 12, 26, 9, PRICE_CLOSE);
    if(g_emaHandle3 == INVALID_HANDLE || g_emaHandle21 == INVALID_HANDLE ||
       g_emaHandle150 == INVALID_HANDLE || g_atrHandle == INVALID_HANDLE ||
       g_macdHandle == INVALID_HANDLE)
@@ -62,8 +77,8 @@ int OnStart()
    MqlRates rates[];
    ArraySetAsSeries(rates, false);
    int copied = (InpBars <= 0)
-      ? CopyRates(sym, InpTimeframe, 0, 100000000, rates)
-      : CopyRates(sym, InpTimeframe, 0, InpBars, rates);
+      ? CopyRates(sym, tf, 0, 100000000, rates)
+      : CopyRates(sym, tf, 0, InpBars, rates);
    if(copied <= 0)
      {
       PrintFormat("ExportBarData: CopyRates returned %d bars - error %d. "
@@ -106,7 +121,7 @@ int OnStart()
      }
 
    string fname = (InpFileName == "")
-      ? StringFormat("%s_%s.csv", sym, EnumToString(InpTimeframe))
+      ? StringFormat("%s_%s.csv", sym, EnumToString(tf))
       : InpFileName;
    int fh = FileOpen(fname, FILE_WRITE | FILE_TXT | FILE_ANSI);
    if(fh == INVALID_HANDLE)
@@ -144,6 +159,6 @@ int OnStart()
    FileClose(fh);
 
    PrintFormat("ExportBarData: wrote %d bars of %s %s to <data folder>\\MQL5\\Files\\%s",
-               copied, sym, EnumToString(InpTimeframe), fname);
+               copied, sym, EnumToString(tf), fname);
    return(0);
   }
