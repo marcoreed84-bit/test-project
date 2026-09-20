@@ -647,7 +647,25 @@ input double  InpMinVolRatio  = 1.25;      // Min volume vs that average - 1.30-
 input group "=== S/R proximity filter ==="
 input bool    InpUseSRDist    = true;      // Skip entries sitting on a previous-days level
 input int     InpSRDays       = 3;         // Previous days used for the level
-input double  InpMinSRDistATR = 0.50;      // Min distance from the level (x ATR)
+input double  InpMinSRDistATR = 1.00;      // Min distance from the level (x ATR) - 0.50->1.00,
+                                            // CANDIDATE UNDER TEST (2026-09-20, Python-only, needs a real
+                                            // MT5 run). 0.50 was never swept on M5; Aurelius_M15_EA.mq5
+                                            // ships 1.50 REAL-MT5-CONFIRMED (its v1.46: net +26.4%, PF
+                                            // 1.666->2.070, Balance DD 8.21%->3.31%). Same sweep re-run on
+                                            // real M5 data (research/aurelius/, 2023-2026, v1.46 defaults
+                                            // held fixed): PF is monotone 1.700/1.739/1.755/1.775/1.806
+                                            // over 0.50/0.75/1.00/1.25/1.50, falling again at 2.00 - a real
+                                            // plateau, permutation 92.4-96.5th pct across ALL of it, and
+                                            // the same shape holds at InpSRDays 2/3/5. 1.00 is the only
+                                            // point that improves net (+2.4%), PF (+3.2%), closed-equity DD
+                                            // (-13.6%) AND floating-equity DD (-4.3%) at once; 1.50 gives
+                                            // better PF (1.806) and floatDD (-9.0%) and halves the worst
+                                            // single adverse excursion, but closed DD rises 8.8% - set to
+                                            // 1.50 instead if matching M15 exactly is preferred. HONEST:
+                                            // the M5 effect is ~10x smaller than M15's, IS net is slightly
+                                            // WORSE (703.0->686.7) with the gain OOS-only, and it wins only
+                                            // 5 of 7 half-year folds. Small, real, not free - test both
+                                            // 1.00 and 1.50 against 0.50 in one MT5 pass if possible.
 
 input group "=== Scale in (optional) ==="
 input bool    InpUseScale     = false;     // Add to a position that is winning  [tested in the Python model: net profit improves on BOTH train/hold splits at every setting tried (e.g. +130/+68% at 3.0 ATR) - but every setting also raises max drawdown 1.2-2.4x and cuts win rate from 34% to 23-29%. It does this by adding size right as a trade "confirms the trend" - which is often close to the local top - so it specifically makes the profit-give-back pattern WORSE, not better, on the trades that reverse after the add. Left OFF: this system's give-back problem is the whole reason for this session's testing, and scale-in trades raw return for exactly the risk being managed away.]
@@ -963,6 +981,22 @@ int OnInit()
          g_entryDir    = (pos.PositionType() == POSITION_TYPE_BUY) ? 1 : -1;
          g_entryLots   = pos.Volume();
          g_peakFavPx   = g_entryPrice;
+         //--- 2026-09-20 (Opus drawdown/profit review): the restore above still
+         //--- missed g_entryBarCount/g_addsDone/g_price21Bad/g_vwapBad/g_beDone -
+         //--- without these, a restart/recompile/input change mid-trade silently
+         //--- restarts the Price21/VWAP confirm-bar streaks (delaying both
+         //--- SHIPPED exits by up to InpPrice21ConfirmBars/InpVwapConfirmBars
+         //--- bars) and would zero the stale/max-bars clock if either were ever
+         //--- enabled. g_addsDone is not reconstructable from broker state (which
+         //--- leg is the "base" is unknown) - reset to 0, meaning at most one
+         //--- fewer add than intended after a restart, not a wrong count.
+         g_entryBarCount = (int)((TimeCurrent() - g_entryTime) / PeriodSeconds());
+         g_addsDone      = 0;
+         g_price21Bad    = 0;
+         g_vwapBad       = 0;
+         g_beDone        = (pos.StopLoss() != 0.0 &&
+                            ((g_entryDir > 0 && pos.StopLoss() >= g_entryPrice) ||
+                             (g_entryDir < 0 && pos.StopLoss() <= g_entryPrice)));
          double atrNow;
          g_entryATR    = GetATR(atrNow) ? atrNow : 0.0;   // atr<=0 (cold read) leaves trailing/breakeven disabled, not armed on bad data
          PrintFormat("Aurelius EA: restored open position #%I64u from OnInit (entry %.2f, %s, %.2f lots)",

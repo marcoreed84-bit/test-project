@@ -1175,6 +1175,23 @@ int OnInit()
          g_entryDir    = (pos.PositionType() == POSITION_TYPE_BUY) ? 1 : -1;
          g_entryLots   = pos.Volume();
          g_peakFavPx   = g_entryPrice;
+         //--- 2026-09-20 (Opus drawdown/profit review, ported from Aurelius_EA.mq5):
+         //--- the restore above still missed g_entryBarCount/g_addsDone/
+         //--- g_price21Bad/g_vwapBad/g_beDone - without these, a restart/
+         //--- recompile/input change mid-trade silently restarts the Price21/
+         //--- VWAP confirm-bar streaks (delaying both SHIPPED exits by up to
+         //--- InpPrice21ConfirmBars/InpVwapConfirmBars bars) and would zero the
+         //--- stale/max-bars clock if either were ever enabled. g_addsDone is not
+         //--- reconstructable from broker state (which leg is the "base" is
+         //--- unknown) - reset to 0, meaning at most one fewer add than intended
+         //--- after a restart, not a wrong count.
+         g_entryBarCount = (int)((TimeCurrent() - g_entryTime) / PeriodSeconds());
+         g_addsDone      = 0;
+         g_price21Bad    = 0;
+         g_vwapBad       = 0;
+         g_beDone        = (pos.StopLoss() != 0.0 &&
+                            ((g_entryDir > 0 && pos.StopLoss() >= g_entryPrice) ||
+                             (g_entryDir < 0 && pos.StopLoss() <= g_entryPrice)));
          double atrNow;
          g_entryATR    = GetATR(atrNow) ? atrNow : 0.0;   // atr<=0 (cold read) leaves trailing/breakeven disabled, not armed on bad data
          PrintFormat("Aurelius EA: restored open position #%I64u from OnInit (entry %.2f, %s, %.2f lots)",
