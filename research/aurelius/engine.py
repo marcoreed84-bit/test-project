@@ -25,7 +25,7 @@ P = dict(
     use_cross_filter=True, cross_window=10, max_crosses=1,
     cooldown_bars=5,
     use_volume=True, vol_avg_bars=100, min_vol_ratio=1.25,
-    use_sr_dist=True, sr_days=3, min_sr_dist_atr=0.50,
+    use_sr_dist=True, sr_days=3, min_sr_dist_atr=1.50,
     use_stop=True, stop_atr=2.5,
     use_price21_exit=True, price21_buffer_atr=0.7, price21_confirm_bars=8,
     use_vwap_exit=True, vwap_buffer_atr=0.2, vwap_confirm_bars=8,
