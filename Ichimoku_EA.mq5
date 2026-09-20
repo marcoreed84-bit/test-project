@@ -181,7 +181,17 @@ enum ENUM_EXIT_MODE  { EXIT_CROSS = 0, EXIT_CLOUD = 1 };
 enum ENUM_LOTMODE    { LOT_FIXED = 0, LOT_RISK_PCT = 1 };
 
 input group "=== Entry mode ==="
-input ENUM_ENTRY_MODE InpEntryMode      = ENTRY_BREAKOUT_FULL;  // PLAIN (PF 1.817, n=318) or BREAKOUT_FULL (PF 2.474, n=53)
+input ENUM_ENTRY_MODE InpEntryMode      = ENTRY_PLAIN;  // v1.05: was ENTRY_BREAKOUT_FULL, which combined with the
+                                          // shipped InpCloseFriday=true/InpMinHoldBars=8/InpSafetyStopATR=2.5
+                                          // below is a config that was NEVER tested anywhere in this file's own
+                                          // changelog - an Opus full-sweep review found it loses money OOS
+                                          // (PF 1.280 full history, OOS PF 0.700, 2022-26 PF 0.800, negative net
+                                          // ex-top-5). BREAKOUT_FULL's PF 2.474/n=53 quoted below requires
+                                          // InpCloseFriday=false + InpMinHoldBars=0 + InpSafetyStopATR=0 - it was
+                                          // never validated with this file's own session-protection defaults on.
+                                          // PLAIN+ADX (see InpUseADX below) is what v1.02-v1.04 actually
+                                          // validated as the real, shipped-default-compatible config: n=191,
+                                          // PF 1.994, net $1312.93, OOS PF 2.323 (beats IS), 1 losing year of 14.
 input ENUM_EXIT_MODE  InpExitMode       = EXIT_CROSS;           // both configs validated best on CROSS, not CLOUD
 
 input group "=== Ichimoku periods (standard) ==="
@@ -192,22 +202,37 @@ input int    InpDisplacement   = 26;    // cloud forward-shift / Chikou back-shi
 
 input group "=== PLAIN mode only ==="
 input bool   InpRequireChikou  = false;  // validated best OFF - leave false unless deliberately re-testing
-input bool   InpUseADX         = false;  // v1.02: PLAIN+ADX(14)>20, full 2013-2026 history, Friday flatten +
+input bool   InpUseADX         = true;   // v1.05: default false->true, REQUIRED to reach this file's own
+                                          // documented-best config (see InpEntryMode above) - shipping PLAIN
+                                          // without ADX is not a validated, tested combination either.
+                                          // v1.02: PLAIN+ADX(14)>20, full 2013-2026 history, Friday flatten +
                                           // 3.5xATR stop modelled (the real exit shape this EA actually runs):
                                           // n=190, PF 2.055, net $1262.31, IS PF 1.971/OOS PF 2.181 (OOS beats
                                           // IS - a good sign, not overfit-shaped), 12 of 14 years positive,
                                           // top-5 trades = 55% of net (similar to the unfiltered baseline's
-                                          // 51%, not materially more tail-heavy). Permutation-tested at the
-                                          // 97.6th/97.3rd percentile against a matched-count/direction/holding-
-                                          // time null drawn from real TK-cross bars - the FIRST config in this
-                                          // entire session's search to clear this project's 95th-percentile bar.
+                                          // 51%, not materially more tail-heavy).
+                                          // CORRECTED (v1.05, Opus full-sweep review): the "97.6th/97.3rd
+                                          // percentile, first config to clear the 95th-percentile bar" claim
+                                          // above was measured against a bar-level null that the UNFILTERED
+                                          // PLAIN signal also clears at 99.4th - it was measuring the whole
+                                          // PLAIN signal's edge, not ADX's incremental contribution. Against
+                                          // this project's later, stricter null (random equal-size subsets of
+                                          // the base signal's own trades): net 84.6th, PF 89.5th, maxDD 98.3rd,
+                                          // best-of-7-thresholds-corrected 64.4th - NOT established as a net/PF
+                                          // edge-adder. Threshold-free check (Spearman rho, ADX-at-entry vs
+                                          // trade P&L) = +0.013, p=0.86 - essentially zero. HOWEVER it IS a
+                                          // real, OOS-consistent DRAWDOWN reducer: maxDD 240->123 (98.3rd
+                                          // percentile), negative years 3->1, stop-outs and worst-loss both
+                                          // improve (see v1.04 note). Ship this as a risk reducer, not a
+                                          // proven profit-adder - v1.03's real MT5 run directionally confirmed
+                                          // the drawdown improvement, which is why it's still the shipped
+                                          // default over no-ADX.
                                           // On the specific 2022-2026 window the real MT5 runs covered: n=56,
                                           // PF 1.856 (vs the unfiltered baseline's PF 1.543 same window).
                                           // NOTE: this is the opposite finding from BREAKOUT_FULL, where
                                           // ADX>20 was catastrophic (OOS PF collapsed to ~0.01-0.1) - the two
                                           // entry definitions interact with trend-strength filtering in
                                           // opposite ways, which is why this toggle only applies in PLAIN mode.
-                                          // Still NOT real-MT5 tested - default OFF until confirmed for real.
 input int    InpADXPeriod      = 14;
 input double InpADXThreshold   = 20.0;
 
@@ -221,6 +246,15 @@ input int    InpMinHoldBars    = 8;      // v1.03: block any non-Friday exit unt
                                           // robust middle-of-plateau point, not the single best (4/16h,
                                           // PF 2.157 vs this value's 2.068) to avoid shipping a spike.
                                           // NOT yet real-MT5 tested - confirm alongside InpUseADX.
+                                          // CLARIFIED (v1.05, Opus full-sweep review): despite the "block...
+                                          // until" wording above, this CANCELS an exit cross that falls inside
+                                          // the hold window rather than deferring it - ShouldExit()'s
+                                          // EXIT_CROSS is a one-bar edge trigger, so a cross seen during the
+                                          // hold period is gone by the time the gate opens, not queued. The
+                                          // replica models this exactly and reproduces v1.03's real numbers,
+                                          // so this IS the tested/shipped behaviour - just be aware 88% of the
+                                          // shipped config's real exits are the Friday flatten (66%) or the
+                                          // ATR stop (21%), not an Ichimoku signal exit (12%).
 
 input group "=== BREAKOUT_FULL mode only - RSI/CMF refinement ==="
 input bool   InpUseRSI         = true;
@@ -261,6 +295,7 @@ CPositionInfo pos;
 
 datetime g_lastBarTime = 0;
 int      g_barsInTrade = 0;   // v1.03: bars elapsed since entry, for InpMinHoldBars
+bool     g_exitPending = false;   // v1.05: a close request that failed and must be retried - see ManagePosition
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -273,6 +308,35 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetTypeFillingBySymbol(_Symbol);
    trade.SetDeviationInPoints(InpSlippage);
+
+   //--- v1.05 (Opus full-sweep review): restore per-trade state. Without this,
+   //--- a restart/recompile/input change while a position is open (a) re-arms
+   //--- InpMinHoldBars from zero, which - since ShouldExit()'s EXIT_CROSS is a
+   //--- one-bar edge trigger, not a latch - can permanently cancel that trade's
+   //--- signal exit, and (b) leaves g_lastBarTime at 0, so the first tick after
+   //--- restart is treated as a new bar even mid-bar, letting ManagePosition()/
+   //--- TryEnter() re-process a bar the EA may already have acted on before the
+   //--- restart (e.g. re-entering a signal that was already stopped out).
+   g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+   g_barsInTrade = 0;
+   g_exitPending = false;
+   bool initIsBuy;
+   if(HavePosition(initIsBuy))
+     {
+      datetime openTime = 0;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         if(!pos.SelectByIndex(i)) continue;
+         if(pos.Symbol() != _Symbol || pos.Magic() != InpMagic) continue;
+         openTime = pos.Time();
+         break;
+        }
+      if(openTime > 0)
+        {
+         int barsSince = Bars(_Symbol, PERIOD_CURRENT, openTime, TimeCurrent());
+         g_barsInTrade = (barsSince > 0) ? barsSince - 1 : 0;   // 0 on the entry bar, matching live semantics
+        }
+     }
    return(INIT_SUCCEEDED);
   }
 //+------------------------------------------------------------------+
@@ -285,7 +349,17 @@ void OnDeinit(const int reason) {}
 //+------------------------------------------------------------------+
 bool HasEnoughHistory()
   {
-   int need = InpSenkouB + 2 * InpDisplacement + 20;
+   //--- v1.05 (Opus full-sweep review): must also cover the manual indicators'
+   //--- own warmups, which exceed the Ichimoku lookback - ComputeADX needs
+   //--- 2*period + period*8 + 2 (142 bars at period=14), ComputeRSI/ComputeATR
+   //--- need period*9 + 1 (127 bars). Without this, a freshly attached chart
+   //--- with 124-142 bars passes this guard but ComputeADX/ComputeRSI silently
+   //--- return false, so CheckEntry() returns 0 - fails safe (no bogus entries)
+   //--- but with no explanation for the extended no-trade window.
+   int need    = InpSenkouB + 2 * InpDisplacement + 20;
+   int adxNeed = 2 * InpADXPeriod + InpADXPeriod * 8 + 4;
+   int oscNeed = MathMax(InpRSIPeriod, 14) * 9 + 4;
+   need = MathMax(need, MathMax(adxNeed, oscNeed));
    return(Bars(_Symbol, PERIOD_CURRENT) >= need);
   }
 //+------------------------------------------------------------------+
@@ -585,8 +659,11 @@ bool HavePosition(bool &isBuy)
    return(false);
   }
 //+------------------------------------------------------------------+
-void ClosePosition(const string reason)
+bool ClosePosition(const string reason)
   {
+   //--- v1.05 (Opus full-sweep review): now returns whether every leg actually
+   //--- closed, so callers can latch-and-retry instead of assuming success.
+   bool allClosed = true;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(!pos.SelectByIndex(i)) continue;
@@ -594,18 +671,33 @@ void ClosePosition(const string reason)
       if(trade.PositionClose(pos.Ticket()))
          Print("Ichimoku_EA: closed - ", reason);
       else
+        {
          Print("Ichimoku_EA: close FAILED (", reason, "), ", trade.ResultRetcodeDescription());
+         allClosed = false;
+        }
      }
+   return(allClosed);
   }
 //+------------------------------------------------------------------+
 void ManagePosition()
   {
    bool isBuy;
-   if(!HavePosition(isBuy)) { g_barsInTrade = 0; return; }
-   if(g_barsInTrade >= InpMinHoldBars && ShouldExit(isBuy))
+   if(!HavePosition(isBuy)) { g_barsInTrade = 0; g_exitPending = false; return; }
+   //--- v1.05 (Opus full-sweep review): ShouldExit()'s EXIT_CROSS is a ONE-BAR
+   //--- edge trigger (tenkan/kijun just crossed) - if the close request fails,
+   //--- that cross will never be true again, so a failed exit must be LATCHED
+   //--- and retried, not silently dropped. g_barsInTrade must also stay
+   //--- unchanged (NOT reset) until the position is actually flat, since
+   //--- resetting it on a failed close would additionally re-arm
+   //--- InpMinHoldBars and delay the retry by that many more bars.
+   if(g_exitPending || (g_barsInTrade >= InpMinHoldBars && ShouldExit(isBuy)))
      {
-      ClosePosition(InpExitMode == EXIT_CROSS ? "TK_CROSS" : "CLOUD_BREAK");
-      g_barsInTrade = 0;
+      g_exitPending = true;
+      if(ClosePosition(InpExitMode == EXIT_CROSS ? "TK_CROSS" : "CLOUD_BREAK"))
+        {
+         g_barsInTrade = 0;
+         g_exitPending = false;
+        }
       return;
      }
    g_barsInTrade++;
@@ -656,24 +748,35 @@ void TryEnter()
    if(InpSafetyStopATR > 0.0)
      {
       double atr;
-      if(ComputeATR(1, 14, atr) && atr > 0.0)
+      //--- v1.05 (Opus full-sweep review): previously, an ATR read failure here
+      //--- silently left sl=0.0 and the trade opened with NO stop at all despite
+      //--- InpSafetyStopATR>0 asking for one - defeating v1.01's entire safety-
+      //--- net purpose. In LOT_RISK_PCT mode it was worse: LotSize(price, 0.0)
+      //--- computes riskDistance=price, producing an absurdly undersized lot
+      //--- clamped to the minimum. Skip the entry instead of taking it stop-less.
+      if(!ComputeATR(1, 14, atr) || atr <= 0.0)
         {
-         sl = (dir == 1) ? price - InpSafetyStopATR * atr : price + InpSafetyStopATR * atr;
-         long stopsPts  = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-         long freezePts = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-         double minStop = MathMax(MathMax(stopsPts, freezePts) * _Point, _Point);
-         double closePx = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         if(MathAbs(closePx - sl) < minStop)
-            sl = (dir == 1) ? closePx - minStop : closePx + minStop;
-         sl = NormalizeDouble(sl, _Digits);
+         Print("Ichimoku_EA: entry skipped - InpSafetyStopATR is on but ATR is unavailable");
+         return;
         }
+      sl = (dir == 1) ? price - InpSafetyStopATR * atr : price + InpSafetyStopATR * atr;
+      long stopsPts  = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      long freezePts = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+      double minStop = MathMax(MathMax(stopsPts, freezePts) * _Point, _Point);
+      double closePx = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      if(MathAbs(closePx - sl) < minStop)
+         sl = (dir == 1) ? closePx - minStop : closePx + minStop;
+      sl = NormalizeDouble(sl, _Digits);
      }
 
    double lots = LotSize(price, sl);
    bool ok = (dir == 1) ? trade.Buy(lots, _Symbol, 0.0, sl, 0.0, InpComment)
                          : trade.Sell(lots, _Symbol, 0.0, sl, 0.0, InpComment);
    if(ok)
+     {
       g_barsInTrade = 0;
+      g_exitPending = false;
+     }
    else
       Print("Ichimoku_EA: entry failed, ", trade.ResultRetcodeDescription());
   }
@@ -690,6 +793,25 @@ void OnTick()
      {
       bool isBuy;
       if(HavePosition(isBuy)) ClosePosition("FRIDAY");
+     }
+
+   //--- v1.05 (Opus full-sweep review): retry a latched, previously-failed
+   //--- TK-cross/cloud-break exit on every tick rather than waiting for the
+   //--- next H4 bar - up to 4 hours is a long time to hold an unwanted
+   //--- position on a rejected close (requote, off-quotes, busy trade context).
+   if(g_exitPending)
+     {
+      bool exitIsBuy;
+      if(HavePosition(exitIsBuy))
+        {
+         if(ClosePosition(InpExitMode == EXIT_CROSS ? "TK_CROSS_RETRY" : "CLOUD_BREAK_RETRY"))
+           {
+            g_barsInTrade = 0;
+            g_exitPending = false;
+           }
+        }
+      else
+         g_exitPending = false;
      }
 
    datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
