@@ -131,7 +131,7 @@
 //|     can't be fully ruled out as a risk, only reasoned about.        |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.02"
+#property version   "1.03"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -158,6 +158,19 @@ input int    InpFridayCloseHour    = 22;      // server time
 
 input group "=== Notifications ==="
 input bool   InpPushNotifications  = true;
+
+input group "=== Cross-EA signal (v1.03 - optional, Aurelius conflict filter) ==="
+input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius_EA.mq5 (its own M5 chart) is
+                                                // ALREADY holding the opposite direction right now - real,
+                                                // Python-validated (research/aurelius/
+                                                // vanguard_aurelius_position_filter_test.py): net $2989.87 ->
+                                                // $3059.94, barely touches trade count (Aurelius is flat 87%
+                                                // of the time). If Aurelius isn't attached, or hasn't updated
+                                                // recently, Vanguard trades completely normally - see
+                                                // CheckAureliusConflict()'s own header.
+input int    InpAureliusStaleSecs = 900;       // Treat the signal as absent if it hasn't updated in this long
+                                                // (15 min default - a few Aurelius M5 bars) - covers Aurelius
+                                                // being removed, crashed, or never attached in the first place.
 
 input group "=== Misc ==="
 input ulong  InpMagic              = 750801;
@@ -286,6 +299,13 @@ int      g_panelMinW = 0;
 bool     g_panelReclaim = true;
 double   g_vwapPrevValue = 0.0;   // snapshotted each new bar, for the per-bar VWAP segment draw
 int      g_barLastBreakoutDir = 0; // cosmetic only - the panel's "breakout this bar" row
+
+//--- cross-EA signal reader (v1.03 - see InpUseAureliusFilter). Matches
+//--- Aurelius_EA.mq5's own writer-side name exactly - "M5" literal on
+//--- both ends, not PERIOD_CURRENT-derived, since both files hard-lock
+//--- to M5 anyway (see each OnInit).
+string   g_aurGVarName = "";
+int      g_lastAurDir = 0;   // cosmetic only - the panel's "Aurelius position" row, refreshed every new bar
 
 //--- forward declarations: OnInit draws the panel before DrawPanel is defined
 void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim = true);
@@ -448,6 +468,46 @@ double SRDistance(bool isBuy, double atrVal)
    if(!GetSRLevels(hi, lo)) return(-1.0);
    double close1 = iClose(_Symbol, PERIOD_M5, 1);
    return isBuy ? MathAbs(hi - close1) / atrVal : MathAbs(close1 - lo) / atrVal;
+  }
+//+------------------------------------------------------------------+
+//| Reads Aurelius_EA.mq5's real, broadcast position direction (v1.03 |
+//| - see InpUseAureliusFilter's header): +1/-1 = Aurelius currently   |
+//| holds that side, 0 = flat, absent, or stale (hasn't updated within |
+//| InpAureliusStaleSecs - covers Aurelius never attached, removed, or |
+//| crashed). Called once per new bar regardless of Vanguard's own     |
+//| position state, purely so the panel can always show Aurelius's     |
+//| current status, not just at the moments Vanguard is checking for   |
+//| a new entry.                                                        |
+//+------------------------------------------------------------------+
+int ReadAureliusDir()
+  {
+   if(!InpUseAureliusFilter) return(0);
+   if(!GlobalVariableCheck(g_aurGVarName)) return(0);   // Aurelius never attached this session
+   datetime lastSet = (datetime)GlobalVariableTime(g_aurGVarName);
+   //--- TimeLocal(), NOT TimeCurrent() (found in review): global variable
+   //--- timestamps are stamped against the terminal's LOCAL clock, not
+   //--- the broker's server time - comparing against TimeCurrent() would
+   //--- be off by whatever the server/local timezone gap is (can be
+   //--- several hours), making this either never trigger (permanently
+   //--- "stale") or never expire (a genuinely dead signal treated as
+   //--- live forever), depending on which side of the gap the broker
+   //--- sits.
+   if(TimeLocal() - lastSet > InpAureliusStaleSecs) return(0);   // attached before, not actively updating now
+   return (int)GlobalVariableGet(g_aurGVarName);
+  }
+//+------------------------------------------------------------------+
+//| True only when this bar's breakout direction `dir` should be       |
+//| BLOCKED because Aurelius is ALREADY holding the opposite side      |
+//| right now - Python-validated (research/aurelius/                   |
+//| vanguard_aurelius_position_filter_test.py: net $2989.87->$3059.94, |
+//| barely touches trade count). Aurelius flat/absent/stale (0) never   |
+//| blocks - Vanguard trades completely normally, matching the user's   |
+//| explicit requirement.                                               |
+//+------------------------------------------------------------------+
+bool AureliusBlocksEntry(int dir)
+  {
+   int aurDir = ReadAureliusDir();
+   return(aurDir != 0 && aurDir != dir);
   }
 //+------------------------------------------------------------------+
 //| Fractal swing check - is the bar at shift=(InpFractalK+1) a        |
@@ -970,12 +1030,12 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    //--- discipline as Aurelius's own derivation (it found a real off-by-
    //--- one doing this by guesswork instead): every PSection/PRow call
    //--- advances ty by rh (ROWS) and every section boundary adds a
-   //--- further +6 (GAPS). In-position: a0 + s1+g1-g3 + s2+c1-c4 +
-   //--- s3+d1-d4 + s4+p1-p4 + s5+q1-q4 = 25 rh-rows, 10 gap-boundaries.
-   //--- Flat: identical through s4, but p4 there only advances +6 (no
-   //--- rh) - one row shorter (24), same 10 gap-boundaries (p4's +6 and
-   //--- s5's own gap both still happen).
-   const int ROWS = (haveLong || haveShort) ? 25 : 24, GAPS = 10;
+   //--- further +6 (GAPS). In-position: a0 + s1+g1-g3 + s2+c1-c5 (v1.03
+   //--- added c5, Aurelius position) + s3+d1-d4 + s4+p1-p4 + s5+q1-q4 =
+   //--- 26 rh-rows, 10 gap-boundaries. Flat: identical through s4, but
+   //--- p4 there only advances +6 (no rh) - one row shorter (25), same
+   //--- 10 gap-boundaries (p4's +6 and s5's own gap both still happen).
+   const int ROWS = (haveLong || haveShort) ? 26 : 25, GAPS = 10;
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
    int guard = 0;
@@ -1051,7 +1111,21 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    PRow("c2", x, ty, w, "S/R dist (buy/sell)",
         haveATR ? StringFormat("%.2f / %.2f ATR", srBuy, srSell) : "-", srState); ty += rh;
    PRow("c3", x, ty, w, "spread", (string)spr, spr <= InpMaxSpreadPoints ? 1 : 0); ty += rh;
-   PRow("c4", x, ty, w, "ATR(14)", haveATR ? DoubleToString(atr, 2) : "-", -1); ty += rh + 6;
+   PRow("c4", x, ty, w, "ATR(14)", haveATR ? DoubleToString(atr, 2) : "-", -1); ty += rh;
+   //--- red ONLY when actively blocking this bar's breakout (found in
+   //--- review: previously always showed green whenever Aurelius held
+   //--- ANY position, including the exact opposing case
+   //--- AureliusBlocksEntry() was blocking on - a trader watching the
+   //--- panel had no way to tell the filter was the reason no trade
+   //--- fired). Neutral when the filter's off or Aurelius is flat/absent;
+   //--- green when present and NOT conflicting (same direction, or no
+   //--- breakout to conflict with this bar).
+   int aurState = -1;
+   if(InpUseAureliusFilter && g_lastAurDir != 0)
+      aurState = (g_barLastBreakoutDir != 0 && g_lastAurDir != g_barLastBreakoutDir) ? 0 : 1;
+   PRow("c5", x, ty, w, "Aurelius position",
+        !InpUseAureliusFilter ? "filter off" : (g_lastAurDir > 0 ? "LONG" : g_lastAurDir < 0 ? "SHORT" : "flat/absent"),
+        aurState); ty += rh + 6;
 
    //--- strategy ------------------------------------------------------
    PSection("s3", x, ty, w, rh, "STRATEGY"); ty += rh + 6;
@@ -1272,6 +1346,8 @@ void CheckForEntry(int breakoutDir)
    double sr = SRDistance(isBuy, atr);
    if(sr >= 0.0 && sr < InpMinSRDistATR) return;
 
+   if(AureliusBlocksEntry(breakoutDir)) return;
+
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = isBuy ? px - InpSafetyStopATR * atr : px + InpSafetyStopATR * atr;
    double lots = LotSize(atr);
@@ -1305,6 +1381,10 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
+
+   //--- "M5" literal, matching Aurelius_EA.mq5's own writer-side name -
+   //--- see its header note.
+   g_aurGVarName = "AURELIUS_POSDIR_M5_" + _Symbol;
 
    SeedVWAP();
    SyncPositionState();
@@ -1383,6 +1463,7 @@ void OnTick()
       UpdateSignalLines();
       UpdateVWAPLine();
       UpdateLevelLines();
+      g_lastAurDir = ReadAureliusDir();
       bool hl, hs;
       CurrentPositions(hl, hs);
       if(InpShowPanel) DrawPanel(hl, hs, true);

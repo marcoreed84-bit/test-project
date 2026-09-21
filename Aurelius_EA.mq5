@@ -519,9 +519,16 @@
 //|  at every step tested, left at 1.00). See InpMinSlopeATR's own comment and                                 |
 //|  SESSION_NOTES.md for the full numbers. NEEDS A REAL MT5 BACKTEST before                                    |
 //|  trusting this over 0.50 - Python-only so far.                                                               |
+//|                                                                                                                 |
+//|  v1.47: adds InpPublishPosition (default on) - broadcasts this EA's real     |
+//|  position direction via a terminal global variable ("AURELIUS_POSDIR_M5_"+   |
+//|  Symbol), purely so Vanguard_EA.mq5 (a separate EA, its own chart) can        |
+//|  optionally skip entering directly against an already-open Aurelius           |
+//|  position. Read-only broadcast - has zero effect on Aurelius's own entries,    |
+//|  exits, sizing, or risk, whether Vanguard is attached or reading it or not.     |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.46"
+#property version   "1.47"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -835,6 +842,15 @@ input bool    InpWaterBottom = true;             // Watermark bottom-right inste
 input int     InpWaterSize  = 42;                // Watermark font size
 input string  InpWaterFont  = "Arial Black";     // Watermark font
 
+input group "=== Cross-EA signal (for Vanguard_EA.mq5's optional conflict filter) ==="
+input bool    InpPublishPosition = true;       // Publish this EA's real position direction via a terminal
+                                                // global variable, so Vanguard_EA.mq5 (attached to its own
+                                                // chart) can optionally avoid entering directly against an
+                                                // already-open Aurelius position - see Vanguard_EA.mq5's own
+                                                // header for the full design. Purely a broadcast: Aurelius's
+                                                // own trading is completely unaffected whether this is on or
+                                                // off, or whether anything is even reading it.
+
 input group "=== Logging ==="
 input bool    InpLogTrades       = true;       // Write closed trades to CSV
 input bool    InpVerbose         = false;      // Print decisions to the Experts log
@@ -913,12 +929,24 @@ int    g_panX = -1, g_panY = -1;      // live panel position, updated by draggin
 bool   g_bgOK = false;                // background image loaded successfully
 int    g_bgTries = 0;
 
+//--- cross-EA signal (see InpPublishPosition) - M5-specific name so
+//--- Vanguard_EA.mq5's own M5 reader and Vanguard_M15_EA.mq5's M15
+//--- reader (reading Aurelius_M15_EA.mq5's own, separately-named
+//--- variable) can never cross-connect to the wrong timeframe pair.
+string g_posDirGVarName = "";
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
    //--- PERFORMANCE FIX (v1.32): see g_skipCosmeticDraws declaration and
    //--- the OnTick() note below.
    g_skipCosmeticDraws = MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE);
+
+   //--- "M5" is literal, not PERIOD_CURRENT-derived: this file always runs
+   //--- on M5 (see this EA's own symbol/period conventions), and Vanguard's
+   //--- reader needs a name it can compute without ever having queried
+   //--- this chart's actual period.
+   g_posDirGVarName = "AURELIUS_POSDIR_M5_" + _Symbol;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
@@ -2862,6 +2890,18 @@ void OnTick()
       if(pos.PositionType() == POSITION_TYPE_BUY) haveLong = true;
       else                                        haveShort = true;
      }
+
+   //--- cross-EA signal (see InpPublishPosition's header) - broadcasts
+   //--- this EA's real position direction once per new bar via a
+   //--- terminal global variable, for Vanguard_EA.mq5's OWN, separate,
+   //--- optional conflict filter to read. GlobalVariableSet() also
+   //--- stamps the variable's last-modified time (GlobalVariableTime()),
+   //--- which is what lets a reader tell "actively running" apart from
+   //--- "was attached once, long ago" without a second heartbeat
+   //--- variable. Purely a broadcast - has no effect on this EA's own
+   //--- trading whatsoever, on or off.
+   if(InpPublishPosition)
+      GlobalVariableSet(g_posDirGVarName, haveLong ? 1.0 : (haveShort ? -1.0 : 0.0));
 
    //--- same v1.32 reasoning as the between-bar draw above: purely
    //--- cosmetic, skipped in a non-visual Tester run. MA lines drawn
