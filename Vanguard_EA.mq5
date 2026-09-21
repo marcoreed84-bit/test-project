@@ -63,6 +63,40 @@
 //|  (18.8%->15.4%) at a modest net cost, same tradeoff shape seen       |
 //|  throughout this session's confluence testing.                      |
 //|                                                                    |
+//|  REAL MT5 STRATEGY TESTER, v1.00 (fixed 0.01 lots, 2023.01-        |
+//|  2026.09, GOLD#, XM Global): net=+56,913.47 ZAR, PF=1.638,          |
+//|  Sharpe=2.81, win rate 28.6% (748 trades), Equity DD Maximal        |
+//|  8.42%. Confirmed real and working - but the user directly flagged  |
+//|  a real fragility this run exposed: 2026 alone (partial year)       |
+//|  carried ~60% of total net profit, 2023 was nearly flat. Top 20     |
+//|  trades (2.7% of all trades) summed to MORE than 100% of net -      |
+//|  remove them and the system is net negative. Investigated: this is  |
+//|  NOT a broken/fake edge in 2023-2024 (every year was net positive,  |
+//|  PF>1 in the underlying Python construction even for 2023) - it's   |
+//|  gold's own dollar ATR expanding ~5.7x over the period (2023        |
+//|  avg $1.18 -> 2026 avg $6.68, and ATR AS % OF PRICE also grew       |
+//|  0.061%->0.146%, a real volatility increase, not just nominal price |
+//|  inflation) while the EA traded a FIXED lot size regardless.        |
+//|                                                                    |
+//|  v1.01 ADDS ATR-INVERSE POSITION SIZING (InpBaseLots/InpRefATR      |
+//|  below, LotSize()) to directly address that: size scales UP in      |
+//|  calmer (lower-ATR) periods and is floored at the broker's real     |
+//|  0.01 lot minimum in high-ATR periods (so 2025-2026-era trades are  |
+//|  UNCHANGED from what's already real-MT5-validated above - only the  |
+//|  calmer years get bigger). Python-revalidated with this exact       |
+//|  floor/step behavior (not an idealized continuous version - an      |
+//|  earlier draft of this test had a real scaling bug in its drawdown  |
+//|  math that overstated floating DD at 41.6%; fixed and rechecked):   |
+//|  net=+3,679.04 (price-diff $, up from +2,989.87), PF=1.506,         |
+//|  closedDD=11.3% of net (better than 12.8%), floatDD=13.0% of net    |
+//|  (better than 15.4%), walk-forward 4/5, random-direction percentile |
+//|  100.0. Year-by-year net (fixed-lot -> ATR-sized): 2023 $62->$455,  |
+//|  2024 $206->$368, 2025 $904->$1,037, 2026 $1,818 unchanged (already |
+//|  at the lot floor). Range shrinks from 29x (best year/worst year)   |
+//|  to about 4x. Trade concentration (top 20 > net) is UNCHANGED by    |
+//|  this - that's inherent to trend-following, sizing redistributes    |
+//|  WHEN the profit lands, not how few trades produce it.              |
+//|                                                                    |
 //|  KNOWN GAPS (flagged, not silently fixed elsewhere, so they don't   |
 //|  get lost):                                                         |
 //|   - Same-day research on a "fan trendline" (three-line-break)       |
@@ -88,13 +122,16 @@
 //|     below), NOT MT5's built-in iATR - same reason as every sibling  |
 //|     EA (this broker's iATR is a plain SMA of true range, not real   |
 //|     Wilder smoothing).                                              |
-//|   - NEVER RUN THROUGH A REAL MT5 STRATEGY TESTER - this is the      |
-//|     Python-only validation step, same stage Meridian was at before  |
-//|     its first real test. Needs that before any number here can be   |
-//|     trusted the way Meridian's real-tested numbers now are.         |
+//|   - v1.01's ATR sizing has NOT yet itself been through a real MT5   |
+//|     Strategy Tester run - only v1.00 (fixed lots) has. Needs that   |
+//|     before these specific numbers are trusted the same way v1.00's  |
+//|     are. Also: only 2023-2026 data exists to test against (no       |
+//|     earlier real history was available to check behavior in a      |
+//|     genuinely different, more range-bound gold regime) - this       |
+//|     can't be fully ruled out as a risk, only reasoned about.        |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -109,8 +146,9 @@ input group "=== Exit ==="
 input double InpSafetyStopATR     = 4.0;     // validated best cell - see header
 input int    InpATRPeriod         = 14;
 
-input group "=== Risk ==="
-input double InpLots               = 0.01;
+input group "=== Risk (ATR-inverse sizing - see header) ==="
+input double InpBaseLots           = 0.01;    // lot size AT the reference ATR below
+input double InpRefATR             = 3.073;   // this construction's real avg entry ATR - see header
 input double InpMaxSpreadPoints    = 60;
 input int    InpSlippage           = 20;
 
@@ -390,9 +428,23 @@ int UpdateSwingsAndCheckBreakout()
    return(dir);
   }
 //+------------------------------------------------------------------+
-double LotSize()
+//+------------------------------------------------------------------+
+//| ATR-inverse sizing (v1.01 - see header): InpBaseLots is the size  |
+//| AT the reference ATR (InpRefATR, this construction's real average |
+//| entry ATR over the validated backtest). A calmer-than-average bar |
+//| sizes UP, a more volatile one sizes DOWN - real broker lot        |
+//| step/floor enforced same as before, which is what makes this      |
+//| asymmetric: it can't shrink below InpBaseLots's floor, so it only |
+//| ever adds size in calm periods rather than removing it in wild    |
+//| ones. That asymmetry is what was actually validated (see header)  |
+//| - a naive unfloored version tested first showed misleadingly high |
+//| floating DD from a scaling bug, not from the sizing idea itself.  |
+//+------------------------------------------------------------------+
+double LotSize(double atrVal)
   {
-   double lots = InpLots;
+   double lots = InpBaseLots;
+   if(atrVal > 0.0 && InpRefATR > 0.0)
+      lots = InpBaseLots * (InpRefATR / atrVal);
    double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -465,7 +517,7 @@ void CheckForEntry(int breakoutDir)
 
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = isBuy ? px - InpSafetyStopATR * atr : px + InpSafetyStopATR * atr;
-   double lots = LotSize();
+   double lots = LotSize(atr);
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
