@@ -82,9 +82,26 @@
 //|  same-zone double stop-out is a real, checkable event in the data), |
 //|  but not statistically proven at this sample size - left OFF by      |
 //|  default rather than presented as a validated filter.                |
+//|                                                                    |
+//|  v1.02 FIXES A REAL BUG found from the user's own real MT5 test on  |
+//|  v1.01 (2026.01-09.21, GOLD#, account 1301959345): 406 trades vs     |
+//|  the real EA's 169, 43.6% win rate vs the real 71%, account          |
+//|  drawdown hit 100.2% (wiped out) by 2026.04.13. Root cause: a        |
+//|  session's frozen range stayed re-armable for ~21h (until that       |
+//|  session's window reopened), so ordinary chop around the range       |
+//|  boundary could break out, retrace into the zone, enter, stop out,   |
+//|  break out again, retrace again, enter again - repeatedly, all on    |
+//|  the SAME static range. Confirmed directly: 59 of 68 trading days    |
+//|  had more than one entry, averaging 4.9/day, one day hit 14. The     |
+//|  real report never shows more than 2 trades on any day. Fixed with   |
+//|  g_sesRangeTraded[] (see its own header note): once a trade is       |
+//|  taken from a session's current range, that range is retired -       |
+//|  no further entries from it until its window reopens and freezes     |
+//|  a brand new one. NOT yet re-tested on a real MT5 run - needs that    |
+//|  before the overtrading is confirmed fixed, not just reasoned about. |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -218,6 +235,14 @@ datetime g_sesRangeStartTime[4], g_sesRangeEndTime[4];
 int      g_sesBiasDir[4];                            // 0 none, +1/-1 breakout seen, awaiting retracement
 double   g_sesExtHigh[4], g_sesExtLow[4];
 datetime g_sesExtTime[4];
+//--- v1.02 bugfix (see header): true once a trade has already been
+//--- taken from the CURRENT frozen range - without this, a still-valid
+//--- range stays re-armable for ~21h (until its session reopens), so
+//--- ordinary chop around the range boundary re-triggers entry after
+//--- entry all day (confirmed against a real MT5 run: 4.9 entries/day
+//--- average, one day hit 14, vs the real EA's report which never
+//--- shows more than 2/day).
+bool     g_sesRangeTraded[4];
 
 //--- current position's own scale-out state (only one position at a time)
 double   g_posEntry = 0.0, g_posRisk = 0.0;
@@ -378,6 +403,7 @@ void UpdateSessionRanges(datetime barTime, double barHigh, double barLow)
          g_sesRangeEndTime[i] = barTime;
          g_sesBiasDir[i] = 0;
          g_sesExtHigh[i] = 0.0; g_sesExtLow[i] = 0.0;
+         g_sesRangeTraded[i] = false;
         }
       g_sesWasIn[i] = inWin;
      }
@@ -394,7 +420,7 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
   {
    for(int i = 0; i < 4; i++)
      {
-      if(!g_sesEnable[i] || !g_sesRangeValid[i]) continue;
+      if(!g_sesEnable[i] || !g_sesRangeValid[i] || g_sesRangeTraded[i]) continue;
       double H = g_sesRangeHigh[i], L = g_sesRangeLow[i];
       double rng = H - L;
       if(rng <= 0.0) continue;
@@ -538,9 +564,11 @@ void CheckForEntry()
       g_posTP2 = isBuy ? px + InpTP2_RR * risk : px - InpTP2_RR * risk;
       g_posTP3 = tp3;
       g_posTP1Done = false; g_posTP2Done = false; g_posBEDone = false;
-      //--- setup consumed - a fresh breakout must form before this
-      //--- session can trigger again
+      //--- v1.02: this range is now spent - no further entries from it
+      //--- until its session window reopens and freezes a brand new one
+      //--- (see g_sesRangeTraded's own header note)
       g_sesBiasDir[sesIdx] = 0;
+      g_sesRangeTraded[sesIdx] = true;
      }
    else
       PrintFormat("MSG EA: entry FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
@@ -1071,7 +1099,8 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    for(int i = 0; i < 4; i++)
      {
       bool inWin = g_sesEnable[i] && HourInWindow(hourGMT, g_sesStart[i], g_sesEnd[i]);
-      string val = !g_sesEnable[i] ? "off" : (inWin ? "forming" : (g_sesRangeValid[i] ? "watching" : "-"));
+      string val = !g_sesEnable[i] ? "off" : (inWin ? "forming" :
+                   (!g_sesRangeValid[i] ? "-" : (g_sesRangeTraded[i] ? "traded" : "watching")));
       PRow("g" + IntegerToString(i + 1), x, ty, w, names[i], val, !g_sesEnable[i] ? -1 : (inWin ? 1 : (g_sesBiasDir[i] != 0 ? 1 : -1)));
       ty += rh;
      }
@@ -1191,6 +1220,7 @@ int OnInit()
    ArrayInitialize(g_sesWasIn, false);
    ArrayInitialize(g_sesRangeValid, false);
    ArrayInitialize(g_sesBiasDir, 0);
+   ArrayInitialize(g_sesRangeTraded, false);
 
    SyncPositionState();
    g_lastBarTime = 0;
