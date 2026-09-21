@@ -141,3 +141,21 @@ if __name__ == "__main__":
 
     print(f"\nfor reference, M5 v1.02 (same construction, M5 bars): net=3432.72 pf=1.357 "
           f"floatDD%=11.1 walk-forward=5/5 random-pct=100.0")
+
+
+# --- follow-up: tuning attempt informed by Aurelius_M15's real, validated
+# rescale pattern (fast line 21->30, mid/slow lines largely unchanged -
+# NOT a naive /3 across the board). Swept p21 x safety_sl (p50=50,
+# confirm=250 both left unchanged, matching that same pattern). Result:
+# widening the stop helps far more than shifting p21 (which doesn't
+# transfer well to Meridian's simpler cross-based design), but plateaus
+# around sl=6-10xATR at floatDD%~44-45% - the ceiling for this
+# construction on M15. Best found: p21=21, sl=6.0xATR -> net=1953.23,
+# pf=1.309, floatDD%=44.0. Still ~4x the relative risk of the M5
+# version (11.1%) for meaningfully less profit factor headroom (1.309
+# vs 1.357) and much lower net ($1953 vs $3433). Conclusion: M15
+# genuinely doesn't suit this architecture even after a real tuning
+# pass - would need a from-scratch redesign (different confirm-line
+# structure, not just rescaled periods/stop) to be competitive, same
+# conclusion as the literal-port test above, now confirmed after
+# actually trying to tune it rather than assuming.
