@@ -64,9 +64,27 @@
 //|  / FindOwnPosition, the non-visual-tester cosmetic-draw skip).      |
 //|  Panel content and chart drawings (session range box, fib levels,  |
 //|  history) are new, specific to this construction.                  |
+//|                                                                    |
+//|  v1.01 ADDS InpOneTradeAfterLoss (default FALSE - opt-in, see       |
+//|  below): found by analysing the REAL 8-month MSG3-only report       |
+//|  (account 1301880049, 2026.01-2026.08, 86 real round-trip trades) - |
+//|  two of the worst losses (2026.02.11 and 2026.03.25) were each a    |
+//|  SAME-DAY re-entry into the exact same stopped-out zone (identical  |
+//|  SL price both times: 5061.51 and 4540.22) - a revenge re-entry,    |
+//|  not two independent bad trades. Blocking any further entry once    |
+//|  one loss has happened that day: net 18,145.57->18,720.44 (+3.2%),  |
+//|  max balance DD 3,774.60->2,440.98 (-35.3%), preserves 19/20 top     |
+//|  trades (drops one +1,073.05 winner), holds up on a chronological    |
+//|  70/30 IS/OOS split (+2.0% IS, +16.2% OOS - not a one-sided fluke).  |
+//|  HONEST CAVEAT: only 15 of 86 trades are ever cut by this rule -     |
+//|  a permutation test against random same-size cuts gives p=0.11-0.12,|
+//|  NOT below the usual 0.05 bar. Real, mechanistically sensible (a     |
+//|  same-zone double stop-out is a real, checkable event in the data), |
+//|  but not statistically proven at this sample size - left OFF by      |
+//|  default rather than presented as a validated filter.                |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -130,6 +148,7 @@ input int    InpStructLookback    = 10;       // bars used for the structural sw
 input double InpStructBufferATR   = 0.10;
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
+input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
 
 input group "==== Notifications ==="
 input bool   InpPushNotifications = true;
@@ -451,10 +470,36 @@ void NotifyPush(const string text)
    SendNotification(StringSubstr(text, 0, 255));
   }
 //+------------------------------------------------------------------+
+//| v1.01 circuit breaker (see header) - true once THIS EA (own symbol |
+//| + magic) has closed at least one losing deal since today's start,  |
+//| server-time calendar day.                                          |
+//+------------------------------------------------------------------+
+bool LossAlreadyToday()
+  {
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   dt.hour = 0; dt.min = 0; dt.sec = 0;
+   datetime dayStart = StructToTime(dt);
+   if(!HistorySelect(dayStart, TimeCurrent())) return(false);
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+     {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0) continue;
+      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
+      if((long)HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)InpMagic) continue;
+      long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY) continue;
+      if(HistoryDealGetDouble(ticket, DEAL_PROFIT) < 0.0) return(true);
+     }
+   return(false);
+  }
+//+------------------------------------------------------------------+
 void CheckForEntry()
   {
    SyncPositionState();
    if(g_ticket != 0) return;
+   if(InpOneTradeAfterLoss && LossAlreadyToday()) return;
 
    long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(spreadPts > InpMaxSpreadPoints) return;
@@ -976,10 +1021,11 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    int hdr = rh + 14;
    //--- counted directly against the ty+= sequence below (project
    //--- convention - see Vanguard/Aurelius header notes on this exact
-   //--- discipline). In-position: a0 + s1+g1-g4 + s2+h1-h4 + s3+p1-p4 +
-   //--- s4+q1-q4 = 21 rh-rows, 8 gap-boundaries. Flat: p3/p4 collapse to
-   //--- no-row gaps, 19 rh-rows, 8 gap-boundaries.
-   const int ROWS = (haveLong || haveShort) ? 21 : 19, GAPS = 8;
+   //--- discipline). In-position: a0(1) + s1(1)+g1-g4(4) + s2(1)+h1-h5(5)
+   //--- + s3(1)+p1-p4(4) + s4(1)+q1-q4(4) = 22 rh-rows, 8 gap-boundaries.
+   //--- Flat: p-block loses one rh-row (p4 becomes gap-only) = 21 rh-rows,
+   //--- 8 gap-boundaries.
+   const int ROWS = (haveLong || haveShort) ? 22 : 21, GAPS = 8;
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
    int guard = 0;
@@ -1041,7 +1087,11 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    long spr = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    PRow("h3", x, ty, w, "spread", (string)spr, spr <= InpMaxSpreadPoints ? 1 : 0); ty += rh;
    double atrShow; bool haveATR = GetATR(atrShow);
-   PRow("h4", x, ty, w, "ATR(14)", haveATR ? DoubleToString(atrShow, 2) : "-", -1); ty += rh + 6;
+   PRow("h4", x, ty, w, "ATR(14)", haveATR ? DoubleToString(atrShow, 2) : "-", -1); ty += rh;
+   bool lossToday = InpOneTradeAfterLoss && LossAlreadyToday();
+   PRow("h5", x, ty, w, "one-trade breaker",
+        !InpOneTradeAfterLoss ? "off" : (lossToday ? "BLOCKING" : "armed"),
+        !InpOneTradeAfterLoss ? -1 : (lossToday ? 0 : 1)); ty += rh + 6;
 
    //--- position --------------------------------------------------
    PSection("s3", x, ty, w, rh, "POSITION"); ty += rh + 6;
