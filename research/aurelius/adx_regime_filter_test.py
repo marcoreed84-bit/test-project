@@ -1,4 +1,17 @@
 """
+CORRECTION (found via meridian_ma_variant_test.py): this file's ctx['m150']
+is Aurelius's real p150=250/m150=sma default (a 250-period SMA), NOT a
+150-period EMA, despite the variable name and this file's own comments
+describing it as "150 EMA" throughout. Meridian_EA.mq5 itself is
+unaffected (its real MQL5 code genuinely uses InpP150=150 with
+MODE_EMA), and the real MT5 Strategy Tester results are real, ground-
+truth numbers unaffected by this. Only the specific dollar/percentage
+figures reported FROM THIS FILE don't correspond exactly to what's
+shipped - re-verified directionally correct (S/R filter + tighter stop
+still help) against the TRUE 150 EMA in meridian_ma_variant_test.py,
+but treat any exact number from this file with that caveat in mind.
+"""
+"""
 User's ask: can the walk-forward get to 5/5 blocks. Block 1 (2023-01 to
 2023-09) has been the one losing/weak block across EVERY construction
 tested this session, including Aurelius's own real, already-validated
