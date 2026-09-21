@@ -68,7 +68,45 @@
 //|  layer (the thing Aurelius has that this doesn't) before more than |
 //|  demo exposure would be responsible.                               |
 //|                                                                    |
-//|  KNOWN v1.00 GAPS (flagged, not fixed, so they don't get lost):    |
+//|  v1.01 DRAWDOWN WORK (asked directly: "more confluence to cut the  |
+//|  losers"): research/aurelius/meridian_dd_confluence_test.py tested |
+//|  every filter Aurelius_EA.mq5 already has validated - momentum,    |
+//|  pullback, volume ratio, S/R distance, slope, crisscross - on top  |
+//|  of this entry. Only S/R distance helped (floating DD 12.3%->11.3% |
+//|  of net); momentum/volume/crisscross made DD WORSE despite cutting |
+//|  trade count; the slope filter is nearly incompatible with a fresh |
+//|  cross by construction (a 21/50 cross happens near the 50 EMA's    |
+//|  slope INFLECTION, not after it's already built momentum - only 1  |
+//|  of 2603 trades satisfied both). Separately tested Aurelius's own   |
+//|  proven drawdown fix (InpUsePrice21Exit-style early exit on price   |
+//|  closing back through the 21) via                                   |
+//|  research/aurelius/meridian_price21exit_test.py - it made THIS      |
+//|  system's drawdown worse at every setting tried (13.1%-34.2% vs     |
+//|  12.3% baseline), because unlike Aurelius (slow multi-MA alignment- |
+//|  break exit), Meridian's exit is already the fast 21/50 relationship|
+//|  - an early exit on the same line just cuts winners short without   |
+//|  preventing the real tail-risk trades. Not shipped.                 |
+//|                                                                     |
+//|  What DID work, combined and verified (Python): the S/R filter      |
+//|  above (InpSRDays=3, InpMinSRDistATR=0.50, now wired into           |
+//|  CheckForEntry() via SRDistance()) PLUS tightening the safety stop  |
+//|  2.5xATR (was 3.0, itself swept - see meridian_dd_confluence_test.py|
+//|  for the full grid) - net AND drawdown improved TOGETHER, not a     |
+//|  tradeoff: n=2539, net=3420.71 (was 3184.61), PF=1.356 (was 1.300), |
+//|  closed DD 9.8% of net (was 10.1%), floating DD 11.1% (was 12.3%),  |
+//|  random-direction percentile 99.3, IS=601.84/OOS=2818.87 both       |
+//|  positive, and walk-forward went 5/5 BLOCKS POSITIVE - the first    |
+//|  construction all session to clear every block, including the      |
+//|  previously-always-losing 2023 Jan-Sep block (now +6.99, barely     |
+//|  positive but real). This is a genuine, modest improvement, not a   |
+//|  fix for the real 36.78% equity DD the MT5 test found - that number |
+//|  was against a small fixed account carrying 0.01-lot ATR stops, and |
+//|  a ~10% relative cut in floating DD is real but far short of        |
+//|  closing that gap. NOT YET RUN THROUGH A REAL MT5 STRATEGY TESTER   |
+//|  at these new settings - needs the same real-test step v1.00 got    |
+//|  before this can be trusted the way that earlier number was.        |
+//|                                                                     |
+//|  KNOWN GAPS (flagged, not fixed, so they don't get lost):          |
 //|   - No visual panel/wallpaper - deliberately out of scope for a    |
 //|     first pass; every other EA in this project has one, this one   |
 //|     can get one later if the system proves out.                    |
@@ -82,20 +120,22 @@
 //|     real Wilder smoothing. Matches engine.py's wilder_atr exactly. |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-input group "=== Signal: 21/50 cross, 150 + VWAP confirmed ==="
+input group "=== Signal: 21/50 cross, 150 + VWAP + S/R confirmed ==="
 input int    InpP21             = 21;
 input int    InpP50             = 50;
 input int    InpP150            = 150;
 input ENUM_MA_METHOD InpMAMethod = MODE_EMA;
+input int    InpSRDays          = 3;        // trailing completed D1 bars checked for the nearest level
+input double InpMinSRDistATR    = 0.50;     // reject entries this close (xATR) to that level - see header
 
 input group "=== Exit ==="
-input double InpSafetyStopATR   = 3.0;      // validated best cell - see header
+input double InpSafetyStopATR   = 2.5;      // v1.01: tightened from 3.0 - see header (net AND drawdown both improved)
 input int    InpATRPeriod       = 14;
 
 input group "=== Risk ==="
@@ -218,6 +258,28 @@ bool GetATR(double &value)
    ComputeWilderATR(g_atrBuf, InpATRPeriod);
    value = g_atrBuf[0];
    return(value > 0.0);
+  }
+//+------------------------------------------------------------------+
+//| Distance (xATR) from the last closed M5 bar's close to the nearer |
+//| of the last InpSRDays COMPLETED daily highs/lows - matches         |
+//| engine.py's SRDistanceATR port of Aurelius_EA.mq5 exactly (D1      |
+//| shift 1..InpSRDays, never shift 0's still-forming day). Returns    |
+//| -1.0 (never rejects) if ATR or D1 history isn't available yet.     |
+//+------------------------------------------------------------------+
+double SRDistance(bool isBuy, double atrVal)
+  {
+   if(atrVal <= 0.0) return(-1.0);
+   double hi = -DBL_MAX, lo = DBL_MAX;
+   for(int d = 1; d <= InpSRDays; d++)
+     {
+      double h = iHigh(_Symbol, PERIOD_D1, d);
+      double l = iLow(_Symbol, PERIOD_D1, d);
+      if(h <= 0.0 || l <= 0.0) return(-1.0);   // not enough D1 history yet
+      if(h > hi) hi = h;
+      if(l < lo) lo = l;
+     }
+   double close1 = iClose(_Symbol, PERIOD_M5, 1);
+   return isBuy ? MathAbs(hi - close1) / atrVal : MathAbs(close1 - lo) / atrVal;
   }
 //+------------------------------------------------------------------+
 //| Session VWAP - seeds from the current calendar day's first bar on |
@@ -372,6 +434,14 @@ void CheckForEntry()
 
    double atr;
    if(!GetATR(atr) || atr <= 0.0) return;
+
+   // v1.01: reject entries too close to the nearest recent daily S/R level -
+   // the one confluence filter this session's research found actually cuts
+   // drawdown instead of just cutting trade count (see header). sr < 0
+   // means "not enough D1 history yet" - never rejects on that, matching
+   // the Python model's fail-open convention for missing data.
+   double sr = SRDistance(isBuy, atr);
+   if(sr >= 0.0 && sr < InpMinSRDistATR) return;
 
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = isBuy ? px - InpSafetyStopATR * atr : px + InpSafetyStopATR * atr;
