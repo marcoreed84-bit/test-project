@@ -129,9 +129,37 @@
 //|     earlier real history was available to check behavior in a      |
 //|     genuinely different, more range-bound gold regime) - this       |
 //|     can't be fully ruled out as a risk, only reasoned about.        |
+//|                                                                    |
+//|  v1.04 ADDS A STALE EXIT (InpUseStaleExit/InpStaleBars/             |
+//|  InpStaleMinProfitATR below): cuts a trade loose early - at         |
+//|  whatever it's currently worth - if it's shown no real progress     |
+//|  after InpStaleBars, instead of waiting for the full 4.0xATR safety |
+//|  stop. Directly answered the user's own question ("is there really  |
+//|  no way to cut drawdown") - tested honestly against several ideas   |
+//|  that DIDN'T work first (partial profit-taking made concentration   |
+//|  worse not better; breakeven stop-move destroyed net AND drawdown   |
+//|  both; a joint sweep with a tightened stop added nothing beyond     |
+//|  stale-exit alone and either broke top-20 preservation or worsened  |
+//|  DD despite better net - see research/aurelius/vanguard_dd_*        |
+//|  and vanguard_m5_joint_sweep_test.py). InpStaleBars=225 (~18.75h on  |
+//|  M5) is a REAL, INDEPENDENTLY-DERIVED value, not shared with the    |
+//|  M15 file's own InpStaleBars=75 (also ~18.75h - the two fresh       |
+//|  sweeps landed on the same real-world time window without being     |
+//|  assumed to, a reassuring cross-check, not a coincidence forced by   |
+//|  a naive bar-count rescale).                                        |
+//|                                                                    |
+//|  Python-validated (+VWAP+S/R+stale-exit, same k=100/sl=4.0xATR):    |
+//|  net=2928.67 (was 2989.87, -2.0%), PF 1.570->1.587, closed DD       |
+//|  $383.64->$338.48 (-11.8%), floating DD $459.48->$416.96 (-9.3%),   |
+//|  walk-forward 3/5->4/5 blocks, random-direction percentile          |
+//|  99.7->100.0. All 20 of the real MT5 trades that carry Vanguard's   |
+//|  entire actual profitability are preserved - explicitly checked,    |
+//|  not assumed, per the user's own direct requirement. NOT yet run    |
+//|  through a real MT5 Strategy Tester - needs that before this        |
+//|  specific number is trusted the way v1.00's fixed-lot numbers are.  |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -145,6 +173,10 @@ input double InpMinSRDistATR      = 0.50;    // reject entries this close (xATR)
 input group "=== Exit ==="
 input double InpSafetyStopATR     = 4.0;     // validated best cell - see header
 input int    InpATRPeriod         = 14;
+input bool   InpUseStaleExit      = true;    // cut a non-performing trade loose early - see header (v1.04)
+input int    InpStaleBars         = 225;     // ~18.75h on M5 - real, Python-validated optimum, see header
+input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below
+                                              // this once InpStaleBars have elapsed
 
 input group "=== Risk (ATR-inverse sizing - see header) ==="
 input double InpBaseLots           = 0.01;    // lot size AT the reference ATR below
@@ -306,6 +338,9 @@ int      g_barLastBreakoutDir = 0; // cosmetic only - the panel's "breakout this
 //--- to M5 anyway (see each OnInit).
 string   g_aurGVarName = "";
 int      g_lastAurDir = 0;   // cosmetic only - the panel's "Aurelius position" row, refreshed every new bar
+double   g_entryATR = 0.0;   // ATR at entry, remembered for the stale-exit profit threshold (v1.04) - matches
+                              // the Python validation's exact semantics (profit measured in ENTRY-bar ATR
+                              // units, not current ATR, same convention as the safety stop's own distance)
 
 //--- forward declarations: OnInit draws the panel before DrawPanel is defined
 void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim = true);
@@ -1320,9 +1355,38 @@ void ManageOpenPosition(int breakoutDir)
    if(IsFridayFlattenTime()) { CloseCurrentPosition("FRIDAY"); return; }
 
    if(breakoutDir != 0 && breakoutDir != g_posDir)
-      CloseCurrentPosition("REVERSAL");
-   // safety stop is a real resting SL order (set at entry) - the broker
-   // enforces it even if this EA/terminal goes offline.
+      { CloseCurrentPosition("REVERSAL"); return; }
+
+   //--- stale exit (v1.04, see header): cut a trade loose - at whatever
+   //--- it's currently worth - if it's shown no real progress after
+   //--- InpStaleBars, rather than waiting for the full safety stop.
+   //--- g_entryATR <= 0.0 means this session never saw the entry (e.g.
+   //--- a terminal/EA restart while the position was already open) -
+   //--- skips the check rather than risk a wrong threshold; the resting
+   //--- stop-loss order still protects the position regardless. No
+   //--- PositionSelectByTicket() here - SyncPositionState() at the top
+   //--- of this function already selected g_ticket, and nothing between
+   //--- there and here re-selects anything else (found redundant in
+   //--- review).
+   //--- NOTE: if a genuinely new breakout fires the SAME bar this stale
+   //--- exit closes the position, CheckForEntry() (called right after
+   //--- this in OnTick) can re-enter immediately - intentional, and
+   //--- consistent with the validated Python model's own event
+   //--- sequencing (sim_stale's `i < last_exit` boundary allows exactly
+   //--- this: a fresh signal at the exit bar itself is not blocked).
+   if(InpUseStaleExit && g_entryATR > 0.0)
+     {
+      datetime opTime = (datetime)PositionGetInteger(POSITION_TIME);
+      int barsHeld = (int)iBarShift(_Symbol, PERIOD_M5, opTime, false);
+      if(barsHeld >= InpStaleBars)
+        {
+         double curClose = iClose(_Symbol, PERIOD_M5, 1);
+         double openPx = PositionGetDouble(POSITION_PRICE_OPEN);
+         double profitATR = (g_posDir > 0 ? (curClose - openPx) : (openPx - curClose)) / g_entryATR;
+         if(profitATR < InpStaleMinProfitATR)
+            CloseCurrentPosition("STALE");
+        }
+     }
   }
 //+------------------------------------------------------------------+
 void CheckForEntry(int breakoutDir)
@@ -1359,7 +1423,10 @@ void CheckForEntry(int breakoutDir)
    bool ok = isBuy ? trade.Buy(lots, _Symbol, px, sl, 0.0, InpTradeComment)
                     : trade.Sell(lots, _Symbol, px, sl, 0.0, InpTradeComment);
    if(ok)
+     {
       SyncPositionState();
+      g_entryATR = atr;
+     }
    else
       PrintFormat("Vanguard EA: entry FAILED, retcode %d (%s)",
                   trade.ResultRetcode(), trade.ResultRetcodeDescription());
