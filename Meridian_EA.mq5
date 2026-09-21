@@ -128,7 +128,7 @@ double   g_atrBuf[];
 //+------------------------------------------------------------------+
 bool IsNewBar()
   {
-   datetime t = iTime(_Symbol, PERIOD_CURRENT, 0);
+   datetime t = iTime(_Symbol, PERIOD_M5, 0);
    if(t == g_lastBarTime) return(false);
    g_lastBarTime = t;
    return(true);
@@ -174,7 +174,7 @@ void ComputeWilderATR(double &out[], int period)
    // start_pos=1: r[0] is the last CLOSED bar (shift 1), never the still-
    // forming current bar - matches this project's shift=1 convention
    // (engine.py: "index i means bar i has just closed") everywhere else.
-   int got = CopyRates(_Symbol, PERIOD_CURRENT, 1, MathMax(period * 3, 200), r);
+   int got = CopyRates(_Symbol, PERIOD_M5, 1, MathMax(period * 3, 200), r);
    if(got < need) { ArrayResize(out, 1); out[0] = 0.0; return; }
    ArraySetAsSeries(out, true);
    ArrayResize(out, got);
@@ -218,7 +218,7 @@ datetime DayStart(datetime t)
 //+------------------------------------------------------------------+
 void SeedVWAP()
   {
-   datetime last = iTime(_Symbol, PERIOD_CURRENT, 1);
+   datetime last = iTime(_Symbol, PERIOD_M5, 1);
    if(last == 0) return;
    datetime day = DayStart(last);
    g_vwapDay = day;
@@ -226,21 +226,21 @@ void SeedVWAP()
    g_vwapCumVol = 0.0;
    for(int shift = 1; shift < 400; shift++)
      {
-      datetime t = iTime(_Symbol, PERIOD_CURRENT, shift);
+      datetime t = iTime(_Symbol, PERIOD_M5, shift);
       if(t == 0 || DayStart(t) != day) break;
-      double typical = (iHigh(_Symbol, PERIOD_CURRENT, shift) +
-                         iLow(_Symbol, PERIOD_CURRENT, shift) +
-                         iClose(_Symbol, PERIOD_CURRENT, shift)) / 3.0;
-      double vol = (double)iTickVolume(_Symbol, PERIOD_CURRENT, shift);
+      double typical = (iHigh(_Symbol, PERIOD_M5, shift) +
+                         iLow(_Symbol, PERIOD_M5, shift) +
+                         iClose(_Symbol, PERIOD_M5, shift)) / 3.0;
+      double vol = (double)iTickVolume(_Symbol, PERIOD_M5, shift);
       g_vwapCumPV  += typical * vol;
       g_vwapCumVol += vol;
      }
-   g_vwapValue = (g_vwapCumVol > 0.0) ? g_vwapCumPV / g_vwapCumVol : iClose(_Symbol, PERIOD_CURRENT, 1);
+   g_vwapValue = (g_vwapCumVol > 0.0) ? g_vwapCumPV / g_vwapCumVol : iClose(_Symbol, PERIOD_M5, 1);
   }
 //+------------------------------------------------------------------+
 void UpdateVWAP()
   {
-   datetime t1 = iTime(_Symbol, PERIOD_CURRENT, 1);
+   datetime t1 = iTime(_Symbol, PERIOD_M5, 1);
    if(t1 == 0) return;
    datetime day = DayStart(t1);
    if(day != g_vwapDay)
@@ -248,12 +248,12 @@ void UpdateVWAP()
       SeedVWAP();
       return;
      }
-   double typical = (iHigh(_Symbol, PERIOD_CURRENT, 1) + iLow(_Symbol, PERIOD_CURRENT, 1) +
-                      iClose(_Symbol, PERIOD_CURRENT, 1)) / 3.0;
-   double vol = (double)iTickVolume(_Symbol, PERIOD_CURRENT, 1);
+   double typical = (iHigh(_Symbol, PERIOD_M5, 1) + iLow(_Symbol, PERIOD_M5, 1) +
+                      iClose(_Symbol, PERIOD_M5, 1)) / 3.0;
+   double vol = (double)iTickVolume(_Symbol, PERIOD_M5, 1);
    g_vwapCumPV  += typical * vol;
    g_vwapCumVol += vol;
-   g_vwapValue = (g_vwapCumVol > 0.0) ? g_vwapCumPV / g_vwapCumVol : iClose(_Symbol, PERIOD_CURRENT, 1);
+   g_vwapValue = (g_vwapCumVol > 0.0) ? g_vwapCumPV / g_vwapCumVol : iClose(_Symbol, PERIOD_M5, 1);
   }
 //+------------------------------------------------------------------+
 bool MA(int handle, int shift, double &value)
@@ -347,7 +347,7 @@ void CheckForEntry()
    int dir;
    if(!DetectCross(dir)) return;
 
-   double m150_1, close1 = iClose(_Symbol, PERIOD_CURRENT, 1);
+   double m150_1, close1 = iClose(_Symbol, PERIOD_M5, 1);
    if(!MA(h150, 1, m150_1)) return;
 
    bool isBuy = (dir > 0);
@@ -377,13 +377,29 @@ void CheckForEntry()
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   // Every number in this EA's header (the validated M5 backtest) was
+   // calibrated specifically on M5 bars - all internal calls already use
+   // PERIOD_M5 explicitly (not PERIOD_CURRENT), so this only prevents a
+   // chart-attach mistake (e.g. dropped on an M15/H1 chart by habit) from
+   // running silently: the EA would still fetch and trade M5 data
+   // correctly regardless of the chart it's on, but a mismatched chart
+   // period is exactly the kind of easy-to-miss setup error this project
+   // has hit before (ExportBarData.mq5's PERIOD_M5-default bug earlier
+   // this session) - refuse to load rather than risk it going unnoticed.
+   if(_Period != PERIOD_M5)
+     {
+      PrintFormat("Meridian EA: this system is calibrated for M5 only - attach it to an M5 chart "
+                  "(currently on period %d)", _Period);
+      return(INIT_FAILED);
+     }
+
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
 
-   h21  = iMA(_Symbol, PERIOD_CURRENT, InpP21,  0, InpMAMethod, PRICE_CLOSE);
-   h50  = iMA(_Symbol, PERIOD_CURRENT, InpP50,  0, InpMAMethod, PRICE_CLOSE);
-   h150 = iMA(_Symbol, PERIOD_CURRENT, InpP150, 0, InpMAMethod, PRICE_CLOSE);
+   h21  = iMA(_Symbol, PERIOD_M5, InpP21,  0, InpMAMethod, PRICE_CLOSE);
+   h50  = iMA(_Symbol, PERIOD_M5, InpP50,  0, InpMAMethod, PRICE_CLOSE);
+   h150 = iMA(_Symbol, PERIOD_M5, InpP150, 0, InpMAMethod, PRICE_CLOSE);
    if(h21 == INVALID_HANDLE || h50 == INVALID_HANDLE || h150 == INVALID_HANDLE)
      {
       Print("Meridian EA: indicator handle creation failed");
