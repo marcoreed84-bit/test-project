@@ -23,10 +23,21 @@ than reimplemented, but used here as the TRIGGER itself (buy off
 sr_lo, sell off sr_hi), not as a filter on a different signal.
 
 Exit: target = the OPPOSITE level, safety stop = re-break past the
-touched level by SAFETY_ATR, time cap = MAX_HOLD_BARS (200 bars /
-~16.7h, matching this session's own finding that the top winning
-Meridian trades had a median natural leg length of ~16.7h - reused
-as a principled cap, not an arbitrary one). Whichever comes first.
+touched level by SAFETY_ATR, time cap = MAX_HOLD_BARS.
+
+CORRECTION: the original 200-bar (~16.7h) cap was a real mistake -
+reused from an unrelated number (median natural LEG length of
+Meridian's top TREND trades) without checking it against what THIS
+construction actually needs. Diagnostic on the original run: median
+hold for winning trades was EXACTLY 200 bars - the cap itself - and
+200 of 207 "wins" (96.6%) were timeouts, not real target hits; only
+7 of 1487 trades (0.5%) ever actually reached the opposite S/R level.
+The median real range width (sr_hi - sr_lo) is $64.99 - a genuine,
+tradeable distance (consistent with the ~$164 support-to-resistance
+move in the user's own chart) - but 16.7 hours is nowhere near enough
+time for gold to travel it; the user's own chart example took ~6 days.
+Fixed below with a realistic multi-day cap swept properly instead of
+guessed once. Whichever exit (target/stop/timeout) comes first.
 Correct single-position sequencing (buy/sell rejection triggers are
 NOT inherently alternating like an MA cross, so this is enforced
 explicitly).
@@ -87,10 +98,11 @@ def build_range_bounce_triggers(ctx):
     return events
 
 
-def sim_range_trade(events, close, high, low, spread, atr, sr_hi, sr_lo, n):
+def sim_range_trade(events, close, high, low, spread, atr, sr_hi, sr_lo, n, max_hold_bars=MAX_HOLD_BARS):
     trades = []
     last_exit = -1
     skipped = 0
+    timeouts = 0
     for i, d in events:
         if i < last_exit:
             skipped += 1
@@ -107,7 +119,7 @@ def sim_range_trade(events, close, high, low, spread, atr, sr_hi, sr_lo, n):
         sc = spread[fill_i] * POINT
         entry = raw + sc if is_buy else raw - sc
         sl = touched_lvl - SAFETY_ATR * atr[i] if is_buy else touched_lvl + SAFETY_ATR * atr[i]
-        cap = min(fill_i + MAX_HOLD_BARS, n)
+        cap = min(fill_i + max_hold_bars, n)
         exit_bar, exit_px = None, None
         for kk in range(fill_i, cap):
             if is_buy:
@@ -119,10 +131,55 @@ def sim_range_trade(events, close, high, low, spread, atr, sr_hi, sr_lo, n):
         if exit_bar is None:
             exit_bar = cap - 1 if cap > fill_i else fill_i
             exit_px = close[min(exit_bar, n - 1)]
+            timeouts += 1
         pnl = (exit_px - entry) if is_buy else (entry - exit_px)
         trades.append((i, exit_bar, pnl, is_buy))
         last_exit = exit_bar
-    return trades, skipped
+    return trades, skipped, timeouts
+
+
+def evaluate(label, events, close, high, low, spread, atr, sr_hi, sr_lo, n, time, max_hold_bars,
+             run_control=False):
+    print(f"\n--- {label} ---")
+    trades, skipped, timeouts = sim_range_trade(events, close, high, low, spread, atr, sr_hi, sr_lo, n,
+                                                 max_hold_bars=max_hold_bars)
+    if not trades:
+        print("  0 trades"); return None
+    pnls = np.array([t[2] for t in trades])
+    entries = np.array([t[0] for t in trades])
+    holds = np.array([t[1] - t[0] for t in trades])
+    gw = pnls[pnls > 0].sum(); gl = -pnls[pnls <= 0].sum()
+    pf = gw / gl if gl > 0 else float("inf")
+    closed_dd, float_dd, net = drawdown_stats(trades, close, spread, n)
+    print(f"  n={len(trades)} (skipped {skipped} overlaps, {timeouts} timeouts={100*timeouts/len(trades):.1f}%) "
+          f"net={net:.2f} win%={100*(pnls>0).mean():.1f} pf={pf:.3f} "
+          f"median_hold={np.median(holds)*5/60:.1f}h mean_hold={holds.mean()*5/60:.1f}h")
+    if net > 0:
+        print(f"  closedDD={closed_dd:.2f} ({100*closed_dd/net:.1f}%)  floatDD={float_dd:.2f} ({100*float_dd/net:.1f}%)")
+
+    edges = np.linspace(0, n, 6).astype(int)
+    pos = 0
+    for b in range(5):
+        lo, hi = edges[b], edges[b + 1]
+        m = (entries >= lo) & (entries < hi)
+        if m.sum() == 0: continue
+        if pnls[m].sum() > 0: pos += 1
+    print(f"  walk-forward: {pos}/5 blocks positive")
+
+    if run_control:
+        rng = np.random.default_rng(0)
+        random_nets = []
+        for s in range(N_RANDOM_SEEDS):
+            rdirs = rng.choice([1.0, -1.0], size=len(events))
+            rev = [(i, d) for (i, _), d in zip(events, rdirs)]
+            rev.sort(key=lambda e: e[0])
+            trades_r, _, _ = sim_range_trade(rev, close, high, low, spread, atr, sr_hi, sr_lo, n,
+                                              max_hold_bars=max_hold_bars)
+            random_nets.append(sum(t[2] for t in trades_r) if trades_r else 0.0)
+        random_nets = np.array(random_nets)
+        pct = 100 * (random_nets < net).mean()
+        print(f"  random-direction percentile={pct:.1f} (null mean={random_nets.mean():.2f})")
+    return dict(label=label, n=len(trades), net=net, pf=pf, timeouts=timeouts)
 
 
 if __name__ == "__main__":
@@ -137,46 +194,26 @@ if __name__ == "__main__":
     events = build_range_bounce_triggers(ctx)
     print(f"n_bars={n} (~{n/288:.0f} trading days), {len(events)} support/resistance "
           f"rejection triggers -> {len(events)/(n/288):.3f}/day\n")
+    print("for reference, the original (broken) 16.7h cap gave net=-547.69, "
+          "96.6% of 'wins' were actually timeouts, only 0.5% of all trades reached the real target\n")
 
-    trades, skipped = sim_range_trade(events, close, high, low, spread, atr, sr_hi, sr_lo, n)
     print("=" * 70)
-    if not trades:
-        print("0 trades"); sys.exit(0)
-    pnls = np.array([t[2] for t in trades])
-    entries = np.array([t[0] for t in trades])
-    holds = np.array([t[1] - t[0] for t in trades])
-    gw = pnls[pnls > 0].sum(); gl = -pnls[pnls <= 0].sum()
-    pf = gw / gl if gl > 0 else float("inf")
-    closed_dd, float_dd, net = drawdown_stats(trades, close, spread, n)
-    print(f"n={len(trades)} (skipped {skipped} overlaps) net={net:.2f} win%={100*(pnls>0).mean():.1f} "
-          f"pf={pf:.3f} median_hold={np.median(holds)*5:.0f}min mean_hold={holds.mean()*5/60:.1f}h")
-    if net > 0:
-        print(f"closedDD={closed_dd:.2f} ({100*closed_dd/net:.1f}%)  floatDD={float_dd:.2f} ({100*float_dd/net:.1f}%)")
+    print("realistic multi-day hold caps:")
+    results = []
+    # bars: 3d=864, 7d=2016, 14d=4032, 21d=6048, 30d=8640 (288 M5 bars/trading day)
+    for days, bars in ((3, 864), (7, 2016), (14, 4032), (21, 6048), (30, 8640)):
+        r = evaluate(f"max_hold={days}d ({bars} bars)", events, close, high, low, spread, atr,
+                     sr_hi, sr_lo, n, time, bars)
+        if r: results.append(r)
 
-    edges = np.linspace(0, n, 6).astype(int)
-    pos = 0
-    print("\nwalk-forward:")
-    for b in range(5):
-        lo, hi = edges[b], edges[b + 1]
-        m = (entries >= lo) & (entries < hi)
-        nb = m.sum()
-        if nb == 0:
-            print(f"  block {b+1}: 0 trades"); continue
-        netb = pnls[m].sum()
-        if netb > 0: pos += 1
-        t0 = pd.to_datetime(time[lo]).date(); t1 = pd.to_datetime(time[min(hi, n-1)]).date()
-        print(f"  block {b+1} [{t0}->{t1}]: n={nb} net={netb:.2f} win%={100*(pnls[m]>0).mean():.1f}")
-    print(f"  -> positive in {pos}/5 blocks")
+    print("\n" + "=" * 70)
+    print("SUMMARY:")
+    for r in sorted(results, key=lambda r: -r["net"]):
+        print(f"  {r['label']:<24} net={r['net']:9.2f} pf={r['pf']:.3f} timeouts={100*r['timeouts']/r['n']:5.1f}%  n={r['n']}")
 
-    print(f"\nrandom-direction control (real net={net:.2f}):")
-    rng = np.random.default_rng(0)
-    random_nets = []
-    for s in range(N_RANDOM_SEEDS):
-        rdirs = rng.choice([1.0, -1.0], size=len(events))
-        rev = [(i, d) for (i, _), d in zip(events, rdirs)]
-        rev.sort(key=lambda e: e[0])
-        trades_r, _ = sim_range_trade(rev, close, high, low, spread, atr, sr_hi, sr_lo, n)
-        random_nets.append(sum(t[2] for t in trades_r) if trades_r else 0.0)
-    random_nets = np.array(random_nets)
-    pct = 100 * (random_nets < net).mean()
-    print(f"null mean={random_nets.mean():.2f} std={random_nets.std():.2f} -> real net percentile={pct:.1f}")
+    day_bars = {(f"max_hold={d}d ({b} bars)"): b for d, b in ((3, 864), (7, 2016), (14, 4032), (21, 6048), (30, 8640))}
+    best = max(results, key=lambda r: r["net"]) if results else None
+    if best:
+        print(f"\nfull random-direction control on best ({best['label']}):")
+        evaluate(best["label"], events, close, high, low, spread, atr,
+                 sr_hi, sr_lo, n, time, day_bars[best["label"]], run_control=True)
