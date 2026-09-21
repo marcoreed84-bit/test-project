@@ -92,19 +92,48 @@
 //|  CheckForEntry() via SRDistance()) PLUS tightening the safety stop  |
 //|  2.5xATR (was 3.0, itself swept - see meridian_dd_confluence_test.py|
 //|  for the full grid) - net AND drawdown improved TOGETHER, not a     |
-//|  tradeoff: n=2539, net=3420.71 (was 3184.61), PF=1.356 (was 1.300), |
-//|  closed DD 9.8% of net (was 10.1%), floating DD 11.1% (was 12.3%),  |
-//|  random-direction percentile 99.3, IS=601.84/OOS=2818.87 both       |
-//|  positive, and walk-forward went 5/5 BLOCKS POSITIVE - the first    |
-//|  construction all session to clear every block, including the      |
-//|  previously-always-losing 2023 Jan-Sep block (now +6.99, barely     |
-//|  positive but real). This is a genuine, modest improvement, not a   |
-//|  fix for the real 36.78% equity DD the MT5 test found - that number |
-//|  was against a small fixed account carrying 0.01-lot ATR stops, and |
-//|  a ~10% relative cut in floating DD is real but far short of        |
-//|  closing that gap. NOT YET RUN THROUGH A REAL MT5 STRATEGY TESTER   |
-//|  at these new settings - needs the same real-test step v1.00 got    |
-//|  before this can be trusted the way that earlier number was.        |
+//|  tradeoff (Python numbers here used the mislabeled 250-SMA line,    |
+//|  see v1.02 below - directionally same conclusion, exact figures     |
+//|  superseded): n=2539, net=3420.71 (was 3184.61), PF=1.356 (was      |
+//|  1.300), floating DD 11.1% (was 12.3%), walk-forward 5/5 BLOCKS     |
+//|  POSITIVE - the first construction all session to clear every       |
+//|  block, including the previously-always-losing 2023 Jan-Sep block   |
+//|  (now +6.99, barely positive but real).                             |
+//|                                                                     |
+//|  REAL MT5 STRATEGY TESTER RESULT, v1.01 (2026-09-21, same setup as   |
+//|  v1.00's real test): 2641 trades, PF 1.2824 (vs v1.00's 1.2437),    |
+//|  net +51394.84 ZAR (vs +44899.83), Balance DD Maximal 29.00% (vs    |
+//|  35.96%), Equity DD Maximal 29.82% (vs 36.78%), Sharpe 2.055 (vs    |
+//|  1.756) - confirms the Python direction on BOTH net and drawdown,   |
+//|  and the real cut (36.78%->29.82%, ~19% relative) beat the Python   |
+//|  model's own ~10% prediction. Same worst-drawdown window (peak      |
+//|  2023-06-09, trough 2024-11-06) but shallower (6449.51 vs 8094.79). |
+//|  Real but still not enough - this account is thin relative to the   |
+//|  position risk regardless of signal quality (see v1.00 section).    |
+//|                                                                     |
+//|  v1.02 - MISLABELING FOUND AND TURNED INTO A REAL IMPROVEMENT:      |
+//|  research/aurelius/engine.py's build_context() ctx['m150'] is       |
+//|  Aurelius's REAL, validated p150=250/m150=SMA default (a genuine,   |
+//|  documented 2026-09-07 change in Aurelius_EA.mq5 itself, not a bug  |
+//|  there) - NOT a 150 EMA as 6 Meridian research scripts assumed      |
+//|  while quoting the v1.01 Python numbers above. This file's own code |
+//|  was never affected (always computed a literal 150 EMA). Checked    |
+//|  both explicitly (meridian_ma_variant_test.py: EMA/SMA/SMMA x       |
+//|  close/open, 6-way sweep - EMA-of-close, i.e. what v1.01 shipped,   |
+//|  won clearly: net=3253.93 floatDD%=14.9 vs SMA/SMMA's 12.9-39.6%)   |
+//|  THEN swept period x method for the confirm line specifically       |
+//|  (meridian_slow_confirm_sweep_test.py) - SMA beat EMA at every      |
+//|  period tested (150/200/250/300), and 250 SMA (Aurelius's own real  |
+//|  choice) won overall: net=3432.72, PF=1.357 (best of the session),  |
+//|  floating DD=11.1% (best), walk-forward 5/5, random-direction       |
+//|  percentile=100.0 (the single strongest statistical score of the    |
+//|  whole session). Adopted: InpP150/InpMAMethod split into            |
+//|  InpFastMAMethod (21/50, still EMA) and InpPConfirm=250/             |
+//|  InpConfirmMAMethod=SMA (the former "150" line, renamed to avoid    |
+//|  repeating the exact confusion that caused this). NOT YET RUN       |
+//|  THROUGH A REAL MT5 STRATEGY TESTER AT THESE SETTINGS - needs the   |
+//|  same real-test step v1.00 and v1.01 both got before this can be    |
+//|  trusted the way those numbers were.                                |
 //|                                                                     |
 //|  KNOWN GAPS (flagged, not fixed, so they don't get lost):          |
 //|   - No visual panel/wallpaper - deliberately out of scope for a    |
@@ -120,17 +149,19 @@
 //|     real Wilder smoothing. Matches engine.py's wilder_atr exactly. |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-input group "=== Signal: 21/50 cross, 150 + VWAP + S/R confirmed ==="
+input group "=== Signal: 21/50 cross, slow-confirm + VWAP + S/R confirmed ==="
 input int    InpP21             = 21;
 input int    InpP50             = 50;
-input int    InpP150            = 150;
-input ENUM_MA_METHOD InpMAMethod = MODE_EMA;
+input ENUM_MA_METHOD InpFastMAMethod = MODE_EMA;   // 21/50 method - EMA confirmed best, see header
+input int    InpPConfirm        = 250;      // v1.02: was 150 (named InpP150) - see header, SMA beat EMA
+                                             // at every period tested, 250 was the best of those
+input ENUM_MA_METHOD InpConfirmMAMethod = MODE_SMA; // v1.02: was MODE_EMA (shared with 21/50) - see header
 input int    InpSRDays          = 3;        // trailing completed D1 bars checked for the nearest level
 input double InpMinSRDistATR    = 0.50;     // reject entries this close (xATR) to that level - see header
 
@@ -482,9 +513,9 @@ int OnInit()
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
 
-   h21  = iMA(_Symbol, PERIOD_M5, InpP21,  0, InpMAMethod, PRICE_CLOSE);
-   h50  = iMA(_Symbol, PERIOD_M5, InpP50,  0, InpMAMethod, PRICE_CLOSE);
-   h150 = iMA(_Symbol, PERIOD_M5, InpP150, 0, InpMAMethod, PRICE_CLOSE);
+   h21  = iMA(_Symbol, PERIOD_M5, InpP21,      0, InpFastMAMethod,    PRICE_CLOSE);
+   h50  = iMA(_Symbol, PERIOD_M5, InpP50,      0, InpFastMAMethod,    PRICE_CLOSE);
+   h150 = iMA(_Symbol, PERIOD_M5, InpPConfirm, 0, InpConfirmMAMethod, PRICE_CLOSE);
    if(h21 == INVALID_HANDLE || h50 == INVALID_HANDLE || h150 == INVALID_HANDLE)
      {
       Print("Meridian EA: indicator handle creation failed");
