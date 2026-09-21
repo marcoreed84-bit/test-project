@@ -99,9 +99,28 @@
 //|  no further entries from it until its window reopens and freezes     |
 //|  a brand new one. NOT yet re-tested on a real MT5 run - needs that    |
 //|  before the overtrading is confirmed fixed, not just reasoned about. |
+//|                                                                    |
+//|  v1.03 ADDS InpMaxSetupWatchHours=4.25 (real-data calibrated): v1.02 |
+//|  still overtraded on the user's real MT5 run (360 trades vs the      |
+//|  real EA's 169, still net-negative, 82.55% DD) because the one-      |
+//|  trade-per-range fix only stopped WITHIN-range repeat-firing, not     |
+//|  the deeper issue - the retracement zone was being watched for the   |
+//|  FULL ~21h until the session reopened, while the real EA is far      |
+//|  more time-limited. Checked directly against the real 8-month        |
+//|  MSG3-only report (159 session-days with real M5 bar coverage):      |
+//|  EVERY real entry happened within 4.08h of the session closing -     |
+//|  none later. Cross-checking my own zone-touch trigger against real   |
+//|  per-day outcomes: with no time limit, precision (of the days my     |
+//|  trigger fires, how many the real EA also traded) was only 48%;      |
+//|  with a 4.25h cutoff, precision rises to 76%, recall 67%. Real,      |
+//|  measured against actual day-by-day data - not a fresh guess. Not    |
+//|  a perfect match (24% of my fires still don't correspond to a real   |
+//|  trade, and 33% of real trades aren't found by this zone logic at    |
+//|  all - a different/additional trigger likely exists) - still needs   |
+//|  a real MT5 re-test before trusting the overtrading is resolved.     |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.02"
+#property version   "1.03"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -166,6 +185,8 @@ input double InpStructBufferATR   = 0.10;
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
+input double InpMaxSetupWatchHours = 4.25;    // v1.03 real-data fix - see header. Every real MSG3 entry in the
+                                               // 8-month report happened within 4.08h of session close - none later.
 
 input group "==== Notifications ==="
 input bool   InpPushNotifications = true;
@@ -418,9 +439,18 @@ void UpdateSessionRanges(datetime barTime, double barHigh, double barLow)
 //+------------------------------------------------------------------+
 int CheckSessionSetups(double close1, double high1, double low1, double atr, int &sesIdx, double &slPrice)
   {
+   datetime barTime = iTime(_Symbol, PERIOD_M5, 1);
    for(int i = 0; i < 4; i++)
      {
       if(!g_sesEnable[i] || !g_sesRangeValid[i] || g_sesRangeTraded[i]) continue;
+      //--- v1.03 real-data fix (see header): the watch window expires
+      //--- InpMaxSetupWatchHours after the range froze - retire it
+      //--- rather than leaving it re-armable for the rest of the day.
+      if(barTime - g_sesRangeEndTime[i] > (datetime)(InpMaxSetupWatchHours * 3600.0))
+        {
+         g_sesBiasDir[i] = 0;
+         continue;
+        }
       double H = g_sesRangeHigh[i], L = g_sesRangeLow[i];
       double rng = H - L;
       if(rng <= 0.0) continue;
