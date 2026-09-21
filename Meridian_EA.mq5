@@ -38,20 +38,35 @@
 //|  built): Aurelius's own real, LIVE MT5 Strategy Tester result      |
 //|  (see Aurelius_EA.mq5's header) is PF 1.56 on real-tick execution  |
 //|  (Python backtest PF 1.51) - both meaningfully higher than this    |
-//|  system's 1.30. Aurelius's real documented weakness is a 27.69%    |
-//|  equity drawdown (a position floated ~$1184 underwater once) vs    |
-//|  9.76% balance drawdown - a known, still-being-worked-on risk.     |
-//|  This system's own drawdown numbers above are smaller in absolute  |
-//|  dollars, but it has NONE of Aurelius's defensive layers (no       |
-//|  momentum filter, no pullback confirmation, no volume/S-R checks)  |
-//|  and has NEVER been run through a real MT5 Strategy Tester - only  |
-//|  the Python backtest above. Verdict at build time: this does NOT   |
-//|  look better than Aurelius on the numbers available. It is a real, |
-//|  bug-fixed, statistically legitimate standalone signal - simpler   |
-//|  and more mechanical than Aurelius, not superior to it. Needs the  |
-//|  same real-money-adjacent validation path Aurelius already went    |
-//|  through (real Strategy Tester run, demo paper-trading) before any |
-//|  stronger claim would be honest.                                   |
+//|  system's 1.30 (Python) / 1.244 (real, see below). Aurelius's real |
+//|  documented weakness is a 27.69% equity drawdown (a position       |
+//|  floated ~$1184 underwater once) vs 9.76% balance drawdown - a     |
+//|  known, still-being-worked-on risk. Verdict at build time was that |
+//|  this does NOT look better than Aurelius, and the real test below  |
+//|  CONFIRMS that rather than softening it - real drawdown here is    |
+//|  worse than Aurelius's own documented weak point, not better.      |
+//|                                                                    |
+//|  REAL MT5 STRATEGY TESTER RESULT (2026-09-21, XM Global GOLD#, M5, |
+//|  2023.01.01-2026.09.19, 20000 ZAR deposit, InpLots=0.01, real-tick |
+//|  execution, 84% real-tick history quality): 2512 trades, PF        |
+//|  1.243712 (vs Python's 1.300 - close agreement, confirms the       |
+//|  signal is real, not a backtest artifact), win rate 26.75% (vs     |
+//|  Python's 26.0%), avg hold 4h13m, net +44899.83 ZAR. BUT: Balance  |
+//|  Drawdown Maximal 35.96% (8094.79), Equity Drawdown Maximal        |
+//|  36.78% (8324.51) - WORSE than Aurelius's real 27.69%. Reconciled  |
+//|  the deal-by-deal balance curve: peak was 2023-06-09, trough was   |
+//|  2024-11-06 - a 17-MONTH drawdown before recovery, not one bad     |
+//|  trade. Yearly net: 2023 +20365, 2024 -2799 (the losing year the   |
+//|  drawdown traces to), 2025 +10218, 2026 +37116. The 0.01-lot /     |
+//|  3.0xATR-stop design was never checked against account size before |
+//|  this ran - a 20000 ZAR (~$1100) account carrying gold-CFD ATR     |
+//|  stops is thin relative to this system's per-trade risk, which is  |
+//|  a real contributor to the severity here, not just the signal      |
+//|  itself. VERDICT UNCHANGED, REINFORCED: not better than Aurelius,  |
+//|  real but not ready to trade as-is - needs either a materially     |
+//|  larger account, a tighter/scaled stop, or a real defensive filter |
+//|  layer (the thing Aurelius has that this doesn't) before more than |
+//|  demo exposure would be responsible.                               |
 //|                                                                    |
 //|  KNOWN v1.00 GAPS (flagged, not fixed, so they don't get lost):    |
 //|   - No visual panel/wallpaper - deliberately out of scope for a    |
