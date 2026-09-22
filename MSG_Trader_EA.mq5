@@ -424,9 +424,49 @@
 //|  between - which this file's strictly staged logic cannot produce. Most likely fast bars              |
 //|  jumping through a level between ticks; not investigated here, and too few to affect any              |
 //|  of the numbers above.                                                                                 |
+//|                                                                    |
+//|  v1.11 REAL M1 RE-TEST, clean MSG3-only config (Backtest_11): net +17,548.30 (v1.10 was                |
+//|  +20,731.20, -15.4%), PF 1.655 (v1.10: 1.804) - the reduction the v1.11 header predicted in            |
+//|  advance, not a surprise. CONFIRMED the static lock-in is actually running, not a stale                |
+//|  binary still on the ratchet: measured the post-TP2 stop LEVEL directly from each exit                 |
+//|  order's own price (not the fill, which carries slippage noise) for every 3-leg trade in               |
+//|  this run - median 0.994R, and several trades exit at 1.02-1.36R, which a ratchet cannot               |
+//|  ever produce (its stop is mathematically bounded below the peak, which itself never                   |
+//|  exceeds 2.0R, so a ratchet stop can never reach 1.0R let alone exceed it). The mechanism               |
+//|  fix works as designed.                                                                                 |
+//|                                                                    |
+//|  BUT A DIFFERENT, ALREADY-KNOWN BUG RESURFACED: the slowest trade in Backtest_11 ran                    |
+//|  80:50:08 and alone contributed $7,027.88 - about 40% of the run's entire net profit from               |
+//|  one trade. This is NOT a new failure mode - it is the identical weekend-gap interaction               |
+//|  first found in v1.07->v1.08 (see that header entry above): entry Thursday 16:12:06, whose              |
+//|  48h nominal InpMaxHoldHours deadline lands Saturday 16:12:06 (market closed), so the check             |
+//|  cannot fire until the first tick after Monday's reopen. v1.08 closed this gap by tightening            |
+//|  InpMaxHoldHours to 6h - but v1.10's real A/B test proved that blanket tightening costs far             |
+//|  more in cut-short winners than it saves, and reverted it. Reverting to 48h necessarily                 |
+//|  reopened this specific weekend-gap door too; that was a known, accepted side effect of the             |
+//|  v1.10 decision, not an oversight, and it has now been observed for real.                               |
+//|                                                                    |
+//|  v1.12 FIXES THE WEEKEND GAP DIRECTLY instead of re-tightening InpMaxHoldHours a second time             |
+//|  (already disproven as the right lever by v1.10's A/B test). Added a narrow guard: any still-           |
+//|  open position gets flattened in the last InpWeekendGuardMinutes (default 30) before the                |
+//|  symbol's own Friday trading session closes (read via SymbolInfoSessionTrade, not a hardcoded            |
+//|  hour, so it follows this broker's actual schedule), rather than being left to sit through the          |
+//|  weekend and have its InpMaxHoldHours deadline miss by dozens of hours. This targets only the           |
+//|  specific failure mode observed - a position still open minutes before the weekly close - and           |
+//|  leaves InpMaxHoldHours=48 completely untouched for every other trade, unlike v1.08's blanket           |
+//|  cut which touched all trades under 48h regardless of when in the week they occurred. Given real        |
+//|  M1 trades resolve in a median of 0.68h and a max of 5.16h, this guard should essentially never          |
+//|  fire on a normal trade - only on a pathological grind exactly like this one.                            |
+//|                                                                    |
+//|  INFERRED, NOT MEASURED: there is no real data on how the real EA itself handles a trade still           |
+//|  open into a weekend, because none of its 108+86 observed real trades ever ran anywhere near             |
+//|  long enough to reach one. InpWeekendGuardMinutes=30 is a reasonable defensive buffer, not a             |
+//|  calibrated value. NOT VALIDATED BY A REAL BACKTEST - the next real run needs to confirm this            |
+//|  outlier is actually gone and check what, if anything, the guard costs (expected: negligible,            |
+//|  since it should almost never fire).                                                                     |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.11"
+#property version   "1.12"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -463,6 +503,10 @@ input double InpTP_RR             = 1.5;
 input int    InpMaxHoldHours      = 48;       // v1.10: REVERTED from v1.08's 6 - see header. Real A/B test on
                                                // identical M1 configs proved 48 beats 6 (net +20,731 vs +14,805,
                                                // PF 1.80 vs 1.56). Matches the real EA's own actual shipped value.
+input int    InpWeekendGuardMinutes = 30;     // v1.12: INFERRED, not measured - see header. Flattens any still-
+                                               // open position this many minutes before the symbol's Friday
+                                               // close, so a slow grind can't sit through the weekend gap and
+                                               // miss its InpMaxHoldHours deadline by dozens of hours. 0 disables.
 
 input group "==== Sessions (GMT) ==="
 input bool   InpMsg1Enable        = true;
@@ -705,6 +749,28 @@ bool HourInWindow(int hour, int startH, int endH)
    if(startH == endH) return(false);
    if(startH < endH) return(hour >= startH && hour < endH);
    return(hour >= startH || hour < endH);   // wraps midnight, e.g. 22..0
+  }
+//+------------------------------------------------------------------+
+//| v1.12: minutes remaining until the symbol's own Friday trading    |
+//| session closes, or -1 if it's not Friday or the session can't be  |
+//| read. Uses SymbolInfoSessionTrade (the broker's actual schedule)  |
+//| rather than a hardcoded close hour - both it and TimeCurrent()    |
+//| are in server time, so no GMT conversion is needed here.          |
+//+------------------------------------------------------------------+
+int MinutesToFridayClose()
+  {
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   if(dt.day_of_week != FRIDAY) return(-1);
+   datetime from, to;
+   if(!SymbolInfoSessionTrade(_Symbol, FRIDAY, 0, from, to)) return(-1);
+   MqlDateTime todt;
+   TimeToStruct(to, todt);
+   int closeSec = todt.hour * 3600 + todt.min * 60 + todt.sec;
+   int nowSec   = dt.hour * 3600 + dt.min * 60 + dt.sec;
+   int diffSec  = closeSec - nowSec;
+   if(diffSec < 0) return(-1);   // already past this session - not the pre-close window
+   return(diffSec / 60);
   }
 //+------------------------------------------------------------------+
 void LoadSessionConfig()
@@ -971,6 +1037,21 @@ void ManageOpenPosition()
      {
       trade.PositionClose(g_ticket);
       return;
+     }
+
+   //--- v1.12 weekend-gap guard (INFERRED - see header): flatten a still-open position
+   //--- shortly before the weekly close instead of letting it sit through the weekend
+   //--- gap, where InpMaxHoldHours's nominal deadline can miss by dozens of hours (the
+   //--- exact 80.8h failure mode in the header). Only bites in the closing minutes of
+   //--- Friday, so it does not touch the InpMaxHoldHours=48 calibration itself.
+   if(InpWeekendGuardMinutes > 0)
+     {
+      int minsToClose = MinutesToFridayClose();
+      if(minsToClose >= 0 && minsToClose <= InpWeekendGuardMinutes)
+        {
+         trade.PositionClose(g_ticket);
+         return;
+        }
      }
 
    if(!InpScaleOut || InpTPMode != 0 || g_posRisk <= 0.0) return;
