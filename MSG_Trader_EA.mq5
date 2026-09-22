@@ -137,9 +137,32 @@
 //|  price. Still needs a real MT5 re-test - if win rate/PF come back    |
 //|  in line with the real report, this is the fix; if not, the entry    |
 //|  price itself (not just the stop) may also differ from real.         |
+//|                                                                    |
+//|  v1.04 REAL RE-TEST (MSG3-only, matching the real report's own       |
+//|  config directly): net +2,199.84 (real: +18,145.57), PF 1.12 (real   |
+//|  1.82), win rate 57.55% (real 71.0%) - genuinely profitable now,      |
+//|  and trade SHAPE matches closely (avg win 345.66 vs real 335.18,      |
+//|  avg loss -419.67 vs real -450.53, avg hold 1:02:29 vs real 1:03:01,  |
+//|  max DD 37.81%/42.06% vs real 37.75%/42.43% - all close). Remaining   |
+//|  gap is pure selectivity, not trade sizing. Tried zone-width sweeps   |
+//|  (50-90% range) and multi-bar zone confirmation (1-4 bars) against    |
+//|  the real day-by-day record - neither broke past ~75-76% precision,   |
+//|  confirming the zone-touch trigger itself has a real ceiling, not a   |
+//|  tuning gap.                                                          |
+//|                                                                    |
+//|  v1.05 FIXES THE SL REFERENCE POINT. User's own hypothesis (SL at     |
+//|  the range boundary) tested directly: not exact (only 2/82 real       |
+//|  trades have SL within 1% of L/H), but measuring SL's distance FROM   |
+//|  the block edge (instead of from entry, v1.04's approach) is a        |
+//|  visibly tighter fit - interquartile 26-38% of range vs 33-54% when   |
+//|  measured from entry. Real: entry moves around inside the 61.8-78.6%  |
+//|  OTE zone, but SL stays close to a FIXED level relative to L/H         |
+//|  regardless - a structural stop, not one measured from the fill        |
+//|  price. InpRangeRiskPct=30.8 (median) now applies from the range's     |
+//|  own L/H rather than from entry. Not yet re-tested on a real MT5 run.  |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -199,7 +222,7 @@ input int    InpHistoryDays       = 30;
 input group "==== Reconstruction-specific (not in the original report) ==="
 input double InpZoneTopPct        = 61.8;     // OTE retracement zone - see header, INFERRED
 input double InpZoneBotPct        = 78.6;
-input double InpRangeRiskPct       = 41.7;    // v1.04 real-data fix - see header (median real risk/range ratio)
+input double InpRangeRiskPct       = 30.8;    // v1.05 real-data fix - see header (median SL level from block edge)
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
@@ -515,28 +538,37 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
   }
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| v1.04 real-data fix (see header): risk = InpRangeRiskPct% of the   |
-//| session's own finalized range, measured directly from entry -      |
-//| NOT a tight recent-bar swing (v1.01-1.03's structural stop measured |
-//| risk at a median of just $2.59, vs the real EA's real median        |
-//| $11.70 - a ~4.5x-too-tight stop that was getting hit by ordinary    |
-//| noise long before a real move could develop, the actual cause of   |
-//| v1.03's 5x-shorter-than-real average hold time). Checked directly   |
-//| against the real 8-month report: real risk/range ratio has median   |
-//| 41.7%, mean 45.9%, most trades between 33-54% - a real, tight        |
-//| cluster, not a guess.                                               |
+//| v1.05 real-data fix (see header): SL is a fixed InpRangeRiskPct%   |
+//| level measured from the session range's OWN boundary (L for a buy, |
+//| H for a sell) - NOT a distance measured back from the entry price   |
+//| (v1.04's approach). Checked directly against the real 8-month       |
+//| report: measuring SL-to-entry gave a real but noisier fit (33-54%   |
+//| interquartile spread, since entry itself moves around inside the    |
+//| 61.8-78.6% OTE zone); measuring SL-to-block-edge instead is a        |
+//| visibly tighter fit (26-38% interquartile spread, same 82 real       |
+//| trades) - real evidence the stop is a fixed structural level of the |
+//| range, independent of exactly where inside the zone the entry       |
+//| filled. Median real value: 30.8%.                                   |
 //+------------------------------------------------------------------+
 double StructuralOrFibSL(bool isBuy, int sesIdx, double entryPx, double rng, double atr)
   {
+   double H = g_sesRangeHigh[sesIdx], L = g_sesRangeLow[sesIdx];
    if(InpFixedFibSL)
      {
-      double H = g_sesRangeHigh[sesIdx], L = g_sesRangeLow[sesIdx];
       double swing = isBuy ? (g_sesExtHigh[sesIdx] - L) : (H - g_sesExtLow[sesIdx]);
       return isBuy ? g_sesExtHigh[sesIdx] - (InpFibSLPct / 100.0) * swing
                    : g_sesExtLow[sesIdx]  + (InpFibSLPct / 100.0) * swing;
      }
-   double risk = (InpRangeRiskPct / 100.0) * rng;
-   return isBuy ? entryPx - risk : entryPx + risk;
+   double off = (InpRangeRiskPct / 100.0) * rng;
+   double sl = isBuy ? L + off : H - off;
+   //--- safety clamp: with a minimal breakout extension AND a deep-zone
+   //--- entry (close to 78.6%), a fixed offset from L/H can land on the
+   //--- wrong side of entryPx - fall back to a small fixed fraction of
+   //--- the range so risk is always positive and on the correct side.
+   double minRisk = 0.05 * rng;
+   if(isBuy && sl >= entryPx - minRisk) sl = entryPx - minRisk;
+   if(!isBuy && sl <= entryPx + minRisk) sl = entryPx + minRisk;
+   return sl;
   }
 //+------------------------------------------------------------------+
 double LotStep(double lots)
