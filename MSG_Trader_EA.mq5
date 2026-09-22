@@ -41,10 +41,10 @@
 //|   - InpTPMode's meaning (0 = 3-stage scale-out via TP1/TP2/TP3;     |
 //|     any other value = single fixed target at InpTP_RR) - the       |
 //|     report only ever showed TPMode=0.                              |
-//|   - InpTrailRR's exact behaviour (implemented here as: move the    |
-//|     stop to breakeven once floating profit reaches InpTrailRR x    |
-//|     the original risk - a common, simple reading of "trail RR",    |
-//|     not the only possible one).                                    |
+//|   - InpTrailRR's exact behaviour: CONFIRMED as of v1.09 - the real  |
+//|     EA's own UI shows it labeled "Trail lock-in (R) after 2nd       |
+//|     target", a continuous trailing stop from TP2 onward, not a      |
+//|     one-time breakeven move (see v1.09 note below).                 |
 //|   - GMT-offset auto-detection (TimeGMT()-TimeTradeServer(), see    |
 //|     BrokerGMTOffsetHours()) - the report ran with InpGMTOffset=0    |
 //|     and auto-detect on, so this was never exercised against a      |
@@ -265,10 +265,39 @@
 //|  mechanism actually is: InpMaxHoldHours tightened to 6 (M1) / 12 (M5) -     |
 //|  the real observed max plus headroom, a proxy that prevents the             |
 //|  pathological case without claiming to know the real EA's real exit logic. |
-//|  Not yet re-tested on a real MT5 run.                                      |
+//|                                                                    |
+//|  v1.08 REAL M1 RE-TEST (took two attempts - the first still showed the      |
+//|  80.8h outlier because InpMaxHoldHours was stuck at a cached 48 from a       |
+//|  previous MT5 session, same input-cache trap as v1.07's own first attempt;  |
+//|  re-run with InpMaxHoldHours correctly at 6 confirmed max hold capped at     |
+//|  6:01:01, no more outlier): net +15,983.75 (v1.07 was +21,479.90, -25.6%),   |
+//|  PF 1.614 (v1.07: 1.839, worse), equity DD 24.14% (v1.07: 38.37%, much       |
+//|  better), balance DD 41.99% (v1.07: 42.32%, basically unchanged). Capping    |
+//|  that outlier trade removed both its pathological risk AND the large real    |
+//|  profit its eventual favorable resolution produced - an honest trade-off,    |
+//|  not a clean win. Whether 6h is the RIGHT cap (vs just A cap, taken from      |
+//|  the real observed max) is still an open question.                           |
+//|                                                                    |
+//|  v1.09 FIXES THE TRAIL MECHANISM - the real EA's own UI (a user screenshot   |
+//|  of the actual T1 EA's Inputs tab) labels InpTP1_RR "1st target (R) - then    |
+//|  stop to break-even" and InpTrailRR "Trail lock-in (R) after 2nd target",     |
+//|  next to a separate "2nd target (R) - then trail stop" label on InpTP2_RR -   |
+//|  confirming a TWO-STAGE mechanism this file never implemented: a one-time     |
+//|  move to breakeven at TP1 (already had this, just tied to the wrong trigger  |
+//|  - InpTrailRR reaching its own threshold, not TP1 itself), then a CONTINUOUS  |
+//|  trailing stop from TP2 onward that keeps InpTrailRR x risk of profit locked  |
+//|  in as price extends further favorably. v1.01-v1.08 only ever moved to        |
+//|  breakeven once and then left the remaining position with a fully static      |
+//|  stop all the way to TP3 or the max-hold timer - very plausibly the real       |
+//|  cause of the real EA's own short observed hold times (v1.08's header above): |
+//|  a real trailing stop exits on its own the moment price pulls back by the      |
+//|  lock-in distance, it doesn't need a timer to end a trade at all. Not yet       |
+//|  re-tested on a real MT5 run - if this closes the hold-time gap on its own,     |
+//|  InpMaxHoldHours may not need to be as aggressively tightened as v1.08 made     |
+//|  it; that's a real open question for the next real test to answer.              |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.08"
+#property version   "1.09"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -292,7 +321,9 @@ input bool   InpScaleOut          = true;
 input double InpTP1_RR            = 1.0;
 input double InpTP2_RR            = 1.5;
 input double InpTP3_RR            = 2.0;      // CONFIRMED: real broker TP order is always entry +/- 2.0x risk
-input double InpTrailRR           = 1.0;      // move stop to breakeven once floating profit reaches this x risk
+input double InpTrailRR           = 1.0;      // v1.09: CONFIRMED meaning from the real EA's own UI label ("Trail
+                                               // lock-in (R) after 2nd target") - continuous trailing distance
+                                               // after TP2, NOT a one-time breakeven move (that's what TP1 does)
 
 input group "==== Exit ==="
 input int    InpTPMode            = 0;        // 0 = 3-stage scale-out (InpScaleOut/TP1-3), else = single TP at InpTP_RR
@@ -422,7 +453,7 @@ bool     g_sesRangeTraded[4];
 //--- current position's own scale-out state (only one position at a time)
 double   g_posEntry = 0.0, g_posRisk = 0.0;
 double   g_posTP1 = 0.0, g_posTP2 = 0.0, g_posTP3 = 0.0;
-bool     g_posTP1Done = false, g_posTP2Done = false, g_posBEDone = false;
+bool     g_posTP1Done = false, g_posTP2Done = false;
 string   g_posTag = "";
 datetime g_posOpenTime = 0;
 
@@ -476,7 +507,7 @@ void SyncPositionState()
      }
    else
      {
-      if(g_ticket != 0) { g_posTP1Done = false; g_posTP2Done = false; g_posBEDone = false; }
+      if(g_ticket != 0) { g_posTP1Done = false; g_posTP2Done = false; }
       g_ticket = 0;
       g_posDir = 0;
      }
@@ -773,7 +804,7 @@ void CheckForEntry()
       g_posTP1 = isBuy ? px + InpTP1_RR * risk : px - InpTP1_RR * risk;
       g_posTP2 = isBuy ? px + InpTP2_RR * risk : px - InpTP2_RR * risk;
       g_posTP3 = tp3;
-      g_posTP1Done = false; g_posTP2Done = false; g_posBEDone = false;
+      g_posTP1Done = false; g_posTP2Done = false;
       //--- v1.02: this range is now spent - no further entries from it
       //--- until its session window reopens and freezes a brand new one
       //--- (see g_sesRangeTraded's own header note)
@@ -818,10 +849,23 @@ void ManageOpenPosition()
    bool hitTP1 = (g_posDir > 0) ? (price >= g_posTP1) : (price <= g_posTP1);
    bool hitTP2 = (g_posDir > 0) ? (price >= g_posTP2) : (price <= g_posTP2);
 
+   //--- v1.09 real-data fix (see header): the real EA's own UI labels -
+   //--- "1st target (R) - then stop to break-even" and "2nd target (R) -
+   //--- then trail stop" / "Trail lock-in (R) after 2nd target" - describe
+   //--- a TWO-STAGE mechanism this file never had: a one-time move to
+   //--- breakeven at TP1, then a CONTINUOUS trailing stop from TP2 onward
+   //--- that keeps InpTrailRR x risk of profit locked in as price extends
+   //--- further. v1.01-v1.08 only ever did the breakeven half, once, and
+   //--- then left the remaining position with a static stop all the way
+   //--- to TP3 or the max-hold timer - very likely the real cause of the
+   //--- real EA's own short observed hold times (a trailing stop exits on
+   //--- its own as soon as price pulls back, it doesn't need a timer).
    if(!g_posTP1Done && hitTP1)
      {
       ClosePartial(vol / 3.0, "TP1");
       g_posTP1Done = true;
+      if(PositionSelectByTicket(g_ticket))
+         trade.PositionModify(g_ticket, g_posEntry, PositionGetDouble(POSITION_TP));
      }
    if(g_posTP1Done && !g_posTP2Done && hitTP2)
      {
@@ -830,17 +874,13 @@ void ManageOpenPosition()
       g_posTP2Done = true;
      }
 
-   //--- trail to breakeven once InpTrailRR x risk of profit is reached
-   //--- (INFERRED reading of InpTrailRR - see header)
-   if(!g_posBEDone)
+   if(g_posTP2Done)
      {
-      double profitR = (g_posDir > 0) ? (price - g_posEntry) / g_posRisk : (g_posEntry - price) / g_posRisk;
-      if(profitR >= InpTrailRR)
-        {
-         if(PositionSelectByTicket(g_ticket))
-            trade.PositionModify(g_ticket, g_posEntry, PositionGetDouble(POSITION_TP));
-         g_posBEDone = true;
-        }
+      double lockPx = (g_posDir > 0) ? price - InpTrailRR * g_posRisk : price + InpTrailRR * g_posRisk;
+      double curSL = PositionGetDouble(POSITION_SL);
+      bool improve = (g_posDir > 0) ? (lockPx > curSL) : (lockPx < curSL);
+      if(improve && PositionSelectByTicket(g_ticket))
+         trade.PositionModify(g_ticket, lockPx, PositionGetDouble(POSITION_TP));
      }
   }
 //+------------------------------------------------------------------+
