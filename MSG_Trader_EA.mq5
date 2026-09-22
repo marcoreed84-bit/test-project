@@ -41,10 +41,12 @@
 //|   - InpTPMode's meaning (0 = 3-stage scale-out via TP1/TP2/TP3;     |
 //|     any other value = single fixed target at InpTP_RR) - the       |
 //|     report only ever showed TPMode=0.                              |
-//|   - InpTrailRR's exact behaviour: CONFIRMED as of v1.09 - the real  |
-//|     EA's own UI shows it labeled "Trail lock-in (R) after 2nd       |
-//|     target", a continuous trailing stop from TP2 onward, not a      |
-//|     one-time breakeven move (see v1.09 note below).                 |
+//|   - InpTrailRR's exact behaviour: no longer inferred at all. Fully  |
+//|     CONFIRMED as of v1.11 by direct measurement of the real M1      |
+//|     report's own stop prices - a STATIC lock-in level at entry      |
+//|     +/- 1.000R set once at TP2, exact on 20 of 20 real trades       |
+//|     (see the v1.11 block below). v1.09 had the trigger and the      |
+//|     value right but the mechanism wrong (it built a ratchet).       |
 //|   - GMT-offset auto-detection (TimeGMT()-TimeTradeServer(), see    |
 //|     BrokerGMTOffsetHours()) - the report ran with InpGMTOffset=0    |
 //|     and auto-detect on, so this was never exercised against a      |
@@ -314,9 +316,117 @@
 //|  own trades never take anywhere near this long (real max 5.16h M1 / 10.95h M5) -               |
 //|  this remains a genuine, unexplained gap in the reconstruction, not something this              |
 //|  version claims to have fixed. Flagged rather than papered over with another guess.              |
+//|                                                                    |
+//|  v1.11 ANSWERS v1.10's UNRESOLVED QUESTION - and the answer is that v1.09 implemented             |
+//|  the RIGHT input with the WRONG mechanism. Re-parsed the real M1 report's Orders+Deals            |
+//|  tables directly (108 round-trips, grouped by cumulative volume in/out, same methodology          |
+//|  as every version above) and looked at the exit LEG-BY-LEG rather than just at hold time.         |
+//|  39 of the 108 real trades scale out all three legs, so the post-TP2 stage is directly             |
+//|  observable on them.                                                                               |
+//|                                                                    |
+//|  CONFIRMED - the real exit ladder, measured to full precision, three stages, each exact:           |
+//|   - Before TP1: stop sits at the original -1.000R. 43 of the 44 one-leg trades closed at            |
+//|     exactly -1.0000R (the 44th closed on the broker TP).                                            |
+//|   - At TP1 (1.0R, 1/3 out): stop moves to EXACTLY breakeven. All 21 of the 21 two-leg               |
+//|     trades that closed on a stop closed at 0.0000R - min -0.0000, max 0.0000, no spread.            |
+//|     This file already did this correctly; re-confirmed, not changed.                                |
+//|   - At TP2 (1.5R, half the remainder out): stop moves to EXACTLY entry +/- 1.000R and then          |
+//|     NEVER MOVES AGAIN. All 20 of the 20 three-leg trades whose final leg closed on a stop           |
+//|     closed at exactly 1.000000R - mean 1.000000, stdev 0.000000, across real risks ranging          |
+//|     6.64 to 29.13 points and TP2->exit times from 0.15 to 25.5 minutes. The other 19 of the         |
+//|     39 ran to the 2.0R broker TP. So the final leg lives in a 1.0R-wide corridor: a hard            |
+//|     floor at +1.0R and the broker TP at +2.0R.                                                       |
+//|                                                                    |
+//|  THE RATCHET IS DISPROVEN, NOT MERELY UNCONFIRMED. Replayed real M1 bars                             |
+//|  (GOLD#_PERIOD_M1.csv) between each real TP2 fill and each real final exit and measured how          |
+//|  far price actually ran past TP2 before reversing: post-TP2 peaks span 1.127R to 1.954R              |
+//|  (median 1.628R; 10 of 20 went past 1.6R, 5 past 1.75R). v1.09's peak-minus-1.0R ratchet             |
+//|  would therefore have exited those same 20 trades anywhere between 0.127R and 0.954R, each           |
+//|  one at a different level. The real report shows all 20 at a flat, identical 1.000R.                 |
+//|  Zero of 20 fit a ratchet; 20 of 20 fit a static level. The clearest single case: the                |
+//|  2026-06-17 trade peaked at 1.954R after TP2 and still exited at exactly 1.000R - a ratchet          |
+//|  would have had its stop up at 0.954R by then and would have closed it there.                        |
+//|                                                                    |
+//|  THIS IS ALSO WHY v1.10's 32.8h OUTLIER SURVIVED THE TRAIL, and the reason is structural,            |
+//|  not a matter of tuning. A ratchet's stop is (running peak - InpTrailRR x risk), and the             |
+//|  peak can never exceed 2.0R because the broker TP closes the trade there - so the ratchet's          |
+//|  stop is mathematically BOUNDED ABOVE by 2.0R - 1.0R = 1.0R, i.e. it is at or below the real         |
+//|  EA's static floor at every price on every path, and starts a full 0.5R below it the moment          |
+//|  TP2 fires (peak 1.5R -> stop 0.5R, vs the real EA's 1.0R). A position grinding between              |
+//|  1.5R and 1.9R touches neither the 2.0R TP nor a stop down at 0.5-0.9R, and can sit there            |
+//|  for as long as the grind lasts - which is exactly the "slow monotonic grind" failure mode           |
+//|  v1.10's header described but attributed to trailing stops in general. It is not general:            |
+//|  it is specific to a ratchet. The real EA's static floor makes the corridor 1.0R wide                |
+//|  instead of up to 1.5R wide and, because it is weakly tighter than the ratchet on every              |
+//|  path, it closes the remaining leg no later than v1.09 would have on any path - usually              |
+//|  much sooner.                                                                                        |
+//|                                                                    |
+//|  INDEPENDENT CHECK - bar-replay of the candidate rules against the real timing. Walked real          |
+//|  M1 bars forward from each of the 39 real TP2 fills, exiting on whichever of the candidate           |
+//|  stop or the real broker TP came first, and compared five statistics against the real                |
+//|  observed TP2->final-exit behaviour:                                                                 |
+//|        rule                    median   mean    p90     max      sl/tp split                         |
+//|        REAL observed           3.72m    7.98m    -      54.3m    20 / 19                             |
+//|        static +1.0R (v1.11)    3.18m    7.64m   21.3m   53.6m    21 / 18   <- adopted                |
+//|        ratchet peak-1.0R(1.09) 8.35m   13.26m   39.5m   69.5m    16 / 23                             |
+//|        ratchet peak-0.5R       3.18m    5.03m   16.5m   26.6m    25 / 14                             |
+//|  The static +1.0R rule matches real on all five at once. Note particularly the sl/tp split:          |
+//|  simply tightening InpTrailRR to 0.5 (the obvious "just shrink the knob" move) recovers the          |
+//|  median but gets the outcome mix badly wrong - 25 stop-outs vs the real 20, because a tight          |
+//|  ratchet strangles the runners that should reach 2.0R. Fixed-level and tighter-ratchet are           |
+//|  genuinely different rules, and the data picks the fixed level.                                      |
+//|                                                                    |
+//|  THE CHANGE: InpTrailRR's VALUE stays at 1.0 (now independently confirmed by measurement,            |
+//|  not just copied from the real EA's inputs screen). The post-TP2 block in                            |
+//|  ManageOpenPosition() no longer recomputes the stop from the live price on every tick;               |
+//|  it sets the stop once to entry +/- InpTrailRR x risk and re-asserts that same level                 |
+//|  idempotently (covering a failed PositionModify or an EA restart) but never walks it                 |
+//|  further. This is a one-line-of-arithmetic change - g_posEntry instead of price - but it             |
+//|  is a different exit rule, not a re-tuning of the old one.                                            |
+//|                                                                    |
+//|  STILL INFERRED, flagged so it is not read as more than it is:                                        |
+//|   - WHICH input the +1.0R level is read from. InpTrailRR=1.0 and InpTP1_RR=1.0 are both 1.0           |
+//|     in the only configuration ever observed, so this data cannot distinguish "lock in                 |
+//|     InpTrailRR" from "put the stop back at the TP1 price". The real EA's own UI label                 |
+//|     ("Trail lock-in (R) after 2nd target" sitting on InpTrailRR) is the tiebreaker used               |
+//|     here, and it is a label, not a measurement. If someone ever runs the real EA with                 |
+//|     InpTrailRR != InpTP1_RR, one report settles it.                                                    |
+//|   - Whether the real EA re-asserts the level after a restart, or sets it once and forgets.             |
+//|     Unobservable from a Strategy Tester report, which never restarts. The idempotent                   |
+//|     re-assert here is this file's own choice for robustness, not a copied behaviour.                   |
+//|                                                                    |
+//|  NOT VALIDATED BY A REAL BACKTEST - there is no MT5 in the environment this was written in.            |
+//|  Everything above is calibrated against the real EA's real observed exit prices and the real           |
+//|  M1 bar path, which is the strongest evidence available here, but it is NOT the same thing as          |
+//|  a real Strategy Tester run of this reconstruction, and it is not claimed to be. What the next         |
+//|  real run needs to check: (a) does the 32:49:58 outlier disappear, (b) do hold times move              |
+//|  toward the real distribution (real M1: median 0.68h, mean 0.91h, p95 2.50h, max 5.16h - this          |
+//|  reconstruction's job is to reproduce that shape, and v1.10 did not), and (c) what it costs.           |
+//|  HONEST EXPECTATION, stated in advance rather than after the fact: this will very likely              |
+//|  REDUCE net profit. A static +1.0R floor is weakly tighter than v1.09's ratchet on every              |
+//|  path, so it can only cut winners shorter, never longer - the same trade-off v1.08 made and           |
+//|  v1.10 had to walk back. The difference, and the reason it is worth making anyway, is that            |
+//|  v1.08's 6h cap was a proxy invented to suppress a symptom, whereas this is the real EA's             |
+//|  actual measured rule. If the real re-test shows this losing money against v1.10, the honest           |
+//|  reading is NOT that the rule is wrong - it is measured, exactly, 20 times over - but that            |
+//|  this reconstruction's ENTRIES differ from the real EA's in some way that makes the real              |
+//|  EA's own exit rule a poor fit for them, which would be a genuinely new and more useful               |
+//|  finding than another exit knob. Do not revert this on a net-profit comparison alone.                  |
+//|                                                                    |
+//|  WHAT THIS DOES NOT EXPLAIN. The bar-replay above covers only the post-TP2 stage of the 39            |
+//|  real trades that got that far. It does NOT independently reproduce the 32.8h outlier -               |
+//|  that trade belongs to this reconstruction, not to the real report, so it has no real                 |
+//|  counterpart to measure. The argument that the static floor would have closed it is a                 |
+//|  mechanical one (the floor is weakly tighter than the ratchet at every price), and it is              |
+//|  sound, but it is reasoning, not a measurement of that specific trade. Separately, 5 of the           |
+//|  108 real trades skip a partial they should have taken - 1 runs straight to the 2.0R TP with          |
+//|  no TP1 partial at all, and 4 take TP1 but then reach the 2.0R TP with no TP2 partial in              |
+//|  between - which this file's strictly staged logic cannot produce. Most likely fast bars              |
+//|  jumping through a level between ticks; not investigated here, and too few to affect any              |
+//|  of the numbers above.                                                                                 |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.10"
+#property version   "1.11"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -340,9 +450,12 @@ input bool   InpScaleOut          = true;
 input double InpTP1_RR            = 1.0;
 input double InpTP2_RR            = 1.5;
 input double InpTP3_RR            = 2.0;      // CONFIRMED: real broker TP order is always entry +/- 2.0x risk
-input double InpTrailRR           = 1.0;      // v1.09: CONFIRMED meaning from the real EA's own UI label ("Trail
-                                               // lock-in (R) after 2nd target") - continuous trailing distance
-                                               // after TP2, NOT a one-time breakeven move (that's what TP1 does)
+input double InpTrailRR           = 1.0;      // VALUE unchanged and now independently CONFIRMED by measurement:
+                                               // all 20 real M1 three-leg trades that closed on a stop after TP2
+                                               // closed at EXACTLY entry +/- 1.000R (stdev 0.000000). v1.11 keeps
+                                               // the 1.0 but changes what it MEANS: "Trail lock-in (R) after 2nd
+                                               // target" is a STATIC lock-in LEVEL measured from entry, not
+                                               // v1.09's trailing DISTANCE behind the running price. See header.
 
 input group "==== Exit ==="
 input int    InpTPMode            = 0;        // 0 = 3-stage scale-out (InpScaleOut/TP1-3), else = single TP at InpTP_RR
@@ -872,9 +985,12 @@ void ManageOpenPosition()
    //--- "1st target (R) - then stop to break-even" and "2nd target (R) -
    //--- then trail stop" / "Trail lock-in (R) after 2nd target" - describe
    //--- a TWO-STAGE mechanism this file never had: a one-time move to
-   //--- breakeven at TP1, then a CONTINUOUS trailing stop from TP2 onward
-   //--- that keeps InpTrailRR x risk of profit locked in as price extends
-   //--- further. v1.01-v1.08 only ever did the breakeven half, once, and
+   //--- breakeven at TP1, then a second stop move at TP2 that locks in
+   //--- InpTrailRR x risk of profit. v1.09 read that second stage as a
+   //--- continuous ratchet behind the running price; v1.11 re-measured it
+   //--- and found it is a STATIC level at entry +/- InpTrailRR x risk that
+   //--- never moves again (see the v1.11 block below and the file header).
+   //--- v1.01-v1.08 only ever did the breakeven half, once, and
    //--- then left the remaining position with a static stop all the way
    //--- to TP3 or the max-hold timer - very likely the real cause of the
    //--- real EA's own short observed hold times (a trailing stop exits on
@@ -893,12 +1009,30 @@ void ManageOpenPosition()
       g_posTP2Done = true;
      }
 
+   //--- v1.11 real-data fix (see header): the post-TP2 stop is a STATIC
+   //--- LOCK-IN LEVEL at entry +/- InpTrailRR x risk, NOT v1.09's ratchet
+   //--- that followed the running price at a fixed distance behind it.
+   //--- CONFIRMED from the real M1 report: all 20 real three-leg trades
+   //--- whose final leg closed on a stop closed at EXACTLY entry +/- 1.000R
+   //--- (stdev 0.000000 across risks of 6.64-29.13 points), while their
+   //--- post-TP2 peaks ranged 1.127R-1.954R - a peak-minus-1.0R ratchet
+   //--- would have exited those same trades anywhere from 0.127R to 0.954R.
+   //--- Zero of 20 match the ratchet; 20 of 20 match a static level.
+   //--- The level never moves again once set: the trade whose price peaked
+   //--- at 1.954R after TP2 still exited at exactly 1.000R.
    if(g_posTP2Done)
      {
-      double lockPx = (g_posDir > 0) ? price - InpTrailRR * g_posRisk : price + InpTrailRR * g_posRisk;
-      double curSL = PositionGetDouble(POSITION_SL);
-      bool improve = (g_posDir > 0) ? (lockPx > curSL) : (lockPx < curSL);
-      if(improve && PositionSelectByTicket(g_ticket))
+      double lockPx = (g_posDir > 0) ? g_posEntry + InpTrailRR * g_posRisk
+                                     : g_posEntry - InpTrailRR * g_posRisk;
+      double tol    = _Point * 0.5;
+      double curSL  = PositionGetDouble(POSITION_SL);
+      //--- idempotent, and deliberately one-directional: this re-asserts the
+      //--- level if it is not in place yet (first tick after TP2, or a stop
+      //--- left behind by a failed PositionModify / an EA restart), but it
+      //--- never walks the stop past lockPx the way v1.09's ratchet did.
+      bool needMove = (curSL <= 0.0) ||
+                      ((g_posDir > 0) ? (curSL < lockPx - tol) : (curSL > lockPx + tol));
+      if(needMove && PositionSelectByTicket(g_ticket))
          trade.PositionModify(g_ticket, lockPx, PositionGetDouble(POSITION_TP));
      }
   }
