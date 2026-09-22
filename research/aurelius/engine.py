@@ -323,9 +323,25 @@ def build_context(df, h4, params=None):
     m2400 = ma(c, p["p2400"], p["m2400"])
     atr = wilder_atr(h, l, c, 14)
 
-    # --- Aligned(shift=1, isBuy) - ALIGN_MID: c vs 2400, 21>50>150>600 ---
-    aligned_buy = (c > m2400) & (m21 > m50) & (m50 > m150) & (m150 > m600)
-    aligned_sell = (c < m2400) & (m21 < m50) & (m50 < m150) & (m150 < m600)
+    # --- Aligned(shift=1, isBuy) - direct port of Aurelius_EA.mq5's Aligned()
+    # (~1913): PRICE = c vs 2400 + 21>50; FAST = + 50>150; MID (default,
+    # matches the shipped EA) = + 150>600; FULL = replaces "c vs 2400" with
+    # "600 vs 2400" instead of adding another leg. align_mode defaults to
+    # "MID" so every existing caller (P/P15 both ship align_mode="MID") gets
+    # byte-identical behavior to before this was parameterized - only a
+    # caller that explicitly passes a different align_mode sees anything
+    # different.
+    align_mode = p.get("align_mode", "MID")
+    price_ok_buy  = (m600 > m2400) if align_mode == "FULL" else (c > m2400)
+    price_ok_sell = (m600 < m2400) if align_mode == "FULL" else (c < m2400)
+    aligned_buy  = price_ok_buy  & (m21 > m50)
+    aligned_sell = price_ok_sell & (m21 < m50)
+    if align_mode != "PRICE":
+        aligned_buy  = aligned_buy  & (m50 > m150)
+        aligned_sell = aligned_sell & (m50 < m150)
+        if align_mode != "FAST":
+            aligned_buy  = aligned_buy  & (m150 > m600)
+            aligned_sell = aligned_sell & (m150 < m600)
 
     # --- SlopeATR(isBuy) - SLOPE_50 default ---
     slope_ma_arr = {"21": m21, "50": m50, "150": m150, "600": m600}[p["slope_ma"]]
