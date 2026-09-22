@@ -295,9 +295,28 @@
 //|  re-tested on a real MT5 run - if this closes the hold-time gap on its own,     |
 //|  InpMaxHoldHours may not need to be as aggressively tightened as v1.08 made     |
 //|  it; that's a real open question for the next real test to answer.              |
+//|                                                                    |
+//|  v1.10 REVERTS InpMaxHoldHours to 48 (v1.08's 6/12 split removed). Real,          |
+//|  controlled A/B test on two identical M1 configs (v1.09 trailing stop active      |
+//|  in both, only InpMaxHoldHours differing) proved 48 genuinely beats 6: net         |
+//|  +20,731.20 vs +14,805.10, PF 1.804 vs 1.562 - the tight cap was cutting off        |
+//|  real, still-developing profitable trades, not just the one pathological           |
+//|  outlier. v1.08's theory (tighten the cap to match the real EA's observed           |
+//|  ceiling) is DISPROVEN by this direct comparison, not just unconfirmed.              |
+//|                                                                    |
+//|  HONEST UNRESOLVED FINDING: the SAME outlier trade still ran 32:49:58 in the          |
+//|  48h test - not capped by the 48h timer (32.8h < 48h, so the timer never fired),       |
+//|  and NOT caught by v1.09's new trailing stop either. Root cause, reasoned from          |
+//|  this: a trailing stop only protects against a REVERSAL - it does nothing for a          |
+//|  trade that grinds slowly in its favorable direction without ever pulling back by         |
+//|  the full lock-in distance. That appears to be what happened here. Neither lever            |
+//|  tried so far (tight time cap, trailing stop) actually explains why the real EA's             |
+//|  own trades never take anywhere near this long (real max 5.16h M1 / 10.95h M5) -               |
+//|  this remains a genuine, unexplained gap in the reconstruction, not something this              |
+//|  version claims to have fixed. Flagged rather than papered over with another guess.              |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -328,9 +347,9 @@ input double InpTrailRR           = 1.0;      // v1.09: CONFIRMED meaning from t
 input group "==== Exit ==="
 input int    InpTPMode            = 0;        // 0 = 3-stage scale-out (InpScaleOut/TP1-3), else = single TP at InpTP_RR
 input double InpTP_RR             = 1.5;
-input int    InpMaxHoldHours      = 6;        // v1.08 real-data fix - see header. M5 value is 12 - SET THIS BACK
-                                               // TO 12 IF RUNNING ON M5. Real max hold was 5.16h (M1) / 10.95h
-                                               // (M5) - the shipped 48 was never actually binding in real trades.
+input int    InpMaxHoldHours      = 48;       // v1.10: REVERTED from v1.08's 6 - see header. Real A/B test on
+                                               // identical M1 configs proved 48 beats 6 (net +20,731 vs +14,805,
+                                               // PF 1.80 vs 1.56). Matches the real EA's own actual shipped value.
 
 input group "==== Sessions (GMT) ==="
 input bool   InpMsg1Enable        = true;
@@ -833,7 +852,7 @@ void ManageOpenPosition()
    if(g_ticket == 0) return;
    if(!PositionSelectByTicket(g_ticket)) return;
 
-   //--- max hold - v1.08 real-data-tightened default, see header
+   //--- max hold - v1.10 reverted to 48h (v1.08's tighter 6/12h split disproven by real A/B test, see header)
    int barsHeld = (int)((TimeCurrent() - (datetime)PositionGetInteger(POSITION_TIME)));
    if(InpMaxHoldHours > 0 && barsHeld >= InpMaxHoldHours * 3600)
      {
@@ -1475,9 +1494,6 @@ int OnInit()
    if(_Period == PERIOD_M5 && MathAbs(InpMinExtensionPct - 15.0) > 0.01)
       Print("MSG EA: running on M5 with the M1 default InpMinExtensionPct=", DoubleToString(InpMinExtensionPct, 1),
             " - the real M5 value is 15.0, set it back for M5.");
-   if(_Period == PERIOD_M5 && InpMaxHoldHours == 6)
-      Print("MSG EA: running on M5 with the M1 default InpMaxHoldHours=6 - the real M5 value is 12, "
-            "set it back for M5.");
    PrintFormat("MSG EA: period %s, zone %.1f-%.1f%%, watch %.2fh, range risk %.1f%%, min ext %.1f%%",
                (_Period == PERIOD_M1 ? "M1" : "M5"), InpZoneTopPct, InpZoneBotPct,
                InpMaxSetupWatchHours, InpRangeRiskPct, InpMinExtensionPct);
