@@ -182,9 +182,62 @@
 //|  tradeoff found. A marginal few-point poke past the range is noise,      |
 //|  not a genuine breakout with real directional conviction. Not yet        |
 //|  re-tested on a real MT5 run.                                            |
+//|                                                                    |
+//|  v1.07 RECALIBRATES FOR M1. A genuine real M1 backtest of the ACTUAL      |
+//|  T1 EA surfaced (Strategy Tester's period selector isn't gated the same   |
+//|  way live-chart attachment is - the real EA forces a live M1 chart back   |
+//|  to M5, but a Tester run can still be set to M1, producing a real report: |
+//|  108 round-trip trades, 2026.01.01-2026.09.21, PF 1.894, win rate 70.14%, |
+//|  DD 28.19%/31.21% - genuinely better than the real M5 report on several   |
+//|  real axes, not just a hunch). Made the file period-agnostic (every        |
+//|  PERIOD_M5 literal replaced with _Period; OnInit now accepts M1 or M5,    |
+//|  refuses anything else) and recalibrated against real M1 bars/trades      |
+//|  (GOLD#_PERIOD_M1.csv, 2025.11.12-2026.09.18, covering all but the last   |
+//|  ~3 days of the report) using the exact same measurement discipline as    |
+//|  every M5 version above:                                                  |
+//|   - RR: confirmed ~2.0 by design (mean 2.0009) but with real, much wider  |
+//|     scatter than M5's near-zero variance (stdev 0.194 vs 0.0007) - M1's   |
+//|     order-decision-to-fill gap is proportionally larger relative to a     |
+//|     1-minute bar's own price move than M5's gap is to a 5-minute bar's -  |
+//|     a real execution/slippage effect, not a flaw in the RR=2.0 design     |
+//|     itself (this file computes SL/TP from decision-bar values only, same  |
+//|     as before, so no code change follows from this - flagged for the      |
+//|     record, not acted on).                                                |
+//|   - InpRangeRiskPct and InpMaxSetupWatchHours: RE-CONFIRMED, NOT CHANGED. |
+//|     Real M1 risk-from-block-edge median is 30.63% (M5: 30.8%) and real    |
+//|     M1 entries topped out at 3.95h after session close (M5: 4.08h) -      |
+//|     both close enough to the existing M5-derived values that they hold    |
+//|     for M1 too without adjustment. These two properties appear to be      |
+//|     real characteristics of the session/price structure itself, not the   |
+//|     bar granularity used to detect them.                                  |
+//|   - InpMinExtensionPct: genuinely different on M1. Same false-positive-   |
+//|     vs-true-positive day classification as v1.06's M5 work, rebuilt       |
+//|     against real M1 bars: 0% gives 78.0% precision/70.3% recall; 10%      |
+//|     gives 95.3% precision/67.0% recall (only 3 false positives left, vs   |
+//|     18 at 0%) - the best M1 tradeoff, tighter than M5 needed (M5's own    |
+//|     optimum was 15%, only reaching 89.6%/64.2%). M1's finer bars need     |
+//|     less aggressive filtering to get the same false-positive rejection.   |
+//|   - InpZoneTopPct: also genuinely different. Widening the OTE zone from   |
+//|     61.8% to 50% (keeping InpZoneBotPct=78.6%) raises real recall from    |
+//|     67.0% to 89.0% for only a small precision cost (95.3%->91.0%, 8 false |
+//|     positives instead of 3) - checked for overfitting with a chronological|
+//|     half-split (first half: 88.0%/86.3%, second half: 94.9%/92.5% - holds |
+//|     up in both, actually stronger in the second half, not a fluke).       |
+//|     Combined final M1 config (zone 50-78.6%, min ext 10%, watch 4.25h):   |
+//|     91.0% precision / 89.0% recall against the real 92-day M1 record -    |
+//|     meaningfully tighter day-selection than the M5 reconstruction ever    |
+//|     achieved (v1.06's best was 89.6%/64.2%).                              |
+//|   - InpZoneTopPct and InpMinExtensionPct now default to their M1 values - |
+//|     SET THEM BACK to 61.8 / 15.0 if running this file on an M5 chart      |
+//|     (OnInit prints a warning if it detects the mismatch). InpRangeRiskPct |
+//|     and InpMaxSetupWatchHours need no per-period override.                |
+//|   - NOT YET verified with a real MT5 M1 Strategy Tester run of this        |
+//|     reconstruction itself (only the real T1 EA's own M1 report exists     |
+//|     so far) - needs that before trusting these numbers the way the M5      |
+//|     versions' real re-tests are trusted.                                   |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.06"
+#property version   "1.07"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -242,16 +295,19 @@ input int    InpZoneLineWidth     = 2;
 input int    InpHistoryDays       = 30;
 
 input group "==== Reconstruction-specific (not in the original report) ==="
-input double InpZoneTopPct        = 61.8;     // OTE retracement zone - see header, INFERRED
-input double InpZoneBotPct        = 78.6;
-input double InpRangeRiskPct       = 30.8;    // v1.05 real-data fix - see header (median SL level from block edge)
-input double InpMinExtensionPct    = 15.0;    // v1.06 real-data fix - see header (min breakout extension before a
-                                               // zone retracement counts as a real setup, not noise)
+input double InpZoneTopPct        = 50.0;     // v1.07 M1 real-data fix - see header. M5 value was 61.8 (standard
+                                               // OTE) - set THIS BACK TO 61.8 IF RUNNING ON M5.
+input double InpZoneBotPct        = 78.6;     // unchanged between M1/M5 - both real-calibrated to the same value
+input double InpRangeRiskPct       = 30.8;    // real-confirmed IDENTICAL on M1 and M5 (30.63% vs 30.8% median) -
+                                               // see v1.07 header note. No period-specific override needed.
+input double InpMinExtensionPct    = 10.0;    // v1.07 M1 real-data fix - see header. M5 value was 15.0 - SET THIS
+                                               // BACK TO 15.0 IF RUNNING ON M5.
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
-input double InpMaxSetupWatchHours = 4.25;    // v1.03 real-data fix - see header. Every real MSG3 entry in the
-                                               // 8-month report happened within 4.08h of session close - none later.
+input double InpMaxSetupWatchHours = 4.25;    // real-confirmed compatible with BOTH M1 and M5 - real M1 entries
+                                               // topped out at 3.95h, real M5 entries at 4.08h, same window covers
+                                               // both. No period-specific override needed.
 
 input group "==== Notifications ==="
 input bool   InpPushNotifications = true;
@@ -358,7 +414,7 @@ void UpdateRangeDrawings();
 //+------------------------------------------------------------------+
 bool IsNewBar()
   {
-   datetime t = iTime(_Symbol, PERIOD_M5, 0);
+   datetime t = iTime(_Symbol, _Period, 0);
    if(t == g_lastBarTime) return(false);
    g_lastBarTime = t;
    return(true);
@@ -397,7 +453,7 @@ void ComputeWilderATR(double &out[], int period)
   {
    MqlRates r[];
    ArraySetAsSeries(r, true);
-   int got = CopyRates(_Symbol, PERIOD_M5, 1, MathMax(period * 3, 200), r);
+   int got = CopyRates(_Symbol, _Period, 1, MathMax(period * 3, 200), r);
    if(got < period + 2) { ArrayResize(out, 1); out[0] = 0.0; return; }
    ArraySetAsSeries(out, true);
    ArrayResize(out, got);
@@ -504,7 +560,7 @@ void UpdateSessionRanges(datetime barTime, double barHigh, double barLow)
 //+------------------------------------------------------------------+
 int CheckSessionSetups(double close1, double high1, double low1, double atr, int &sesIdx, double &slPrice)
   {
-   datetime barTime = iTime(_Symbol, PERIOD_M5, 1);
+   datetime barTime = iTime(_Symbol, _Period, 1);
    for(int i = 0; i < 4; i++)
      {
       if(!g_sesEnable[i] || !g_sesRangeValid[i] || g_sesRangeTraded[i]) continue;
@@ -522,8 +578,8 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
 
       if(g_sesBiasDir[i] == 0)
         {
-         if(close1 > H) { g_sesBiasDir[i] = 1; g_sesExtHigh[i] = high1; g_sesExtTime[i] = iTime(_Symbol, PERIOD_M5, 1); }
-         else if(close1 < L) { g_sesBiasDir[i] = -1; g_sesExtLow[i] = low1; g_sesExtTime[i] = iTime(_Symbol, PERIOD_M5, 1); }
+         if(close1 > H) { g_sesBiasDir[i] = 1; g_sesExtHigh[i] = high1; g_sesExtTime[i] = iTime(_Symbol, _Period, 1); }
+         else if(close1 < L) { g_sesBiasDir[i] = -1; g_sesExtLow[i] = low1; g_sesExtTime[i] = iTime(_Symbol, _Period, 1); }
          continue;
         }
 
@@ -654,9 +710,9 @@ void CheckForEntry()
    double atr;
    if(!GetATR(atr)) atr = 0.0;
 
-   double close1 = iClose(_Symbol, PERIOD_M5, 1);
-   double high1  = iHigh(_Symbol, PERIOD_M5, 1);
-   double low1   = iLow(_Symbol, PERIOD_M5, 1);
+   double close1 = iClose(_Symbol, _Period, 1);
+   double high1  = iHigh(_Symbol, _Period, 1);
+   double low1   = iLow(_Symbol, _Period, 1);
 
    int sesIdx = -1; double slPrice = 0.0;
    int dir = CheckSessionSetups(close1, high1, low1, atr, sesIdx, slPrice);
@@ -1042,7 +1098,7 @@ void UpdateRangeDrawings()
      {
       if(!g_sesEnable[i] || !g_sesRangeValid[i]) continue;
       string base = "cur" + IntegerToString(i) + "_";
-      datetime t1 = g_sesRangeStartTime[i], t2 = now + PeriodSeconds(PERIOD_M5) * 20;
+      datetime t1 = g_sesRangeStartTime[i], t2 = now + PeriodSeconds(_Period) * 20;
       double H = g_sesRangeHigh[i], L = g_sesRangeLow[i], rng = H - L;
 
       DrawSessionBox(base + "box", t1, g_sesRangeEndTime[i], H, L, g_sesCol[i], true);
@@ -1326,12 +1382,29 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   if(_Period != PERIOD_M5)
+   //--- v1.07: M1 and M5 are the two periods this reconstruction has been
+   //--- calibrated against real reports on. Every bar-data call elsewhere in
+   //--- the file follows _Period, so the logic itself is period-agnostic -
+   //--- but the calibrated constants are not, so anything else is refused
+   //--- rather than silently run on uncalibrated settings.
+   if(_Period != PERIOD_M1 && _Period != PERIOD_M5)
      {
-      PrintFormat("MSG EA: this system is calibrated for M5 only - attach it to an M5 chart "
+      PrintFormat("MSG EA: calibrated for M1 and M5 only - attach it to an M1 or M5 chart "
                   "(currently on period %d)", _Period);
       return(INIT_FAILED);
      }
+   //--- v1.07: the two inputs that are genuinely period-specific (see
+   //--- header) still hold their M1-calibrated default when attached to
+   //--- M5 - warn rather than silently mis-trade on the wrong number.
+   if(_Period == PERIOD_M5 && MathAbs(InpZoneTopPct - 61.8) > 0.01)
+      Print("MSG EA: running on M5 with the M1 default InpZoneTopPct=", DoubleToString(InpZoneTopPct, 1),
+            " - the real M5 value is 61.8, set it back for M5.");
+   if(_Period == PERIOD_M5 && MathAbs(InpMinExtensionPct - 15.0) > 0.01)
+      Print("MSG EA: running on M5 with the M1 default InpMinExtensionPct=", DoubleToString(InpMinExtensionPct, 1),
+            " - the real M5 value is 15.0, set it back for M5.");
+   PrintFormat("MSG EA: period %s, zone %.1f-%.1f%%, watch %.2fh, range risk %.1f%%, min ext %.1f%%",
+               (_Period == PERIOD_M1 ? "M1" : "M5"), InpZoneTopPct, InpZoneBotPct,
+               InpMaxSetupWatchHours, InpRangeRiskPct, InpMinExtensionPct);
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippagePoints);
@@ -1375,9 +1448,9 @@ void OnTick()
   {
    if(!IsNewBar()) return;
 
-   datetime barTime = iTime(_Symbol, PERIOD_M5, 1);
-   double barHigh = iHigh(_Symbol, PERIOD_M5, 1);
-   double barLow  = iLow(_Symbol, PERIOD_M5, 1);
+   datetime barTime = iTime(_Symbol, _Period, 1);
+   double barHigh = iHigh(_Symbol, _Period, 1);
+   double barLow  = iLow(_Symbol, _Period, 1);
 
    //--- snapshot which sessions are about to freeze, so their range can
    //--- be archived into the history trail right after

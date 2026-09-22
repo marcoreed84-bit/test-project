@@ -308,6 +308,16 @@ def simulate(ctx, extra_filter=None, params=None):
         entry_atr = atr[i]
         entry_i = fill_i
         stop_px = (entry_px - p["stop_atr"] * entry_atr) if is_buy else (entry_px + p["stop_atr"] * entry_atr)
+        # --- candidate (OFF by default, p.get(...) leaves every existing
+        # baseline byte-identical): widen the stop to sit just beyond VWAP
+        # when VWAP is further from entry than the normal ATR stop would be
+        # - never tightens it. User's own idea: don't get stopped out by
+        # noise while price is still on the trade's side of VWAP. ---
+        if p.get("stop_beyond_vwap"):
+            vw = ctx["vwap"][i]
+            if not np.isnan(vw) and vw > 0:
+                vwap_buf = p.get("vwap_stop_buffer_atr", 0.1) * entry_atr
+                stop_px = min(stop_px, vw - vwap_buf) if is_buy else max(stop_px, vw + vwap_buf)
         price21_bad = 0
         vwap_bad = 0
         be_done = False
