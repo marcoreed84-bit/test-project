@@ -160,9 +160,31 @@
 //|  regardless - a structural stop, not one measured from the fill        |
 //|  price. InpRangeRiskPct=30.8 (median) now applies from the range's     |
 //|  own L/H rather than from entry. Not yet re-tested on a real MT5 run.  |
+//|                                                                    |
+//|  v1.05 REAL RE-TEST (MSG3-only): net +1,513.50 (v1.04 was            |
+//|  +2,199.84), win rate 58.49% (v1.04: 57.55%) - the tighter stop        |
+//|  barely moved win rate at all, just shrank average win/loss size       |
+//|  proportionally (TP is always 2x risk) and lowered DD 37.81%->29.78%.  |
+//|  CONCLUSION: the SL reference point was never the real bottleneck -     |
+//|  same 106 trades both versions, so it only rescales risk, not which     |
+//|  setups get selected.                                                   |
+//|                                                                    |
+//|  v1.06 ADDS A MINIMUM BREAKOUT EXTENSION FILTER (InpMinExtensionPct     |
+//|  =15.0) - found by comparing the real per-day false-positive vs         |
+//|  true-positive cases directly: on days my zone-touch trigger fires      |
+//|  but the real EA does NOT trade, the breakout only extended a median    |
+//|  of ~3.1 points beyond the range before retracing; on days that DO      |
+//|  match a real trade, the median extension is ~9.9 points - a ~3x        |
+//|  real difference, not noise. Swept the threshold against the real       |
+//|  86-trade day-by-day record: 0% gives 76.3% precision/67.2% recall;     |
+//|  15% gives 89.6% precision/64.2% recall (cuts false positives from      |
+//|  14 to 5 while losing only 2 of 45 true positives) - the best real       |
+//|  tradeoff found. A marginal few-point poke past the range is noise,      |
+//|  not a genuine breakout with real directional conviction. Not yet        |
+//|  re-tested on a real MT5 run.                                            |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.05"
+#property version   "1.06"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -223,6 +245,8 @@ input group "==== Reconstruction-specific (not in the original report) ==="
 input double InpZoneTopPct        = 61.8;     // OTE retracement zone - see header, INFERRED
 input double InpZoneBotPct        = 78.6;
 input double InpRangeRiskPct       = 30.8;    // v1.05 real-data fix - see header (median SL level from block edge)
+input double InpMinExtensionPct    = 15.0;    // v1.06 real-data fix - see header (min breakout extension before a
+                                               // zone retracement counts as a real setup, not noise)
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
@@ -511,7 +535,13 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
          if(swing <= 0.0) continue;
          double zoneTop = g_sesExtHigh[i] - (InpZoneTopPct / 100.0) * swing;
          double zoneBot = g_sesExtHigh[i] - (InpZoneBotPct / 100.0) * swing;
-         if(close1 <= zoneTop && close1 >= zoneBot)
+         //--- v1.06 real-data fix (see header): require the breakout to
+         //--- have travelled at least InpMinExtensionPct% of the range
+         //--- beyond H before a retracement into the zone counts - a
+         //--- marginal few-point poke past the range is noise, not a
+         //--- real breakout.
+         double extPct = (g_sesExtHigh[i] - H) / rng * 100.0;
+         if(close1 <= zoneTop && close1 >= zoneBot && extPct >= InpMinExtensionPct)
            {
             sesIdx = i;
             slPrice = StructuralOrFibSL(true, i, close1, rng, atr);
@@ -526,7 +556,8 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
          if(swing <= 0.0) continue;
          double zoneBot = g_sesExtLow[i] + (InpZoneTopPct / 100.0) * swing;
          double zoneTop = g_sesExtLow[i] + (InpZoneBotPct / 100.0) * swing;
-         if(close1 >= zoneBot && close1 <= zoneTop)
+         double extPct = (L - g_sesExtLow[i]) / rng * 100.0;
+         if(close1 >= zoneBot && close1 <= zoneTop && extPct >= InpMinExtensionPct)
            {
             sesIdx = i;
             slPrice = StructuralOrFibSL(false, i, close1, rng, atr);
