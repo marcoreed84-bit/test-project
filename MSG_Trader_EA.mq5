@@ -35,8 +35,9 @@
 //|  INFERRED (this file's own design, not verifiable without the      |
 //|  real source - flagged so it is never mistaken for a proven port): |
 //|   - The exact retracement zone boundary (61.8%-78.6%, the standard |
-//|     ICT/fib "OTE" window) and the exact structural-stop lookback   |
-//|     (last InpStructLookback bars' extreme + a small ATR buffer).   |
+//|     ICT/fib "OTE" window). The stop distance itself (InpRangeRiskPct|
+//|     of the session range) IS real-data-calibrated as of v1.04 - see |
+//|     its own header note below - not left as a guess.               |
 //|   - InpTPMode's meaning (0 = 3-stage scale-out via TP1/TP2/TP3;     |
 //|     any other value = single fixed target at InpTP_RR) - the       |
 //|     report only ever showed TPMode=0.                              |
@@ -118,9 +119,27 @@
 //|  trade, and 33% of real trades aren't found by this zone logic at    |
 //|  all - a different/additional trigger likely exists) - still needs   |
 //|  a real MT5 re-test before trusting the overtrading is resolved.     |
+//|                                                                    |
+//|  v1.04 FIXES THE STOP DISTANCE. v1.03's real re-test got trade       |
+//|  count right (181 vs real 169) and direction right (43/45 = 95.6%    |
+//|  match on days both models fire), but was still net-negative (win    |
+//|  rate 39% vs real 71%, PF 0.64) with average hold time of just 11    |
+//|  minutes vs the real 63 minutes - trades were getting stopped out    |
+//|  ~5x faster than real ones. Root cause: the "structural" stop (last  |
+//|  InpStructLookback bars' extreme) measured a median risk of just     |
+//|  $2.59 - a tight local-noise stop, nothing like the real EA's own    |
+//|  risk. Checked the real 8-month report's actual risk-to-range ratio  |
+//|  directly (82 trades with real M5 bar coverage): median 41.7%,       |
+//|  mean 45.9%, tightly clustered (most between 33%-54%) - a real,      |
+//|  measured relationship, not a guess. InpRangeRiskPct=41.7 replaces   |
+//|  the old bar-lookback stop entirely: risk is now that % of the       |
+//|  session's own finalized range, applied directly from the entry      |
+//|  price. Still needs a real MT5 re-test - if win rate/PF come back    |
+//|  in line with the real report, this is the fix; if not, the entry    |
+//|  price itself (not just the stop) may also differ from real.         |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -180,8 +199,7 @@ input int    InpHistoryDays       = 30;
 input group "==== Reconstruction-specific (not in the original report) ==="
 input double InpZoneTopPct        = 61.8;     // OTE retracement zone - see header, INFERRED
 input double InpZoneBotPct        = 78.6;
-input int    InpStructLookback    = 10;       // bars used for the structural swing stop, INFERRED
-input double InpStructBufferATR   = 0.10;
+input double InpRangeRiskPct       = 41.7;    // v1.04 real-data fix - see header (median real risk/range ratio)
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
@@ -473,7 +491,7 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
          if(close1 <= zoneTop && close1 >= zoneBot)
            {
             sesIdx = i;
-            slPrice = StructuralOrFibSL(true, i, atr);
+            slPrice = StructuralOrFibSL(true, i, close1, rng, atr);
             return(1);
            }
         }
@@ -488,7 +506,7 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
          if(close1 >= zoneBot && close1 <= zoneTop)
            {
             sesIdx = i;
-            slPrice = StructuralOrFibSL(false, i, atr);
+            slPrice = StructuralOrFibSL(false, i, close1, rng, atr);
             return(-1);
            }
         }
@@ -496,7 +514,19 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
    return(0);
   }
 //+------------------------------------------------------------------+
-double StructuralOrFibSL(bool isBuy, int sesIdx, double atr)
+//+------------------------------------------------------------------+
+//| v1.04 real-data fix (see header): risk = InpRangeRiskPct% of the   |
+//| session's own finalized range, measured directly from entry -      |
+//| NOT a tight recent-bar swing (v1.01-1.03's structural stop measured |
+//| risk at a median of just $2.59, vs the real EA's real median        |
+//| $11.70 - a ~4.5x-too-tight stop that was getting hit by ordinary    |
+//| noise long before a real move could develop, the actual cause of   |
+//| v1.03's 5x-shorter-than-real average hold time). Checked directly   |
+//| against the real 8-month report: real risk/range ratio has median   |
+//| 41.7%, mean 45.9%, most trades between 33-54% - a real, tight        |
+//| cluster, not a guess.                                               |
+//+------------------------------------------------------------------+
+double StructuralOrFibSL(bool isBuy, int sesIdx, double entryPx, double rng, double atr)
   {
    if(InpFixedFibSL)
      {
@@ -505,10 +535,8 @@ double StructuralOrFibSL(bool isBuy, int sesIdx, double atr)
       return isBuy ? g_sesExtHigh[sesIdx] - (InpFibSLPct / 100.0) * swing
                    : g_sesExtLow[sesIdx]  + (InpFibSLPct / 100.0) * swing;
      }
-   int idx = isBuy ? iLowest(_Symbol, PERIOD_M5, MODE_LOW, InpStructLookback, 1)
-                    : iHighest(_Symbol, PERIOD_M5, MODE_HIGH, InpStructLookback, 1);
-   double buf = (atr > 0.0) ? InpStructBufferATR * atr : 0.0;
-   return isBuy ? iLow(_Symbol, PERIOD_M5, idx) - buf : iHigh(_Symbol, PERIOD_M5, idx) + buf;
+   double risk = (InpRangeRiskPct / 100.0) * rng;
+   return isBuy ? entryPx - risk : entryPx + risk;
   }
 //+------------------------------------------------------------------+
 double LotStep(double lots)
