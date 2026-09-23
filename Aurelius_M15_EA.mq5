@@ -615,6 +615,88 @@
 //|  optionally skip entering directly against an already-open Aurelius           |
 //|  position. Read-only broadcast - has zero effect on Aurelius's own entries,    |
 //|  exits, sizing, or risk, whether Vanguard is attached or reading it or not.     |
+//|                                                                                  |
+//|  RESEARCH NOTE (2026-09-22): real MT5 confirmation, LIVE GOLD account              |
+//|  (382043238, NOT GOLD#), 2023.01.01-2026.09.21, 20000 ZAR, today's shipped          |
+//|  defaults unchanged, 62% real ticks: 428 trades, net 42,250.37 ZAR, PF                |
+//|  1.89025, Balance DD Maximal 7.29%, Equity DD Maximal 9.86% / Relative                  |
+//|  13.18% - matches this file's own existing claim that M15 beats M5 on every              |
+//|  risk-adjusted metric (Aurelius_EA.mq5's paired same-day M5 confirmation: PF               |
+//|  1.573425, worse on every DD figure). See Aurelius_EA.mq5's own 2026-09-22                   |
+//|  research note for the full methodology, benchmark comparison and GOLD# data                   |
+//|  caveat - not repeated here.                                                                      |
+//|                                                                                                      |
+//|  ABLATION (research/aurelius/candidate_ablation_test.py, engine.py/sim.py's P15                       |
+//|  params): isolates this file's still-unconfirmed candidates. CORRECTION vs how                          |
+//|  this ablation was originally scoped: InpStopATR is NOT one of them - v1.48                               |
+//|  already real-tested 1.5 and REJECTED it, reverting to today's 2.5 default, so it                          |
+//|  is excluded here. The three still genuinely Python-only are InpPullbackMA                                   |
+//|  (PB_21, v1.50), InpMaxSlopeATR (1.25, v1.49) and InpUseSlopeSRBlock (on, v1.51).                              |
+//|  Same GOLD#-only, price-unit-net caveat as Aurelius_EA.mq5's note applies here too.                             |
+//|                                                                                                                    |
+//|    baseline (shipped)                       n=401  net=$2722.37  PF 2.1335  closedDD $201.92  floatDD $255.67     |
+//|    InpPullbackMA      PB_21->PB_50           n=398  net=$2663.23  PF 2.1325  closedDD $145.81  floatDD $272.85     |
+//|    InpMaxSlopeATR     1.25->1.00             n=345  net=$2406.58  PF 2.1332  closedDD $165.22  floatDD $218.97     |
+//|    InpUseSlopeSRBlock on->off                n=410  net=$2639.55  PF 2.0597  closedDD $210.05  floatDD $282.73     |
+//|    MaxSlopeATR+SlopeSRBlock reverted together n=345 net=$2406.58  PF 2.1332  closedDD $165.22  floatDD $218.97     |
+//|      (byte-identical to MaxSlopeATR alone, see below)                                                              |
+//|    all three reverted (pre-v1.49 stack)      n=348  net=$2464.49  PF 2.1738  closedDD $145.81  floatDD $272.85     |
+//|                                                                                                                    |
+//|  CANNOT BE ISOLATED INDEPENDENTLY: InpMaxSlopeATR and InpUseSlopeSRBlock. The                                     |
+//|  "both reverted together" row above is byte-identical to "MaxSlopeATR alone"                                       |
+//|  because InpUseSlopeSRBlock's own gate (slope>=1.00 AND SR-distance>=6.00) only                                     |
+//|  ever evaluates candidates the PRIMARY slope gate already let through, and once                                      |
+//|  InpMaxSlopeATR=1.00 that primary gate already excludes everything with slope>=                                       |
+//|  1.00 - so the block never has anything left to catch. Confirms exactly the                                            |
+//|  interaction this file's own v1.51 comment flagged when InpUseSlopeSRBlock was                                          |
+//|  shipped ON "specifically so the next real test exercises it": it can only be                                            |
+//|  genuinely tested while InpMaxSlopeATR stays at 1.25.                                                                     |
+//|                                                                                                                              |
+//|  HONEST DISCREPANCY, not glossed over: this run finds the OPPOSITE drawdown                                                 |
+//|  direction from the two earlier Python-only screens that produced these defaults.                                            |
+//|  gate_loosen_test_m15.py (v1.49's own comment) claimed InpMaxSlopeATR 1.00->1.25                                               |
+//|  left max drawdown "UNCHANGED"; here reverting from the shipped 1.25 back to 1.00                                               |
+//|  cuts closedDD 18.2% and floatDD 14.4% - i.e. drawdown IS measurably worse at 1.25,                                              |
+//|  not unchanged. pullback_ma_test.py (v1.50's own comment) claimed PB_21 cut                                                        |
+//|  drawdown ~19% vs PB_50; here reverting from the shipped PB_21 to PB_50 cuts                                                         |
+//|  closedDD 27.8% - PB_50 has the lower drawdown on this construction, the opposite                                                     |
+//|  direction from that screen's claim. Different simulator each time (this is the                                                        |
+//|  full engine.py/sim.py OnTick port, not those scripts' own simpler construction),                                                        |
+//|  same real bar data - reported as an open discrepancy, not resolved here, and it                                                          |
+//|  raises the priority of testing both for real rather than lowers it. Separately:                                                           |
+//|  the closedDD/floatDD figures for "PB_50 alone" and "all three reverted" match to                                                           |
+//|  six decimal places despite different trade sets (398 vs 348 trades, checked                                                                 |
+//|  directly, not a rounding artifact) - the single worst drawdown episode in this                                                               |
+//|  window is driven by a run of trades neither InpMaxSlopeATR nor InpUseSlopeSRBlock                                                             |
+//|  touches, the same "same driving OOS episode" pattern v1.51's own comment already                                                              |
+//|  documented for InpUseSlopeSRBlock alone.                                                                                                        |
+//|                                                                                                                                                   |
+//|  PRIORITIZED REAL MT5 TESTS (symbol GOLD, account 382043238, 2023.01.01-2026.09.21,                                                             |
+//|  20000 ZAR, single toggle off from today's shipped defaults):                                                                                    |
+//|                                                                                                                                                     |
+//|   1. InpMaxSlopeATR=1.00 (largest ablated effect, and the drawdown-direction                                                                      |
+//|      discrepancy above makes this the most urgent to resolve for real). Note:                                                                      |
+//|      InpUseSlopeSRBlock stays on for this test but will sit mostly dormant per the                                                                  |
+//|      interaction above - a real limitation of single-toggle testing here, not an                                                                    |
+//|      oversight. PASS (1.25 keeps its default) if real trade count falls by roughly                                                                   |
+//|      the ablation's ~14% (<=~368 of 428) AND real PF does not rise more than 2%                                                                       |
+//|      above 1.89025. FAIL (reconsider 1.25) if real PF at 1.00 comes back meaningfully                                                                  |
+//|      higher than 1.89025, or Balance/Equity DD improves by more than ~15% relative -                                                                    |
+//|      matching this ablation's direction rather than v1.49's original "unchanged" claim.                                                                  |
+//|                                                                                                                                                            |
+//|   2. InpUseSlopeSRBlock=false (leave InpMaxSlopeATR at 1.25 so the block is actually                                                                      |
+//|      exercised, per the interaction above). PASS (stays on) if real PF drops at least                                                                     |
+//|      2% below 1.89025 with it off, or Balance/Equity DD gets measurably worse. FAIL                                                                        |
+//|      if real PF/DD are flat or better with it off - meaning the 98.5th/99.5th-                                                                              |
+//|      percentile permutation result behind this default doesn't hold on the live                                                                              |
+//|      account.                                                                                                                                                   |
+//|                                                                                                                                                                    |
+//|   3. InpPullbackMA=PB_50 (lowest ablated net effect, but resolves the closedDD-                                                                                  |
+//|      direction discrepancy against pullback_ma_test.py's own earlier claim). PASS                                                                                 |
+//|      (PB_21 keeps its default) if real Balance/Equity DD with PB_21 - already                                                                                      |
+//|      confirmed today at 7.29%/9.86% - comes back lower than a real PB_50 run with                                                                                   |
+//|      everything else identical. FAIL if PB_50's real DD is lower, matching this                                                                                      |
+//|      ablation rather than the original screen.                                                                                                                          |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.52"

@@ -526,6 +526,79 @@
 //|  optionally skip entering directly against an already-open Aurelius           |
 //|  position. Read-only broadcast - has zero effect on Aurelius's own entries,    |
 //|  exits, sizing, or risk, whether Vanguard is attached or reading it or not.     |
+//|                                                                                  |
+//|  RESEARCH NOTE (2026-09-22): two fresh real MT5 confirmations landed today,      |
+//|  both on the LIVE GOLD account (382043238, NOT GOLD#), 2023.01.01-2026.09.21,     |
+//|  20000 ZAR, today's shipped defaults unchanged, 62% real ticks. M5 (this file):    |
+//|  929 trades, net 36,338.93 ZAR, PF 1.573425, Balance DD Maximal 21.49%, Equity      |
+//|  DD Maximal 13.78% / Relative 22.27%. M15 (Aurelius_M15_EA.mq5, same session):       |
+//|  428 trades, net 42,250.37 ZAR, PF 1.89025, Balance DD 7.29%/11.72%, Equity DD        |
+//|  9.86%/13.18% - consistent with that file's own existing claim that M15 beats         |
+//|  M5 on every risk-adjusted metric. Both reconciled exactly against their own           |
+//|  reports. This M5 result BEATS the two prior headline benchmarks at the top of          |
+//|  this file - the 2026-08 demo-GOLD# run (PF 1.56, old pre-v1.45 MA stack,                |
+//|  InpUseStopLoss=false) and v1.45's own real GOLD confirmation (PF 1.424, a                |
+//|  different window, no InpMinSlopeATR/Price21Exit/VwapExit combo) - but neither              |
+//|  older run used the same input stack or window, so this is a raw-PF "beats", not             |
+//|  a like-for-like re-confirmation of either.                                                    |
+//|                                                                                                  |
+//|  THE GAP THIS DOESN'T CLOSE: both real numbers confirm the FULL current stack,                   |
+//|  which still bundles three individually-unconfirmed candidates - InpMinSlopeATR                   |
+//|  (0.40, CANDIDATE UNDER TEST since v1.46), InpUsePrice21Exit (on, never real-                       |
+//|  tested) and InpUseVwapExit (on, never real-tested). A 929-trade real pass can't                     |
+//|  say which of the three is earning its keep vs riding the other two's coattails -                     |
+//|  same reasoning already applied to Ratchet_EA.mq5's InpTrailRunnerATR and to                           |
+//|  Meridian_EA.mq5's MA-stack swap before either was trusted individually.                                |
+//|                                                                                                           |
+//|  ABLATION (research/aurelius/candidate_ablation_test.py, this session): isolates                         |
+//|  each of the three via engine.py/sim.py, the direct OnTick()-port simulator (not                          |
+//|  the simplified trendline-breakout scripts elsewhere in research/aurelius/). DATA                          |
+//|  CAVEAT, same discipline as msim.py's GOLD#-vs-GOLD caveat for Meridian: only real                           |
+//|  GOLD# (demo account) M5 bars exist in this container (2023.01.03-2026.08.14, per                             |
+//|  engine.py's own note) - NOT the live GOLD account the two runs above used, and 5                              |
+//|  weeks short of 2026.09.21 at the end. Every figure below is GOLD#-calibrated:                                  |
+//|  good for RANKING these three levers against each other, not for predicting live-                               |
+//|  GOLD ZAR magnitudes. Net/drawdown are raw price-unit numbers (1 lot-equivalent, no                               |
+//|  compounding), matching this file's existing Python-only "$" convention.                                          |
+//|                                                                                                                     |
+//|    baseline (shipped)                   n=885  net=$2587.24  PF 1.8056  closedDD $146.81  floatDD $328.89           |
+//|    InpMinSlopeATR   0.40->0.50           n=806  net=$2274.70  PF 1.7596  closedDD $149.90  floatDD $305.98           |
+//|    InpUsePrice21Exit on->off             n=875  net=$2554.83  PF 1.7959  closedDD $132.32  floatDD $331.93           |
+//|    InpUseVwapExit    on->off             n=885  net=$2590.96  PF 1.8049  closedDD $137.41  floatDD $328.89           |
+//|    all three reverted (pre-v1.46 stack)  n=796  net=$2262.42  PF 1.7569  closedDD $129.97  floatDD $309.02           |
+//|                                                                                                                     |
+//|  READ: InpMinSlopeATR is doing essentially all the work - reverting it alone                                       |
+//|  accounts for nearly the whole "all three reverted" drop (net -12.1% vs -12.6%,                                     |
+//|  trades -8.9% vs -10.1%). InpUsePrice21Exit's effect is small and mixed: net -1.25%                                  |
+//|  and PF -0.5% when removed (helps a little) but closedDD is 9.9% BETTER with it off                                   |
+//|  - not the clean "wins on every measure" bar this file otherwise requires before                                       |
+//|  trusting a candidate. InpUseVwapExit is the surprise: it does fire (15/885 trades                                      |
+//|  exit via VWAP in the baseline - checked directly, not assumed) but turning it off                                       |
+//|  leaves trade count UNCHANGED (885 either way) and net within $3.72 (0.14%) of                                            |
+//|  baseline - those 15 trades just exit via ALIGN_BREAK/PRICE21 instead, at very                                             |
+//|  similar prices. On this data it looks close to redundant, not the genuine second                                          |
+//|  lever its own Python-only validation (FULL net 1846.2->1990.5) suggested.                                                   |
+//|                                                                                                                                |
+//|  PRIORITIZED REAL MT5 TESTS (symbol GOLD, account 382043238, 2023.01.01-2026.09.21,                                          |
+//|  20000 ZAR, single toggle off from today's shipped defaults each time):                                                       |
+//|                                                                                                                                  |
+//|   1. InpMinSlopeATR=0.50 (highest priority, largest ablated effect). PASS (0.40                                                |
+//|      keeps its default) if the real PF comes back below 1.573425 (today's confirmed                                            |
+//|      PF) AND trade count falls by roughly the ablation's ~8.9% (<=~885 of 929).                                                  |
+//|      FAIL (0.40 not earning its keep) if real PF at 0.50 matches or beats 1.573425.                                               |
+//|                                                                                                                                     |
+//|   2. InpUsePrice21Exit=false. PASS (stays on) only if real PF drops more than 1%                                                   |
+//|      below 1.573425 AND Balance/Equity DD does NOT improve when it's off (the                                                       |
+//|      Python closedDD-improves-when-off result above must NOT repeat for real). FAIL                                                 |
+//|      if real PF is flat/higher with it off, or DD improves - meaning the Python-only                                                  |
+//|      validation's own numbers (TRAIN/HOLD net+PF up, drawdown -19%) don't hold live.                                                   |
+//|                                                                                                                                          |
+//|   3. InpUseVwapExit=false (lowest priority, cheapest to rule out). Python predicts                                                      |
+//|      near-zero effect (trade count unchanged, net +0.14%). Most-likely/PASS outcome:                                                     |
+//|      real PF lands within ~3% of 1.573425 either way, confirming this lever is                                                            |
+//|      currently redundant on this account and a candidate for later simplification.                                                        |
+//|      FAIL of that prediction (real PF moves >3% either direction) means the Python                                                          |
+//|      model is missing something real about this lever and it needs its own look.                                                             |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.47"
