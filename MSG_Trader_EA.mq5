@@ -509,9 +509,39 @@
 //|  NOT VALIDATED BY A REAL BACKTEST of this reconstruction with the filter live - the next real run          |
 //|  needs to check whether it reproduces a similar win-rate/net-profit lift here, not just on the real         |
 //|  EA's own trades used to derive it.                                                                        |
+//|                                                                    |
+//|  v1.14 DEFAULTS InpSkipDeadZone BACK TO FALSE - the real M1 re-test v1.13 asked for came back worse,        |
+//|  and the reason is now understood precisely, not just observed. This EA holds exactly ONE position at      |
+//|  a time (single g_ticket slot). Diffed the real re-test (Backtest_2, filter on, 87 round-trips) against    |
+//|  the clean baseline it was re-run from (Backtest_1, filter off, 93 round-trips) trade by trade: only 3     |
+//|  of the 93 baseline trades survive unchanged. 90 differ, and of those 90, only 23 were actually INSIDE     |
+//|  the dead zone - the trades the filter was built to block, and they were correctly bad (net -3,190.19,     |
+//|  matching the v1.13 analysis exactly). The other 67 vanished purely as a CASCADE side effect: skipping     |
+//|  an entry frees the single position slot earlier than it would have been freed otherwise, which changes    |
+//|  which LATER setups get a slot at all - a completely different downstream trade sequence, unrelated to     |
+//|  whether any of those later setups were themselves in the dead zone. Those 67 cascaded-away trades were    |
+//|  worth +20,245.27 - about 6.3x more than the 23 correctly-blocked trades saved - and were replaced by 84   |
+//|  different trades worth only +15,781.55. Net effect: -1,275.49 versus baseline on this run, despite the    |
+//|  filter doing exactly what it was designed to do on the 23 trades it actually touched directly.            |
+//|                                                                    |
+//|  WHY THE PERMUTATION TEST DIDN'T CATCH THIS: it validated a STATIC question - "were the real dead-zone     |
+//|  trades unusually bad, holding every other real trade fixed" - which is true, p=0.0031, and remains        |
+//|  true today. It could not and did not test the DYNAMIC question - "what happens to the rest of the         |
+//|  sequence if these entries are actually blocked live" - because that requires the single-position          |
+//|  cascade, which only a real sequential re-test can expose. This is a genuine blind spot in trade-level     |
+//|  permutation validation for a single-position system, not a flaw in the permutation test itself for the    |
+//|  narrower question it was built to answer.                                                                 |
+//|                                                                    |
+//|  NOT DELETED: the underlying dead-zone finding on the real EA's own 108 trades is still real and still     |
+//|  unexplained by anything else measured so far - only the STATIC framing of "just skip these entries live"  |
+//|  is disproven as a net-positive change on this run. InpSkipDeadZone is left in, defaulted OFF, as an        |
+//|  opt-in for further experimentation (e.g. it may behave differently on M5, where trades are less dense     |
+//|  and cascade collisions rarer, or if the EA ever supported more than one concurrent position) rather than  |
+//|  deleted outright - same "walk back the conclusion, keep the honestly-documented attempt" precedent as     |
+//|  v1.08's max-hold tightening.                                                                              |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.13"
+#property version   "1.14"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -587,9 +617,9 @@ input double InpRangeRiskPct       = 30.8;    // real-confirmed IDENTICAL on M1 
                                                // see v1.07 header note. No period-specific override needed.
 input double InpMinExtensionPct    = 10.0;    // v1.07 M1 real-data fix - see header. M5 value was 15.0 - SET THIS
                                                // BACK TO 15.0 IF RUNNING ON M5.
-input bool   InpSkipDeadZone      = true;     // v1.13 real-data fix - see header. Skips entries whose risk-as-%-
-                                               // of-price falls in the dead zone below - CONFIRMED bad on the
-                                               // real EA's own 108 real trades (permutation p=0.0031).
+input bool   InpSkipDeadZone      = false;    // v1.14: DEFAULTED OFF - v1.13's real M1 re-test showed a cascade
+                                               // side effect costs more than the filter saves. See header. Left
+                                               // in as opt-in - the underlying dead-zone finding is still real.
 input double InpDeadZoneMinPct    = 0.18;     // % of entry price. Boundary fit from real data - approximate, see header.
 input double InpDeadZoneMaxPct    = 0.26;     // % of entry price. Boundary fit from real data - approximate, see header.
 input int    InpATRPeriod         = 14;
