@@ -599,6 +599,30 @@
 //|      currently redundant on this account and a candidate for later simplification.                                                        |
 //|      FAIL of that prediction (real PF moves >3% either direction) means the Python                                                          |
 //|      model is missing something real about this lever and it needs its own look.                                                             |
+//|                                                                                                                                                |
+//|  RESEARCH NOTE (2026-09-23): a real MT5 run came back, but NOT as any single test    |
+//|  above - it toggled all three candidates off together (InpMinSlopeATR=0.50,          |
+//|  InpUsePrice21Exit=false, InpUseVwapExit=false in the same run), the "all three       |
+//|  reverted" ablation row, not a single-variable test. Live GOLD 382043238,             |
+//|  2023.01.01-2026.09.21, 20000 ZAR: 832 trades (-10.4% vs the 2026-09-22 real          |
+//|  baseline's 929), net 30,587.09 ZAR (-15.8% vs 36,338.93), PF 1.517462 (-3.6% vs      |
+//|  1.573425), Balance DD Maximal 16.08% / 3,567.03 ZAR (BETTER than baseline's 21.49%   |
+//|  / 4,695.87), Equity DD Maximal 15.42% / 6,576.91 ZAR (WORSE than baseline's 13.78%   |
+//|  / 6,210.17), Equity DD Relative 17.06% / 3,827.65 ZAR (better than 22.27% /          |
+//|  4,913.44). Directionally this matches the ablation's own "all three reverted" row    |
+//|  (predicted trades -10.1%, net -12.6%, PF -2.7% vs the real -10.4%/-15.8%/-3.6%) -    |
+//|  real net fell somewhat more than Python predicted but trades and PF are close - so   |
+//|  the three candidates DO earn real net/PF together. But because three variables       |
+//|  moved at once, this run cannot say which one is responsible, and it cannot be        |
+//|  scored against tests 1-3's individual PASS/FAIL criteria above - none of those       |
+//|  are resolved yet. It does add one real, useful data point: the current full stack    |
+//|  has WORSE Equity DD Maximal than reverting all three (13.78% vs 15.42% is backwards  |
+//|  - equity DD is better with the candidates OFF), even though Balance DD and net/PF    |
+//|  are better with them ON - a real net-vs-worst-case-float-DD tradeoff, not a clean    |
+//|  win on every measure. STILL NEEDED: tests 1-3 above, run one candidate at a time -    |
+//|  test 1 (InpMinSlopeATR=0.50 alone, Price21Exit/VwapExit left ON) is the highest      |
+//|  priority, since the ablation and this bundled run both point to it as the            |
+//|  dominant lever.                                                                       |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.47"

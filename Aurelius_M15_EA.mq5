@@ -697,6 +697,26 @@
 //|      confirmed today at 7.29%/9.86% - comes back lower than a real PB_50 run with                                                                                   |
 //|      everything else identical. FAIL if PB_50's real DD is lower, matching this                                                                                      |
 //|      ablation rather than the original screen.                                                                                                                          |
+//|                                                                                                                                                                          |
+//|  RESEARCH NOTE (2026-09-23): real MT5 result for prioritized test 1 above, live  |
+//|  GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, only InpMaxSlopeATR changed   |
+//|  (1.25->1.00; InpUseSlopeSRBlock left on but confirmed dormant here per the      |
+//|  interaction above, so this is still a clean single-variable test of the slope   |
+//|  cap itself): 374 trades (-12.6% vs the 2026-09-22 real baseline's 428, close to |
+//|  the ablation's predicted -14%), net 35,228.27 ZAR (-16.6% vs 42,250.37), PF     |
+//|  1.823831 (-3.5% vs 1.89025). PASS: trade-count drop is in range and PF at 1.00  |
+//|  did NOT come back higher - test 1's criterion is satisfied, InpMaxSlopeATR      |
+//|  stays 1.25 and is now real-confirmed (not just Python), see its own comment.    |
+//|  Drawdown was NOT the clean win the ablation implied though: Balance DD Maximal  |
+//|  actually ROSE 7.29%->8.07% and Equity DD Maximal rose 9.86%->10.94% at 1.00,    |
+//|  even though both dropped slightly in raw ZAR (3445.61->3385.48 / 4775.36->      |
+//|  4713.86) - the % figures rose because the equity peak itself shrank with fewer, |
+//|  smaller-total trades. So on the real account, 1.25 wins on net, PF, AND         |
+//|  drawdown-% - a clear result, resolving the earlier gate_loosen_test_m15.py      |
+//|  "drawdown unchanged" discrepancy in 1.25's favor.                               |
+//|  STILL OPEN: test 2 (InpUseSlopeSRBlock=false with InpMaxSlopeATR held at 1.25,  |
+//|  so the block is actually exercised) and test 3 (InpPullbackMA=PB_50) - neither  |
+//|  has been real-tested yet, this run only answered test 1.                        |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.52"
@@ -847,11 +867,14 @@ input double  InpMaxSlopeATR   = 1.25;      // Max slope - blocks over-extended 
                                              // further to 1.50+ reproduces the earlier Opus finding
                                              // (drawdown jumps to $204.88, PF keeps falling) - 1.25 looks
                                              // like the genuine sweet spot between those two results, not
-                                             // a contradiction of the earlier one. NEEDS A REAL MT5
-                                             // BACKTEST before trusting this over 1.00 - Python-only so
-                                             // far, and this parameter specifically has already shown
-                                             // once that its right value depends on what else is shipped
-                                             // alongside it.
+                                             // a contradiction of the earlier one. REAL-CONFIRMED
+                                             // (2026-09-23, live GOLD 382043238, 2023.01.01-2026.09.21,
+                                             // 20000 ZAR): reverting to 1.00 gave 374 trades (-12.6%) and
+                                             // net 35,228.27 ZAR / PF 1.823831 vs 1.25's own real 428
+                                             // trades / 42,250.37 ZAR / PF 1.89025 - both real (not just
+                                             // net, PF too) confirm 1.25 over 1.00. See the 2026-09-23
+                                             // research note below for the full pass/fail check and an
+                                             // open drawdown-direction discrepancy this same run raised.
 input bool    InpUseCrossFilter  = true;       // Block after repeated 21/50 crossings
 input int     InpCrossWindow     = 10;         // Cross lookback (bars)
 input int     InpMaxCrosses      = 1;          // Max crossings allowed
