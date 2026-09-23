@@ -134,7 +134,182 @@
 //|  THROUGH A REAL MT5 STRATEGY TESTER AT THESE SETTINGS - needs the   |
 //|  same real-test step v1.00 and v1.01 both got before this can be    |
 //|  trusted the way those numbers were.                                |
-//|                                                                     |
+//|                                                                    |
+//|  v1.02 REAL TEST + RESEARCH NOTE (2026-09-23, Opus review) - NO    |
+//|  LOGIC CHANGE, #property version STAYS 1.02. Four real reports came|
+//|  in the same day (two Ratchet, two Meridian); everything below uses|
+//|  the two Meridian ones.                                            |
+//|                                                                    |
+//|  REAL MT5 STRATEGY TESTER RESULT, v1.02 (2026-09-23, XM Global     |
+//|  GOLD#, M5, 2026.01.01-2026.09.21, 10000 ZAR deposit, InpLots=0.01,|
+//|  100% real ticks; recompiled - all five renamed/new inputs present |
+//|  in the report: InpPConfirm=250, InpConfirmMAMethod=SMA,           |
+//|  InpFastMAMethod=EMA, InpSRDays=3, InpMinSRDistATR=0.5): 414       |
+//|  trades, net +36600.33 ZAR, PF 1.636736, win 29.95%, avg hold      |
+//|  4h10m, Balance DD Maximal 4968.25 (14.50%), Equity DD Maximal     |
+//|  5690.44 (16.30%). Deals parsed into round-trips by cumulative     |
+//|  volume (research/ratchet/report.py): 414 round-trips, exactly one |
+//|  out-leg each (no scale-out), profit+commission+swap sums to the   |
+//|  report's Total Net Profit to the cent. This closes the v1.02 "not |
+//|  yet run through a real MT5 Strategy Tester" gap above.            |
+//|                                                                    |
+//|  NOT LIKE-FOR-LIKE WITH v1.00/v1.01's REAL NUMBERS. Those ran 20000|
+//|  ZAR over 2023.01-2026.09 at 84% tick quality; this is 10000 ZAR   |
+//|  over Jan-Sep 2026 only, the strongest gold trend stretch in the   |
+//|  data (see per-year table below - 2026 alone out-earns 2023-2025   |
+//|  combined on every config). So 36.78% / 29.82% -> 16.30% is NOT a  |
+//|  v1.02 drawdown improvement and must not be read as one.           |
+//|                                                                    |
+//|  THE SAME-WINDOW BASELINE THAT DOES EXIST. The same day's          |
+//|  Backtest_1 ran a stale pre-v1.02 binary. Identified exactly, not  |
+//|  assumed: its Inputs block has v1.00's layout (InpP150=150,        |
+//|  InpMAMethod=EMA) with InpSafetyStopATR=2.5 and NO                 |
+//|  InpSRDays/InpMinSRDistATR - a combination no committed version    |
+//|  has. The real initial-SL/Wilder-ATR ratio is 2.500 (median), and  |
+//|  the EA-faithful simulator (below) matches 471/473 of its real     |
+//|  entries to the bar on "150 EMA + VWAP, NO S/R, 2.5 stop", vs 461  |
+//|  with v1.01's S/R on and 440 with v1.00's 3.0 stop. Real result:   |
+//|  473 trades, net +40882.66 ZAR, PF 1.626120, Balance DD 5141.70    |
+//|  (15.09%), Equity DD 6377.98 (21.40%). CONFIRMED same-window       |
+//|  comparison, that binary -> v1.02: trades -12.5%, net -10.5%, PF   |
+//|  flat (1.626 -> 1.637), equity DD -10.8% in ZAR (21.40% -> 16.30%),|
+//|  balance DD -3.4%. A PF-neutral volume cut with net and drawdown   |
+//|  shrinking roughly together, NOT the "net AND drawdown improved    |
+//|  together" v1.01/v1.02's Python said. (It is two changes at once - |
+//|  150 EMA -> 250 SMA AND S/R on - separated below.)                 |
+//|                                                                    |
+//|  PYTHON PREDICTION vs REAL FILLS, SAME WINDOW                      |
+//|  (research/meridian/python_vs_real.py). Re-ran the exact           |
+//|  meridian_slow_confirm_sweep_test.py construction; it reproduces   |
+//|  the header's full-history 3432.72 / PF 1.357 / n=2537 to the cent,|
+//|  so it is the same model. Restricted to 2026-01-01..2026-08-14     |
+//|  (engine's GOLD_M5.csv ends there; real trades cut at the same     |
+//|  date), in price-$ per 0.01 lot:                                   |
+//|                                                                    |
+//|              Python predicted         REAL                         |
+//|   v1.02      n=412 $2376.52 PF 1.669  n=362 $1987.17 PF 1.629      |
+//|   BT1 bin.   n=504 $2315.02 PF 1.532  n=409 $2017.81 PF 1.565      |
+//|   BT1->v1.02 net +2.7%                net -1.5% (-10.5% to 09-21)  |
+//|                                                                    |
+//|  PF held (within 2.5% on v1.02). Trade count and net did not:      |
+//|  Python over-counted trades by 14-23% and over-stated v1.02's net  |
+//|  by ~20%, and its predicted direction for the change was wrong on  |
+//|  this window.                                                      |
+//|                                                                    |
+//|  WHY - THE EA IS NOT THE PYTHON MODEL. research/meridian/msim.py is|
+//|  a bar-by-bar port of this file's                                  |
+//|  OnTick/ManageOpenPosition/CheckForEntry (validated: 414/414 of    |
+//|  Backtest_2's real entries matched to the bar, 411 exiting on the  |
+//|  same bar; on the header's full-history real runs it gives 2511    |
+//|  trades vs v1.00's real 2512, win 26.8% vs 26.75%, and reproduces  |
+//|  v1.01 having MORE trades than v1.00 - the tighter stop frees the  |
+//|  one slot sooner). It exposed four EA-vs-model differences, every  |
+//|  one real behavior of this file's code, none a Python bug as such: |
+//|  - NOT stop-and-reverse. OnTick runs ManageOpenPosition() OR       |
+//|    CheckForEntry(), never both, so the 21/50 cross that closes a   |
+//|    trade on REVERSAL can never open the opposite one (next bar it  |
+//|    is no longer fresh). Python's sim_filtered_entries() opens it.  |
+//|    In the 2026 window 204 reversal-closing crosses are never even  |
+//|    evaluated as entries.                                           |
+//|  - STALE-TICKET BAR. g_ticket is only re-synced inside             |
+//|    ManageOpenPosition()/CheckForEntry(), so after the broker SL    |
+//|    fills mid-bar the next new bar still sees g_ticket != 0 and runs|
+//|    ManageOpenPosition() (which syncs to flat and returns) instead  |
+//|    of CheckForEntry(). A cross on the first bar after an SL        |
+//|    stop-out is never traded. Found because it was the only thing   |
+//|    the simulator's 16 unmatched Backtest_2 entries had in common   |
+//|    (all 16 sat on that bar; real EA flat each time; every condition|
+//|    cleared by a wide margin).                                      |
+//|  - FRIDAY 22:00 FLATTEN (Python has none) - the largest single net |
+//|    difference on the 2026 window: turning just this on in a        |
+//|    Python-rules run cuts net 13.5%.                                |
+//|  - InpMaxSpreadPoints, and no entries before 01:05 server time     |
+//|    (zero real entries at 00:xx or in the 01:00 bar across all four |
+//|    2026-09-23 reports - hour-0 bars only exist in DST-gap weeks,   |
+//|    outside the broker's session table). Minor.                     |
+//|                                                                    |
+//|  Run under Python's rules the simulator lands on Python's counts   |
+//|  (411 vs 412, 503 vs 504); under the EA's, on the real ones (364 vs|
+//|  362, 410 vs 409) - research/meridian/ea_vs_python.py, which also  |
+//|  switches each EA rule on alone.                                   |
+//|                                                                    |
+//|  WHICH v1.02 CHANGE DID WHAT (research/meridian/v102_decompose.py).|
+//|  Four corners, validated simulator, 24 seeds of execution noise    |
+//|  measured from these two reports (entry offset vs bar open, SL-fill|
+//|  slippage). Mean net, price-$ per 0.01 lot; 2023-2025 are          |
+//|  out-of-sample for the simulator:                                  |
+//|                                                                    |
+//|                    2023  2024  2025  2026  total  worst eqDD       |
+//|   150 EMA, no SR      3   -84   532  2405   2856  416              |
+//|   150 EMA + SR v1.01 31   -67   612  2362   2939  437              |
+//|   250 SMA, no SR    -36    25   670  2176   2834  381              |
+//|   250 SMA + SR v1.02  8    61   691  2155   2915  382              |
+//|                                                                    |
+//|  - S/R filter: small and consistent - helps 3 of 4 years under     |
+//|    either confirm line (+$81 total), costs a little in 2026.       |
+//|  - 250 SMA vs 150 EMA (both with S/R): -$24 over the four periods, |
+//|    i.e. noise (per-period sd $29-$142). Better in 2024/2025, worse |
+//|    in 2023 and in 2026 (-$207, -9%), worst-period equity DD -13%,  |
+//|    and the only corner net-positive in all four years (2023's +8 is|
+//|    inside its own sd of 37).                                       |
+//|                                                                    |
+//|  VERDICT: v1.02 KEPT. What the real test CONFIRMS: the PF level    |
+//|  Python predicted, and a lower equity drawdown than the same-window|
+//|  150 EMA binary. What it does NOT confirm: "net AND drawdown       |
+//|  improved together" - on real 2026 fills it is a drawdown-for-net  |
+//|  trade, and across 2023-2026 (simulator, not real) it is           |
+//|  net-neutral vs v1.01 with a shallower worst year.                 |
+//|                                                                    |
+//|  WHAT DRIVES THE REAL DRAWDOWN (Backtest_2's equity curve rebuilt  |
+//|  on real GOLD# M1 bars - 5747.63 vs the report's 5690.44). Worst   |
+//|  episode 2026-05-06 13:54 -> 05-29 04:03: +2360.98 floating on at  |
+//|  the peak (a long later closed on reversal at +1676.01) plus 48    |
+//|  trades of May chop realizing -3259.09. Mostly realized chop, not  |
+//|  one trade's give-back. And unlike Ratchet, profit is broad: top 5 |
+//|  trades = 48% of net, net without them +18962 ZAR.                 |
+//|                                                                    |
+//|  "FIND SOMETHING NEW" - SIX CANDIDATES FROM THE FINDINGS ABOVE, ALL|
+//|  REJECTED (research/meridian/candidates.py). Deliberately not      |
+//|  re-runs of what research/aurelius already rejected in Python      |
+//|  (breakeven, fixed TP, partial scale-out, vol-sized lots, fast-MA  |
+//|  and entry-breach/Price21 exits, ATR-percentile and H4-trend       |
+//|  filters, M15). All judged ONLY through the sequential simulator,  |
+//|  so any single-position cascade is inside the result. Bar fixed    |
+//|  BEFORE running: better net in >=3 of 4 years, better in 2026 under|
+//|  both noisy and deterministic execution, worst-year equity DD not  |
+//|  worse by >2%.                                                     |
+//|  - STOP-AND-REVERSE (make the EA do what every Python number       |
+//|    assumed): 2023 +64, 2024 +46, 2025 -119, 2026 -84 (deterministic|
+//|    -146); total -94. FAIL. Not taking the reversal cross costs in  |
+//|    chop years and pays in trend years. The EA's structure is not a |
+//|    bug to fix.                                                     |
+//|  - FIX THE STALE-TICKET BAR: worse in all 4 years (-6, -24, -28,   |
+//|    -22; total -80). FAIL. It is an accidental one-bar post-stop    |
+//|    cooldown and it helps slightly (the 16 real-window crosses it   |
+//|    dropped would have netted -129.91 in the simulator - modeled,   |
+//|    since the real EA never took them). Kept as-is, now documented  |
+//|    here and at the OnTick() call site.                             |
+//|  - BOTH OF THE ABOVE: 2023 +59, 2024 +48, 2025 -165, 2026 -48;     |
+//|    total -107. FAIL.                                               |
+//|  - WIDEN IT ON PURPOSE (no entry for 3 / 6 bars after an SL): total|
+//|    -497 / -561. FAIL. Of 0 / 1 / 3 / 6 bars, the accidental 1 is   |
+//|    best.                                                           |
+//|  - FRIDAY FLATTEN 23:00 instead of 22:00 (still flat for the       |
+//|    weekend): +15, -55, -6, +37; total -10. FAIL - noise.           |
+//|                                                                    |
+//|  No code change, so #property version stays 1.02 - same precedent  |
+//|  as MSG_Trader_EA.mq5's v1.14 / v1.16 research note: a disproven   |
+//|  idea, explained mechanistically, is what this history is for.     |
+//|                                                                    |
+//|  CAVEATS. The simulator is bar-level; its per-year numbers for     |
+//|  2023-2025 are modeled, not real fills (only the 2026 window and   |
+//|  the header's two full-history trade counts are real checks).      |
+//|  Execution noise was measured on 2026 fills and applied in ATR     |
+//|  units elsewhere. The real v1.02 test is one 9-month window in one |
+//|  regime; a real 2023-2026 v1.02 run at the header's 20000 ZAR would|
+//|  be the like-for-like check against v1.00/v1.01 and is still       |
+//|  missing.                                                          |
+//|                                                                    |
 //|  KNOWN GAPS (flagged, not fixed, so they don't get lost):          |
 //|   - No visual panel/wallpaper - deliberately out of scope for a    |
 //|     first pass; every other EA in this project has one, this one   |
@@ -147,6 +322,10 @@
 //|     below), NOT MT5's built-in iATR - Aurelius's v1.36 note found  |
 //|     this broker's iATR is a plain SMA(period) of true range, not   |
 //|     real Wilder smoothing. Matches engine.py's wilder_atr exactly. |
+//|   - No entry on the first bar after a broker SL fill (stale        |
+//|     g_ticket - see the 2026-09-23 section). Accidental, but         |
+//|     measured: "fixing" it lost net in all four years simulated, so |
+//|     it is deliberately kept.                                       |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
 #property version   "1.02"
@@ -556,6 +735,14 @@ void OnTick()
    // eventually closes and CheckForEntry() reads it again.
    UpdateVWAP();
 
+   // Exactly one of these per bar, never both (2026-09-23 note, see header):
+   //  - a REVERSAL close can't also open the opposite trade on the same bar
+   //    (not stop-and-reverse, unlike the Python research model - tested,
+   //    making it so lost net over 2023-2026);
+   //  - after a broker-side SL fill mid-bar, g_ticket is still non-zero at
+   //    the next new bar, so that bar goes to ManageOpenPosition() (which
+   //    syncs to flat) and a cross on it is never traded. Deliberately kept
+   //    - "fixing" it lost net in all four years simulated.
    if(g_ticket != 0)
       ManageOpenPosition();
    else
