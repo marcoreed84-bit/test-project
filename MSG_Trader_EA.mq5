@@ -679,6 +679,97 @@
 //|  chart's own object list gains new OBJ_TEXT entries alongside the existing lines/boxes). History blocks      |
 //|  (InpDrawHistory) are deliberately left unlabeled - labeling up to InpHistoryDays of past blocks would        |
 //|  clutter the chart faster than it would inform; only the live, current-session box and lines are labeled.    |
+//|                                                                    |
+//|  v1.16 RESEARCH NOTE - AURELIUS M5 TREND GATE: TESTED SEQUENTIALLY, NOT ADOPTED. NO CODE CHANGE, so           |
+//|  #property version stays 1.16 and there is nothing new to run in MT5. Recorded because a disproven idea,       |
+//|  explained mechanistically, is what this history is for.                                                       |
+//|                                                                    |
+//|  THE IDEA. The 93 real trades of Backtest_Final (the real v1.15 re-test: GOLD, MSG3-only, M1, 2026.01.01-      |
+//|  09.21, 20,249.02 ZAR, PF 2.140) were split by the real Aurelius_EA.mq5 trend definition - Aligned(), ALIGN_MID,|
+//|  its shipped M5 defaults, on the most recent CLOSED M5 bar. Trades WITH the trend won 54.8%, NEUTRAL ones        |
+//|  (the M5 MAs not cleanly stacked either way, 62% of trades) 36.2%, and only 4 fought a clean trend. Proposal:    |
+//|  only let CheckSessionSetups fire WITH that trend, rejecting NEUTRAL and AGAINST the way InRiskDeadZone does    |
+//|  (`continue`, so the range is not retired). That is a skip filter, the same shape as v1.13, so it got the full  |
+//|  sequential treatment before anyone believed it.                                                                |
+//|                                                                    |
+//|  CORRECTIONS TO THE STATIC PREMISE, measured:                                                                    |
+//|   (1) The bucket nets (WITH +13,504.67 / AGAINST +467.09 / NEUTRAL +6,277.26) are ZAR, not USD.               |
+//|   (2) The M5 series used ENDS 2026-08-14 23:55. All 11 real trades after that were classified on that stale     |
+//|       bar's state, which was NEUTRAL. Fixed by splicing: the GOLD# M1 CSV resampled to M5 reproduces the real M5  |
+//|       export EXACTLY on all 53,187 overlapping bars (OHLC and tick volume, max |diff| 0.00), so the tail comes    |
+//|       from the resample with no loss. Corrected: WITH 35 (51.4%, +14,312.57 ZAR, PF 2.87), NEUTRAL 54 (37.0%,    |
+//|       +5,469.36, PF 1.55), AGAINST 4.                                                                           |
+//|   (3) Aurelius' shipped stack is EMA21 > EMA50 > SMA250 > SMMA500 (the "150"/"600" names are legacy labels     |
+//|       for 250/500) plus close vs EMA2400. The "GOLD_M5.csv" file is really GOLD# (per its own header). That is  |
+//|       harmless: every MA here is a normalised linear filter of close, so GOLD's near-constant -0.12 bid offset  |
+//|       moves price and all five MAs together and cancels in every comparison. Only the +-0.02 jitter could flip |
+//|       a near-tie, and 0 of 96 simulated entries have any MA/price gap under 0.05 on their decision bar.         |
+//|   (4) Most importantly, the NEUTRAL bucket is net POSITIVE even statically. Its win rate is lower, but its PF   |
+//|       is 1.55. Removing a PF>1 bucket can only lower net unless a cascade rescues it, so this was a win-rate   |
+//|       and PF lever from the start, never a net lever.                                                           |
+//|                                                                    |
+//|  SEQUENTIAL SIM (research/msg/sim.py gains an optional trend gate; run_aurelius_gate.py). Baseline is v1.16    |
+//|  (v1.15 sizing on both arms). The gate reads the Aligned() state at the open of each M1 bar - the M5 bar before |
+//|  the one in progress, exactly what iMA(PERIOD_M5, shift 1) returns on that tick. search.py's windows, USD:      |
+//|        window          v1.16 n / net / PF       WITH-only n / net (delta) / PF / maxDD      not-AGAINST delta    |
+//|        GOLD  HOLDOUT    22 /   17.90 / 1.18      12 /   -7.53 ( -25.43) / 0.83 /  52->26       -2.49          |
+//|        GOLD  IS         66 / 1373.11 / 2.73      28 /  924.78 (-448.33) / 3.35 / 209->140      -16.81         |
+//|        GOLD  OOS        30 /   83.68 / 1.32      12 /  200.62 (+116.94) / 4.18 / 108->36       +33.54         |
+//|        GOLD  2026       96 / 1456.78 / 2.38      40 / 1125.40 (-331.38) / 3.46 / 209->140      +16.74         |
+//|        GOLD# HOLDOUT    22 /   23.82 / 1.24      12 /    2.33 ( -21.49) / 1.05 /  51->25       -4.14          |
+//|        GOLD# IS         66 / 1256.87 / 2.68      28 /  960.16 (-296.71) / 3.71 / 208->139      -16.81         |
+//|        GOLD# OOS        30 /  101.75 / 1.41      12 /  236.10 (+134.35) / 4.76 / 108->36       +70.58         |
+//|        GOLD# 2026       96 / 1358.62 / 2.36      40 / 1196.26 (-162.36) / 3.86 / 208->139      +53.77         |
+//|  WITH-only loses net in HOLDOUT, IS and 2026 on both symbols. Only OOS gains, and that window's NEUTRAL bucket    |
+//|  happened to be negative (-70.61) while IS and HOLDOUT's were positive (+464.68, +22.95). The sign is unstable.   |
+//|                                                                    |
+//|  THE CASCADE CHECK. Matched by calendar day (MSG3-only means one frozen range per day) and entry minute, with   |
+//|  v1.14's corrected categories. GOLD 2026:                                                                       |
+//|        identical            36 days    +995.02 -> +995.02                                                       |
+//|        re-timed, same dir    1 day       -8.38 ->   -0.31   (+8.08)                                             |
+//|        flipped direction     3 days     -13.05 -> +130.69 (+143.75)                                            |
+//|        genuinely skipped    56 days    +483.20 ->   0     (-483.20)                                            |
+//|        new day               0                                                                                  |
+//|  Days that differ with NO gate rejection on their own range, i.e. pure slot cascade: ZERO in every window on     |
+//|  both symbols. The reason is structural, not luck. Median hold is 0.51h and only 1 of 96 baseline trades is    |
+//|  still open at the next day's range freeze - the 03-19 16:12 weekend trade, a WITH sell kept identically in both |
+//|  arms. So on this config the slot is essentially always free when the next setup arms. Skip filters here can    |
+//|  only re-time or kill within the day, which is the same finding as v1.14's correction (1). So unlike v1.13's     |
+//|  first reading, the cascade is NOT what sinks this. (That one trade, +467.87 USD, is also nearly half of the     |
+//|  WITH bucket's +995.02 - without it WITH averages +15.06/trade against NEUTRAL's +7.16. Better per trade, but    |
+//|  both positive.)                                                                                                 |
+//|                                                                    |
+//|  IT KILLS, IT DOES NOT RE-TIME. This is what separates it from v1.13. GOLD 2026: 2,053 rejected touches (1,647  |
+//|  NEUTRAL, 406 AGAINST) on 60 ranges, and 56 of those 60 never trade. The M5 MA stack barely changes inside a     |
+//|  4.25h watch, so if the first touch is rejected, essentially every later one is too. v1.13 touched about a       |
+//|  quarter of setups and mostly re-timed them (20 of 26); this removes 58% of all trades (96 -> 40) as whole days. |
+//|  A kill-the-range variant (a rejection retires the range) lands within 131 USD of it for that reason (2026     |
+//|  -461.76). The four ranges that do trade later account for ALL of the upside (+151.83). In the three flips,    |
+//|  the first breakout is rejected, price closes back through the range, breaks the other way WITH the stack, and |
+//|  trades that. One of them (2026-08-05, -8.66 -> +89.37) is about two thirds of that upside, and it is also the  |
+//|  whole of not-AGAINST's 2026 gain. not-AGAINST touches only 5 ranges in 2026 and is negative without that       |
+//|  single day (GOLD -81.29, GOLD# -44.26) - noise, not an edge.                                                   |
+//|                                                                    |
+//|  IS THE KEPT SUBSET EVEN BETTER THAN CHANCE? Because it does not cascade, comparing against random same-size     |
+//|  subsets of the baseline trades is fair here. The WITH subset's net beats random at p = 0.07-0.17 in IS, OOS     |
+//|  and 2026 (not significant) and is worse than random in HOLDOUT (p 0.54-0.63). PF: p = 0.18-0.36. A circularly  |
+//|  time-shifted Aurelius state series (same base rates and persistence, timing broken; 200 draws) gives PF p =     |
+//|  0.27-0.46. Its net p of ~0.02 is confounded, because shifted gates keep only ~24 trades against the real 40:    |
+//|  MSG breakouts are naturally correlated with an MA stack, which is why 37% of entries are WITH against ~25%    |
+//|  for a time-shifted state. So the state carries at most a weak, unproven quality signal - not enough to pay for 56 lost days.      |
+//|                                                                    |
+//|  CASCADE-FREE CONTROL (the v1.15 move): shrink non-WITH setups to 0.01 instead of skipping. The entry list is     |
+//|  identical, so the result is purely about those trades' value. It also loses: GOLD 2026 -331.88 (PF 2.38->2.40), |
+//|  GOLD# -196.41. Re-derived leg by leg on the REAL Backtest_Final list: 20,249.02 -> 16,073.04 ZAR (-20.6%),       |
+//|  PF 2.140 -> 2.217. NEUTRAL setups earn their full size.                                                          |
+//|                                                                    |
+//|  CONFIRMED (sim, validated as in v1.15, plus the real Final list): no cross-day cascade; the gate kills 56 of 60  |
+//|  touched ranges rather than re-timing them; net falls in 3 of 4 windows on both symbols, including the untouched |
+//|  HOLDOUT; the removed NEUTRAL trades are net-positive in both the simulation and the real report.               |
+//|  INFERRED: why NEUTRAL still pays. Plausibly the MSG3 range breakout carries its own short-horizon direction,   |
+//|  which a slower M5 stack confirms late or not at all - not measured.                                               |
+//|  NOT VALIDATED BY A REAL MT5 BACKTEST, and none is requested: nothing shipped. If anyone revisits this, the     |
+//|  simulator hook is Params(trend_gate="with"|"not_against", trend_arr=aurelius_alignment(bars)).                   |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
 #property version   "1.16"

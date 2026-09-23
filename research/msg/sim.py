@@ -54,6 +54,17 @@ v1.12 code was meant to do (flatten from Friday 23:28, close 23:58).
 
 Money is in USD (0.01 lot = 1 oz, contract 100): pnl = move * lots * 100.
 Real reports are in ZAR; compare against report.round_trips()'s pnl_usd.
+
+AURELIUS M5 TREND GATE (research for v1.17 - Params.trend_gate / trend_arr):
+  optional, default "off" (= exact v1.14/v1.15/v1.16 behaviour).  trend_arr[k]
+  is the real Aurelius_EA.mq5 Aligned(shift=1) state (+1 buy / -1 sell / 0
+  neither) of the most recent CLOSED GOLD# M5 bar at the open of M1 bar k -
+  exactly what iMA(_Symbol, PERIOD_M5, ..., shift=1) returns on the first tick
+  of that M1 bar (see aurelius_alignment()).  "with" rejects a zone touch
+  unless trend == trade dir; "not_against" rejects only trend == -dir.  A
+  rejection `continue`s inside check_setups exactly like InRiskDeadZone: the
+  range is NOT retired and bias/extension keep updating, so a later touch can
+  still fire (re-timing).  Every rejection is logged (simulate(..., rej=[])).
 """
 import datetime as dt
 import math
@@ -73,6 +84,74 @@ def load_bars(path=CSV):
     df = pd.read_csv(path, skiprows=1)
     df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
     return df
+
+
+AURELIUS = "/home/user/test-project/research/aurelius"
+M5_SWITCH = pd.Timestamp("2026-08-15")   # first M5 bar NOT in the real GOLD# M5 export
+
+
+def load_m5_spliced(m1=None):
+    """GOLD# M5 bars 2023-01-03 .. 2026-09-18 for the Aurelius gate.
+
+    research/aurelius/engine.py's GOLD_M5.csv is (despite its file name) a real
+    GOLD# export - its own header says meta_symbol=GOLD# - and it ENDS
+    2026-08-14 23:55, five weeks before the M1 sim data does.  Resampling the
+    GOLD# M1 CSV to 5 minutes reproduces that export EXACTLY on all 53,187
+    overlapping bars (open/high/low/close/tick_volume, max |diff| 0.00, same bar
+    set), so bars from M5_SWITCH on are appended from the M1 resample with no
+    loss.  The export (not the resample) is kept before the switch because it
+    starts in 2023: the 2400-EMA / 500-SMMA need that warm-up, and the M1 CSV
+    only starts 2025-11-12 10:50 (the first HOLDOUT day)."""
+    import sys
+    if AURELIUS not in sys.path:
+        sys.path.insert(0, AURELIUS)
+    import engine as E
+    m5 = E.load_m5()
+    m1 = load_bars() if m1 is None else m1
+    d = m1.set_index("time")
+    r = pd.DataFrame(dict(open=d["open"].resample("5min").first(), high=d["high"].resample("5min").max(),
+                          low=d["low"].resample("5min").min(), close=d["close"].resample("5min").last(),
+                          tick_volume=d["tick_volume"].resample("5min").sum(),
+                          real_volume=d["real_volume"].resample("5min").sum(),
+                          spread=d["spread"].resample("5min").min())).dropna().reset_index()
+    tail = r[r["time"] >= M5_SWITCH]
+    out = pd.concat([m5[m5["time"] < M5_SWITCH][tail.columns], tail], ignore_index=True)
+    return out.sort_values("time").reset_index(drop=True)
+
+
+def aurelius_alignment(bars, m5=None, params=None, return_m5=False):
+    """Per-M1-bar Aurelius trend state: +1 Aligned(buy), -1 Aligned(sell), 0 neither.
+
+    Computed with research/aurelius/engine.py's own build_context() and its
+    shipped v1.46 M5 defaults P (EMA21 > EMA50 > SMA250 > SMMA500, close vs
+    EMA2400, ALIGN_MID - note engine.P's 'p150'/'p600' keys are 250/500, the
+    real Aurelius_EA.mq5 inputs; the 150/600 names are legacy labels).
+
+    Time basis: both series are GOLD# on the same server clock.  At the open of
+    M1 bar k (time T, the tick CheckForEntry runs on), iMA(..PERIOD_M5.., shift=1)
+    is the M5 bar BEFORE the one containing T, i.e. the last M5 bar whose open
+    time is < floor(T, 5 min) - fully closed, 3-8 minutes old.
+
+    GOLD vs GOLD#: every MA here is a normalised linear filter of close, so a
+    constant bid offset (GOLD = GOLD# - 0.12, sim.Params docstring) shifts price
+    and all five MAs by the same amount and leaves every comparison unchanged.
+    Only the +-0.02 jitter in that offset could flip a near-tie; see
+    run_aurelius_gate.py for how often that can matter."""
+    import sys
+    if AURELIUS not in sys.path:
+        sys.path.insert(0, AURELIUS)
+    import engine as E
+    m5 = load_m5_spliced(bars) if m5 is None else m5
+    ctx = E.build_context(m5, E.load_h4(), params or E.P)
+    st5 = np.where(ctx["aligned_buy"], 1, np.where(ctx["aligned_sell"], -1, 0)).astype(np.int8)
+    t5 = m5["time"].values.astype("datetime64[s]").astype(np.int64)
+    t1 = bars["time"].values.astype("datetime64[s]").astype(np.int64)
+    cur5 = (t1 // 300) * 300                       # open time of the M5 bar containing T
+    j = np.searchsorted(t5, cur5, side="left") - 1  # last M5 bar with open < cur5 (shift 1)
+    out = np.where(j >= 0, st5[np.clip(j, 0, None)], 0).astype(np.int8)
+    if return_m5:
+        return out, dict(m5=m5, ctx=ctx, idx=j)
+    return out
 
 
 @dataclass
@@ -124,6 +203,10 @@ class Params:
     ask_extra: float = 0.16
     start: str = "2026-01-01"
     end: str = "2026-09-22"
+    # Aurelius M5 trend gate - see module docstring and aurelius_alignment()
+    trend_gate: str = "off"              # "off" | "with" | "not_against"
+    trend_arr: Optional[np.ndarray] = None
+    trend_kill: bool = False             # sensitivity only: a rejection RETIRES the range (not the EA's semantics)
 
 
 def lot_round(v):
@@ -152,9 +235,12 @@ class Sess:
         self.ext_h = self.ext_l = 0.0
         self.ext_t = None
         self.traded = False
+        self.gate_rej = 0       # trend-gate rejections on the CURRENT frozen range
 
 
-def simulate(bars, p: Params = Params(), log=False):
+def simulate(bars, p: Params = Params(), log=False, rej=None):
+    if p.trend_gate != "off":
+        assert p.trend_arr is not None and len(p.trend_arr) == len(bars), "trend_arr must be aurelius_alignment(bars)"
     t_arr = bars["time"].values.astype("datetime64[s]").astype(np.int64)
     o = bars["open"].values + p.bid_off
     h = bars["high"].values + p.bid_off
@@ -210,6 +296,7 @@ def simulate(bars, p: Params = Params(), log=False):
                 S.bias = 0
                 S.ext_h = S.ext_l = 0.0
                 S.traded = False
+                S.gate_rej = 0
             S.was_in = inw
 
         now = t_arr[k]
@@ -254,7 +341,7 @@ def simulate(bars, p: Params = Params(), log=False):
         # ---- 3. CheckForEntry ---------------------------------------------
         if pos is None and not ticket_stale and not acted_close:
             if bars_spread_ok(bars_spread_pts[k], p):
-                sig = check_setups(sess, c[b], h[b], l[b], t_arr[b], watch_s, p, k, bars, ask, bid)
+                sig = check_setups(sess, c[b], h[b], l[b], t_arr[b], watch_s, p, k, bars, ask, bid, rej)
                 if sig is not None:
                     d, si, sl, ctx = sig
                     px = ask if d > 0 else bid
@@ -272,7 +359,8 @@ def simulate(bars, p: Params = Params(), log=False):
                                        tp1done=False, tp2done=False, legs=[],
                                        H=S.H, L=S.L, rng=S.H - S.L, ext=ctx["ext_pct"],
                                        risk_pct=risk / px * 100.0, sig_close=c[b],
-                                       range_end=int(S.end_t), spread=sp[k])
+                                       range_end=int(S.end_t), spread=sp[k],
+                                       trend=ctx["trend"], gate_rej=S.gate_rej)
 
         # ---- intrabar broker SL / TP3 on bar k ------------------------------
         if pos is not None and p.manage_mode == "tick":
@@ -379,7 +467,19 @@ def structural_sl(isbuy, S, entry, rng, p):
     return sl
 
 
-def check_setups(sess, close1, high1, low1, bar_t, watch_s, p, k, bars, ask, bid):
+def trend_gate_rejects(p, d, k):
+    """Aurelius M5 gate: True -> this touch is rejected (InRiskDeadZone-style `continue`)."""
+    if p.trend_gate == "off":
+        return False
+    tr = int(p.trend_arr[k])
+    if p.trend_gate == "with":
+        return tr != d
+    if p.trend_gate == "not_against":
+        return tr == -d
+    raise ValueError(p.trend_gate)
+
+
+def check_setups(sess, close1, high1, low1, bar_t, watch_s, p, k, bars, ask, bid, rej=None):
     """CheckSessionSetups(), line for line.  NB the SL candidate is computed
     from close1 (as in the mq5), while the order fills at the live Ask/Bid."""
     for i, S in enumerate(sess):
@@ -413,10 +513,19 @@ def check_setups(sess, close1, high1, low1, bar_t, watch_s, p, k, bars, ask, bid
                 sl = structural_sl(True, S, close1, rng, p)
                 ctx = dict(dir=1, S=S, close1=close1, sl=sl, rng=rng, ext_pct=ext_pct,
                            risk_pct=abs(close1 - sl) / close1 * 100.0, bar_t=bar_t, k=k,
-                           fill=ask, zone_pos=(S.ext_h - close1) / swing * 100.0)
+                           fill=ask, zone_pos=(S.ext_h - close1) / swing * 100.0,
+                           trend=None if p.trend_arr is None else int(p.trend_arr[k]))
                 if p.skip_dead and p.dz_min <= ctx["risk_pct"] <= p.dz_max:
                     continue
                 if p.entry_filter is not None and p.entry_filter(ctx):
+                    continue
+                if trend_gate_rejects(p, 1, k):
+                    S.gate_rej += 1
+                    if rej is not None:
+                        rej.append(dict(k=k, dir=1, trend=ctx["trend"], range_end=int(S.end_t),
+                                        risk_pct=ctx["risk_pct"]))
+                    if p.trend_kill:
+                        S.traded = True; S.bias = 0
                     continue
                 return 1, i, sl, ctx
         else:
@@ -434,10 +543,19 @@ def check_setups(sess, close1, high1, low1, bar_t, watch_s, p, k, bars, ask, bid
                 sl = structural_sl(False, S, close1, rng, p)
                 ctx = dict(dir=-1, S=S, close1=close1, sl=sl, rng=rng, ext_pct=ext_pct,
                            risk_pct=abs(close1 - sl) / close1 * 100.0, bar_t=bar_t, k=k,
-                           fill=bid, zone_pos=(close1 - S.ext_l) / swing * 100.0)
+                           fill=bid, zone_pos=(close1 - S.ext_l) / swing * 100.0,
+                           trend=None if p.trend_arr is None else int(p.trend_arr[k]))
                 if p.skip_dead and p.dz_min <= ctx["risk_pct"] <= p.dz_max:
                     continue
                 if p.entry_filter is not None and p.entry_filter(ctx):
+                    continue
+                if trend_gate_rejects(p, -1, k):
+                    S.gate_rej += 1
+                    if rej is not None:
+                        rej.append(dict(k=k, dir=-1, trend=ctx["trend"], range_end=int(S.end_t),
+                                        risk_pct=ctx["risk_pct"]))
+                    if p.trend_kill:
+                        S.traded = True; S.bias = 0
                     continue
                 return -1, i, sl, ctx
     return None
