@@ -539,9 +539,136 @@
 //|  and cascade collisions rarer, or if the EA ever supported more than one concurrent position) rather than  |
 //|  deleted outright - same "walk back the conclusion, keep the honestly-documented attempt" precedent as     |
 //|  v1.08's max-hold tightening.                                                                              |
+//|                                                                    |
+//|  v1.15 ADDS SMALL-RISK POSITION SIZING (InpSmallRiskSizing, default ON) in response to "can we improve     |
+//|  on this 1min" - and it is the first change in this file validated by a full SEQUENTIAL re-simulation,     |
+//|  not a static trade-level test, which is exactly the blind spot v1.14 named. Built for this:               |
+//|  research/msg/sim.py - an event-driven, strictly single-position, bar-by-bar Python replica of this        |
+//|  file's OnTick() on the real GOLD# M1 bars every version above calibrated against. It ports, line for      |
+//|  line: range build/freeze on bar 1 (every bar, flat or not); CheckSessionSetups' bias / extension /        |
+//|  zone / watch-expiry state, INCLUDING that it only runs while FLAT and only behind the spread gate (a       |
+//|  breakout that happens while a trade is open is never seen - part of the real cascade); structural SL;    |
+//|  fill at the new bar's first tick; TP1/TP2/breakeven/static +1.0R lock evaluated ONLY at bar opens (the    |
+//|  IsNewBar gate); broker SL and 2.0R TP intrabar, including on the entry bar; 48h max hold; one slot.       |
+//|                                                                    |
+//|  SIMULATOR VALIDATED FIRST, against 11 real MT5 M1 reports of THIS reconstruction (validate_all.py),      |
+//|  each simulated with the inputs read from its own Settings block and the exit code of its own version.    |
+//|  USD at 0.03 lots (ZAR reports converted leg by leg as price move x volume x 100):                         |
+//|        report (symbol)                real n / net / PF         sim n / net / PF        same entry minute  |
+//|        v1.07 zone 61.8 (GOLD#)         67 /   -46.86 / 0.94      67 /   -60.79 / 0.92        66 / 67       |
+//|        v1.07 (GOLD#)                   96 /  1279.75 / 1.83      96 /  1351.98 / 1.86        95 / 96       |
+//|        v1.08, 48h cached (GOLD#)       96 /  1266.15 / 1.82      96 /  1351.98 / 1.86        96 / 96       |
+//|        v1.08 6h cap (GOLD#)            97 /   959.16 / 1.61      97 /   972.81 / 1.61        97 / 97       |
+//|        MSG1+MSG3 (GOLD#)              217 /   740.41 / 1.17     218 /   773.35 / 1.19       205 / 217      |
+//|        v1.09 ratchet 48h (GOLD#)       96 /  1233.84 / 1.79      96 /  1331.95 / 1.85        96 / 96       |
+//|        v1.09 ratchet 6h (GOLD#)        97 /   887.80 / 1.56      97 /   952.79 / 1.60        96 / 97       |
+//|        v1.11 static lock (GOLD)        93 /  1036.99 / 1.64      96 /  1255.67 / 1.76        91 / 93       |
+//|        v1.12 Backtest_1 (GOLD)         93 /  1051.47 / 1.64      96 /  1255.67 / 1.76        91 / 93       |
+//|        v1.12 fixed-fib SL (GOLD)       94 /   927.64 / 1.65      97 /  1087.96 / 1.75        92 / 94       |
+//|        v1.13 dead zone ON (GOLD)       87 /   976.71 / 1.66      88 /  1057.95 / 1.69        84 / 87       |
+//|  Direction agrees on every matched entry. Two things had to be MEASURED to get here, not tuned:           |
+//|   - SYMBOL. Account 382043238's runs are on "GOLD"; the only M1 export is "GOLD#". Reconstructing each      |
+//|     real order's requested price exactly as (TP + 2*SL)/3: GOLD's bid is 0.12 below GOLD#'s bar open on    |
+//|     59 of 59 sells (-0.10..-0.14), its ask 0.16 above GOLD#'s ask - same mid, ~0.28 wider spread (GOLD     |
+//|     ~52 points typical vs GOLD# ~24). Account 1301959345's runs are on GOLD# itself and fill at the CSV    |
+//|     open to the cent (sell median 0.000) - which is also why the GOLD# rows above match tightest.          |
+//|   - SLIPPAGE. Real Backtest_1 fills: entries +0.083 adverse on average, stop exits +0.223.                 |
+//|  Remaining gap, GOLD only (sim ~$200 high): 3 sim-only entries at 15:32-15:36 server, minutes after US      |
+//|  data releases, that the real GOLD run never took but the GOLD# runs all did. INFERRED cause: GOLD's        |
+//|  normal spread (~52) sits only 8 points under InpMaxSpreadPoints=60, so a news spike trips the gate; M1     |
+//|  bars carry no intra-bar spread, so the simulator cannot see it.                                          |
+//|                                                                    |
+//|  CORRECTIONS TO EARLIER ENTRIES - measured while validating, stated plainly:                              |
+//|   (1) v1.14's cascade MECHANISM is a matching artifact. Its "only 3 of 93 survive unchanged" counted       |
+//|       trades identical to the exact SECOND and price - but two tester runs of logically identical code     |
+//|       jitter by seconds and cents (Backtest_11 vs Backtest_1: 93/93 same entry minute, only 11/93 same      |
+//|       second+price, nets 17,534.96 vs 17,679.37 ZAR). Matched by entry minute, Backtest_2 vs Backtest_1:    |
+//|       67 of 93 trades identical (20,975.84 -> 20,700.71 ZAR, tick noise). 20 were the SAME setup entered     |
+//|       1-6 minutes later (3 at 35-50 min): InRiskDeadZone only `continue`s, it does not retire the range,   |
+//|       so it RE-TIMES the entry - and those re-timed entries lost LESS (-7,059.38 -> -4,296.83). 6 setups     |
+//|       were genuinely skipped (price never re-entered the zone outside the band) and they were winners,      |
+//|       +3,762.91. ZERO trades on any new day - no cross-day cascade at all. -275.13 + 2,762.55 - 3,762.91    |
+//|       = -1,275.49, the observed delta exactly. v1.14's DECISION (default off) stands - the sequential sim   |
+//|       independently agrees skipping is worse (-$197.72 over 2026) - but "67 trades worth +20,245.27 lost    |
+//|       to cascade fallout" does not; that figure should not be relied on.                                   |
+//|   (2) v1.13's dead-zone number depends on its risk definition. The -2,126.48 ZAR for 0.18-0.26% on the     |
+//|       real T1 EA's trades reproduces only with risk measured from the FILL price. Measured from the         |
+//|       order's own requested price (what InRiskDeadZone-style code actually sees), the same band on the     |
+//|       same real trades nets +865.57 ZAR. A band whose sign flips on sub-point slippage is not a robust       |
+//|       effect; v1.13's p=0.0031 was real for the definition it used, but it doesn't carry over.            |
+//|   (3) v1.12's weekend guard CANNOT fire in US/EU DST-mismatch weeks. 2026-03-09..03-27 (US DST on, EU not   |
+//|       yet) the broker's day runs 00:00-22:58 server time and Friday's last bar is 22:57, so the guard's      |
+//|       23:28-23:58 window has no ticks. The 03-19 80.8h trade it was written for sits exactly in that        |
+//|       window - real Backtest_1 (v1.12, guard=30) still has it, closed Monday 01:02:01 by the 48h timer.       |
+//|       NOT fixed in this version, deliberately: that trade is +405.65 USD / ~+7,000 ZAR on this sample, so a   |
+//|       fix (e.g. widen the window by 60 min) would swing net far more than the change below and confound     |
+//|       its A/B. It deserves its own isolated real run.                                                       |
+//|   (4) The real T1 EA manages on EVERY tick; this file only on the first tick of a bar. Real T1 partial exits |
+//|       land at uniform seconds (median 30s into the minute, TP1 filled at a median 1.005R); this file's        |
+//|       land a median 5s in (TP1 median 1.086R - bar-open overshoot). Replayed both engines over real entries  |
+//|       (replay_exits.py): the per-tick engine fits the real T1 legs better (83% vs 78% same leg count) but     |
+//|       LOWERS P/L on both populations (this file's entries $1,119.30 -> $956.52; T1's $1,391.10 -> $1,371.96). |
+//|       A fidelity gap, not an improvement - recorded, NOT adopted.                                          |
+//|                                                                    |
+//|  THE SEARCH (search.py, sweep_small_risk.py). Every candidate re-simulated sequentially over three windows: |
+//|  HOLDOUT 2025-11-12..12-31 (never touched by any calibration - every real report starts 2026-01-01), IS    |
+//|  Jan-May 2026, OOS Jun-Sep 2026, on both GOLD and GOLD#. First, the population itself: at a fixed 0.03 lots  |
+//|  the reconstruction's mean result is only ~+0.02R per trade - the dollar profit comes from wide-range days.  |
+//|  Trades with risk > 0.26% of price average +0.26R / +0.32R / +0.36R (HOLDOUT - only 2 such trades - / IS /  |
+//|  OOS), and are positive in 8 of 8 halves of the four real MT5 lists checked (+0.16..+0.46R, incl. the real   |
+//|  T1 EA's own trades); smaller-risk trades average ~-0.1R here                                                 |
+//|  and unstable by sub-band (which is why (2) above flips). Results:                                          |
+//|   - dead-zone SKIP (v1.13): 2026 -$197.72 - matches the real re-test's direction. Sanity check passed.       |
+//|   - hard SKIP below a risk %: +$371..+$499 in 2026 but cuts the holdout from 22 trades to 2-3 and loses     |
+//|     there - it's a volatility-regime off-switch, not an edge. Rejected. Same for a minimum-range filter.   |
+//|   - exit tweaks: lock 0.5R / no lock +$55 / +$59 over 2026, TP3 2.5R -$182 - small at best, and would        |
+//|     abandon the real EA's measured v1.11 exit rule. Rejected.                                               |
+//|   - SHRINK below a risk %, keep the trade: adopted, below.                                                  |
+//|                                                                    |
+//|  THE CHANGE: in CheckForEntry(), after the entry decision is final and unchanged, EntryLots() sends         |
+//|  LotStep(InpLots * InpSmallRiskLotFactor) = 0.01 instead of 0.03 when the order's own risk (px - SL) is     |
+//|  under InpSmallRiskPct = 0.26% of px. Nothing else moves: the setup is taken, the range retired, the slot    |
+//|  held exactly as long (partials never close the position, and the breakeven/+1.0R stop moves still happen  |
+//|  at 0.01 - only the partial CLOSES are skipped, because 0.01 can't be split). So it CANNOT cascade.         |
+//|                                                                    |
+//|  CONFIRMED:                                                                                                  |
+//|   - No cascade: the sequential sim's entry list is identical to v1.14 in every window on both symbols.      |
+//|   - Because it's cascade-free, it can be checked on REAL MT5 trade lists directly - the check v1.13's skip   |
+//|     never allowed. Each real round-trip re-derived with this file's own ClosePartial/LotStep arithmetic    |
+//|     (real_resize.py, final_candidate.py). Real Backtest_1 (v1.12 = v1.14 logic, GOLD): net 17,679.37 ->     |
+//|     20,655.33 ZAR (+2,975.97, +16.8%), PF 1.657 -> 2.148, max balance DD 4,987.05 -> 3,751.16 ZAR (-24.8%).  |
+//|     Backtest_11 +181.44 USD, fixed-fib run +143.50, Backtest_2 +177.93 - positive on every real list OF THIS  |
+//|     RECONSTRUCTION at every threshold from 0.18 to 0.30, so 0.26 sits on a plateau, not a spike (0.28 scored |
+//|     best and was NOT picked - 0.26 is v1.13's pre-existing edge, not re-fit here).                          |
+//|   - Better than chance at choosing WHICH trades to shrink: 20,000 random same-size shrinks per list give      |
+//|     p = 0.0009-0.0076 on every real list, including the real T1 EA's own 108 trades (null_resize.py).         |
+//|   - Sequential sim, GOLD: IS +$134.29, OOS +$66.82, 2026 +$201.11 (PF 1.76 -> 2.38, DD $280 -> $209).        |
+//|     GOLD#: IS +$71.07, OOS +$3.74.                                                                           |
+//|                                                                    |
+//|  NOT CONFIRMED, and the costs, stated up front:                                                             |
+//|   - The one truly out-of-sample window (HOLDOUT, 22 trades) loses a little: -$12.46 GOLD / -$21.74 GOLD#     |
+//|     (PF 1.15 -> 1.18 / flat). It was a calm regime - 20 of 22 trades fell under 0.26% and they were mildly   |
+//|     profitable. In low volatility this rule mostly just trades smaller, both ways.                          |
+//|   - On the real T1 EA's OWN entries the same rule costs net (-$86.40), though PF 1.90 -> 2.31 and DD falls.  |
+//|     So "small-risk setups lose" is a property of THIS reconstruction's entries, not of GOLD in general.     |
+//|   - INFERRED mechanism, not measured: small risk comes from narrow session ranges (choppy mornings) where     |
+//|     breakout-continuation fails more often, and GOLD's fixed ~0.8 point spread+slippage is a bigger bite      |
+//|     out of a small R.                                                                                          |
+//|                                                                    |
+//|  PREDICTION FOR THE NEXT REAL RUN, written before it exists (same config as Backtest_1: MSG3-only, M1,      |
+//|  GOLD, 2026.01.01-09.21): the SAME ~93 entries as Backtest_1 by entry minute, ~55 of them at 0.01 lots,       |
+//|  net ~20,650 ZAR, PF ~2.1, max balance DD ~3,750 ZAR - allowing for run-to-run tick noise of a few hundred    |
+//|  ZAR (Backtest_11 vs Backtest_1 differ by 144 on identical logic). If the ENTRY LIST changes materially,      |
+//|  something other than sizing has changed and this version's reasoning doesn't apply.                         |
+//|                                                                    |
+//|  NOT VALIDATED BY A REAL MT5 BACKTEST - there is no MT5 in the environment this was written in. The evidence |
+//|  is this file's own sequential Python simulator on real GOLD# M1 bars (validated against 11 real reports    |
+//|  above) plus re-derivation of real MT5 trade lists - strong for a sizing-only change, and not the same thing  |
+//|  as a real Strategy Tester run of v1.15. Everything is reproducible from research/msg/ (each script's         |
+//|  docstring says what it checks). Set InpSmallRiskSizing=false to get v1.14 exactly.                          |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.14"
+#property version   "1.15"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -617,11 +744,18 @@ input double InpRangeRiskPct       = 30.8;    // real-confirmed IDENTICAL on M1 
                                                // see v1.07 header note. No period-specific override needed.
 input double InpMinExtensionPct    = 10.0;    // v1.07 M1 real-data fix - see header. M5 value was 15.0 - SET THIS
                                                // BACK TO 15.0 IF RUNNING ON M5.
-input bool   InpSkipDeadZone      = false;    // v1.14: DEFAULTED OFF - v1.13's real M1 re-test showed a cascade
-                                               // side effect costs more than the filter saves. See header. Left
-                                               // in as opt-in - the underlying dead-zone finding is still real.
+input bool   InpSkipDeadZone      = false;    // v1.14: DEFAULTED OFF - v1.13's real M1 re-test came back worse.
+                                               // v1.15 corrects WHY (see header): it re-times same-day entries and
+                                               // skips 6 winning setups - not a cross-day cascade - and the band
+                                               // itself flips sign under the EA's own risk definition. Opt-in only.
 input double InpDeadZoneMinPct    = 0.18;     // % of entry price. Boundary fit from real data - approximate, see header.
 input double InpDeadZoneMaxPct    = 0.26;     // % of entry price. Boundary fit from real data - approximate, see header.
+input bool   InpSmallRiskSizing   = true;     // v1.15: SHRINK (never skip) setups whose risk < InpSmallRiskPct of price -
+                                               // the setup is still taken and the single position slot is held exactly as
+                                               // long, so unlike v1.13's skip it cannot change any later trade. See header.
+input double InpSmallRiskPct      = 0.26;     // % of entry price, measured on the order's own px/SL (not re-fit here -
+                                               // v1.13's pre-existing edge; real-list gains hold across 0.20-0.30).
+input double InpSmallRiskLotFactor = 0.3333;  // small-risk lots = LotStep(InpLots * this): 0.03 -> 0.01. 1.0 = off.
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
@@ -1029,6 +1163,24 @@ double LotStep(double lots)
    return(lots);
   }
 //+------------------------------------------------------------------+
+//| v1.15 (see header): reduced size for a setup whose own risk is     |
+//| under InpSmallRiskPct of price. Never returns more than InpLots    |
+//| and never 0 - the setup is always still taken, so the position     |
+//| slot (and therefore every later trade) is exactly as in v1.14.     |
+//+------------------------------------------------------------------+
+double SmallRiskLots()
+  {
+   double l = LotStep(InpLots * InpSmallRiskLotFactor);
+   if(l <= 0.0) l = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   return MathMin(InpLots, l);
+  }
+double EntryLots(double px, double risk)
+  {
+   if(!InpSmallRiskSizing || px <= 0.0) return(InpLots);
+   double riskPct = risk / px * 100.0;
+   return (riskPct < InpSmallRiskPct) ? SmallRiskLots() : InpLots;
+  }
+//+------------------------------------------------------------------+
 void NotifyPush(const string text)
   {
    if(!InpPushNotifications) return;
@@ -1092,8 +1244,11 @@ void CheckForEntry()
    trade.SetDeviationInPoints(InpSlippagePoints);
    trade.SetTypeFillingBySymbol(_Symbol);
 
-   bool ok = isBuy ? trade.Buy(InpLots, _Symbol, px, slPrice, tpFinal, g_sesTag[sesIdx])
-                    : trade.Sell(InpLots, _Symbol, px, slPrice, tpFinal, g_sesTag[sesIdx]);
+   //--- v1.15: size only - the entry decision above is untouched (see header)
+   double lots = EntryLots(px, risk);
+
+   bool ok = isBuy ? trade.Buy(lots, _Symbol, px, slPrice, tpFinal, g_sesTag[sesIdx])
+                    : trade.Sell(lots, _Symbol, px, slPrice, tpFinal, g_sesTag[sesIdx]);
    if(ok)
      {
       SyncPositionState();
@@ -1726,7 +1881,9 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    else
      {
       PRow("p1", x, ty, w, "state", "FLAT", -1); ty += rh;
-      PRow("p2", x, ty, w, "next lot size", DoubleToString(InpLots, 2), -1); ty += rh;
+      PRow("p2", x, ty, w, InpSmallRiskSizing ? "lots (small-risk)" : "next lot size",
+           InpSmallRiskSizing ? DoubleToString(InpLots, 2) + " (" + DoubleToString(SmallRiskLots(), 2) + ")"
+                              : DoubleToString(InpLots, 2), -1); ty += rh;
       PRow("p3", x, ty, w, "", "", -1); ty += rh;
       PRow("p4", x, ty, w, "", "", -1); ty += 6;
      }
