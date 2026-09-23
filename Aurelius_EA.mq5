@@ -623,6 +623,27 @@
 //|  test 1 (InpMinSlopeATR=0.50 alone, Price21Exit/VwapExit left ON) is the highest      |
 //|  priority, since the ablation and this bundled run both point to it as the            |
 //|  dominant lever.                                                                       |
+//|                                                                                          |
+//|  RESEARCH NOTE (2026-09-23): the requested single-toggle rerun of test 1 came in -      |
+//|  live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, ONLY InpMinSlopeATR changed     |
+//|  (0.50; InpUsePrice21Exit/InpUseVwapExit both left on their shipped true, confirmed      |
+//|  in the report's own Inputs block). 841 trades (-9.5% vs the 2026-09-22 real            |
+//|  baseline's 929), net 31,094.31 ZAR (-14.4% vs 36,338.93), PF 1.527447 (-2.9% vs         |
+//|  1.573425). PASS: real PF at 0.50 comes back below 1.573425 and trade count falls        |
+//|  in range (841 <= the ~885 ceiling) - test 1's criterion is satisfied, InpMinSlopeATR    |
+//|  stays 0.40 and is now real-confirmed, not just Python (see its own comment). This       |
+//|  also lines up with the ablation's prediction reasonably well (predicted trades -8.9%,   |
+//|  net -12.1%, PF -2.5% vs the real -9.5%/-14.4%/-2.9% - same direction, real net fell      |
+//|  a bit more than predicted but close). Drawdown does NOT sweep clean for 0.40 - a real     |
+//|  tradeoff, same shape as the bundled "all three reverted" note above: 0.50 (reverted)      |
+//|  has the LOWER Balance DD Maximal (19.31%/4,307.16 vs 0.40's 21.49%/4,695.87) and the      |
+//|  lower Equity DD Relative (20.07%/4,520.20 vs 0.40's 22.27%/4,913.44), while 0.40 has      |
+//|  the lower Equity DD Maximal (13.78%/6,210.17 vs 0.50's 14.84%/6,303.68) - 2 of 3          |
+//|  drawdown figures favor 0.50, only 1 favors 0.40. So the honest read: 0.40 wins net and    |
+//|  PF outright (the criterion this test was scored against), but it is not a clean win on    |
+//|  every measure - loosening to 0.40 trades some real drawdown headroom for the extra        |
+//|  net/PF, it doesn't get both for free. STILL NEEDED: tests 2 (InpUsePrice21Exit=false      |
+//|  alone) and 3 (InpUseVwapExit=false alone) - neither has been real-tested yet.             |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.47"
@@ -727,10 +748,17 @@ input double  InpMinSlopeATR     = 0.40;       // Minimum slope (x ATR) - CANDID
                                                 // monotonically WORSE at every step, left unchanged - and
                                                 // removing the pullback-to-50 requirement entirely, and
                                                 // loosening InpMaxSpreadPoints - both also rejected/no-
-                                                // effect, see SESSION_NOTES.md for the full numbers. NEEDS A
-                                                // REAL MT5 BACKTEST before trusting this over 0.50 -
-                                                // Python-only so far, same discipline as every other number
-                                                // in this file.
+                                                // effect, see SESSION_NOTES.md for the full numbers.
+                                                // REAL-CONFIRMED (2026-09-23, live GOLD 382043238,
+                                                // 2023.01.01-2026.09.21, 20000 ZAR, single-toggle test -
+                                                // InpUsePrice21Exit/InpUseVwapExit left on their shipped
+                                                // true): reverting to 0.50 gave 841 trades (-9.5%), net
+                                                // 31,094.31 ZAR (-14.4%), PF 1.527447 (-2.9%) vs 0.40's own
+                                                // real 929 trades / 36,338.93 ZAR / PF 1.573425 - 0.40 wins
+                                                // on net and PF, confirming the Python sweep for real. See
+                                                // the 2026-09-23 research note below for the full pass/fail
+                                                // check and drawdown detail (mixed: Balance DD better at
+                                                // 0.40, Equity DD Maximal very slightly worse).
 input double  InpMaxSlopeATR   = 1.00;      // Max slope - blocks over-extended entries (0 = off)
 input bool    InpUseCrossFilter  = true;       // Block after repeated 21/50 crossings
 input int     InpCrossWindow     = 10;         // Cross lookback (bars)
