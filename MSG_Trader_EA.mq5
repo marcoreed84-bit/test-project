@@ -666,9 +666,22 @@
 //|  above) plus re-derivation of real MT5 trade lists - strong for a sizing-only change, and not the same thing  |
 //|  as a real Strategy Tester run of v1.15. Everything is reproducible from research/msg/ (each script's         |
 //|  docstring says what it checks). Set InpSmallRiskSizing=false to get v1.14 exactly.                          |
+//|                                                                    |
+//|  v1.16 LABELS THE CHART DRAWINGS. A real screenshot of v1.15 attached to a live chart showed exactly         |
+//|  what the code always produced - a session box, fib lines, and (once a trade is open) entry/SL/TP lines -   |
+//|  with no text on any of them, so there was no way to tell one dashed line from another without already      |
+//|  knowing the code. Every drawn object now carries a small on-chart caption via a new DrawChartLabel()        |
+//|  helper (OBJ_TEXT anchored at the line's own time/price, not a screen-corner panel label): the session       |
+//|  box gets "MSGn  H .. / L ..", each of the 7 fib levels gets its own %, with the two that bound the real     |
+//|  entry zone (InpZoneTopPct/InpZoneBotPct) marked "(zone)", and entry/SL/TP1/TP2/TP3 each show their tag      |
+//|  and live price once a position is open. Purely cosmetic - no entry, exit, or sizing logic changed, so       |
+//|  this does not need a new real backtest to validate (net/PF/trade list are identical to v1.15; only the       |
+//|  chart's own object list gains new OBJ_TEXT entries alongside the existing lines/boxes). History blocks      |
+//|  (InpDrawHistory) are deliberately left unlabeled - labeling up to InpHistoryDays of past blocks would        |
+//|  clutter the chart faster than it would inform; only the live, current-session box and lines are labeled.    |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.15"
+#property version   "1.16"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1567,14 +1580,44 @@ void PWatermark()
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
   }
 //+------------------------------------------------------------------+
+//| v1.16 (see header): a small price/time-anchored text caption, so    |
+//| every drawn line and box says what it is on the chart itself -      |
+//| a screenshot of a live-attached run showed unlabeled lines with no   |
+//| way to tell block edge from fib zone from TP/SL at a glance.        |
+//+------------------------------------------------------------------+
+void DrawChartLabel(const string prefix, const string tag, datetime t, double price,
+                     const string text, const color col, const int fontSize = 9)
+  {
+   string nm = prefix + tag;
+   if(text == "") { if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm); return; }
+   if(ObjectFind(0, nm) < 0)
+      ObjectCreate(0, nm, OBJ_TEXT, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, t);
+   ObjectSetDouble (0, nm, OBJPROP_PRICE, 0, price);
+   ObjectSetString (0, nm, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetString (0, nm, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+  }
+void DeleteChartLabel(const string prefix, const string tag)
+  {
+   string nm = prefix + tag;
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+  }
+//+------------------------------------------------------------------+
 void DeleteLevelLine(const string tag)
   {
    string nm = g_pl + tag;
    if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   DeleteChartLabel(g_pl, tag + "_lbl");
   }
 //+------------------------------------------------------------------+
 void DrawLevelLine(const string tag, const double price, const color col,
-                   const ENUM_LINE_STYLE style, const int width)
+                   const ENUM_LINE_STYLE style, const int width, const string label = "")
   {
    if(price <= 0.0) { DeleteLevelLine(tag); return; }
    string nm = g_pl + tag;
@@ -1588,6 +1631,8 @@ void DrawLevelLine(const string tag, const double price, const color col,
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   if(label != "")
+      DrawChartLabel(g_pl, tag + "_lbl", TimeCurrent(), price, "  " + label, col);
   }
 //+------------------------------------------------------------------+
 //| Entry/stop/TP1-3 of the OPEN position, as horizontal lines.        |
@@ -1596,13 +1641,21 @@ void UpdateLevelLines()
   {
    if(InpDrawLevels && g_ticket != 0 && PositionSelectByTicket(g_ticket))
      {
-      DrawLevelLine("entry", PositionGetDouble(POSITION_PRICE_OPEN), InpColEntryLine, STYLE_SOLID, 1);
+      double openPx = PositionGetDouble(POSITION_PRICE_OPEN);
+      DrawLevelLine("entry", openPx, InpColEntryLine, STYLE_SOLID, 1,
+                    "ENTRY " + DoubleToString(openPx, _Digits));
       double sl = PositionGetDouble(POSITION_SL);
-      if(sl > 0.0) DrawLevelLine("sl", sl, InpColStopLine, STYLE_SOLID, 1); else DeleteLevelLine("sl");
-      DrawLevelLine("tp1", g_posTP1Done ? 0.0 : g_posTP1, InpColTPLine, STYLE_DOT, 1);
-      DrawLevelLine("tp2", g_posTP2Done ? 0.0 : g_posTP2, InpColTPLine, STYLE_DOT, 1);
+      if(sl > 0.0) DrawLevelLine("sl", sl, InpColStopLine, STYLE_SOLID, 1,
+                                  "SL " + DoubleToString(sl, _Digits));
+      else DeleteLevelLine("sl");
+      DrawLevelLine("tp1", g_posTP1Done ? 0.0 : g_posTP1, InpColTPLine, STYLE_DOT, 1,
+                    "TP1 " + DoubleToString(g_posTP1, _Digits));
+      DrawLevelLine("tp2", g_posTP2Done ? 0.0 : g_posTP2, InpColTPLine, STYLE_DOT, 1,
+                    "TP2 " + DoubleToString(g_posTP2, _Digits));
       double tp = PositionGetDouble(POSITION_TP);
-      if(tp > 0.0) DrawLevelLine("tp3", tp, InpColTPLine, STYLE_SOLID, 1); else DeleteLevelLine("tp3");
+      if(tp > 0.0) DrawLevelLine("tp3", tp, InpColTPLine, STYLE_SOLID, 1,
+                                  "TP3 " + DoubleToString(tp, _Digits));
+      else DeleteLevelLine("tp3");
      }
    else
      {
@@ -1664,23 +1717,40 @@ void UpdateRangeDrawings()
       double H = g_sesRangeHigh[i], L = g_sesRangeLow[i], rng = H - L;
 
       DrawSessionBox(base + "box", t1, g_sesRangeEndTime[i], H, L, g_sesCol[i], true);
+      if(InpDrawRange)
+         DrawChartLabel(g_pz, base + "lbl", t1, H + rng * 0.04,
+                        " MSG" + IntegerToString(i + 1) + "  H " + DoubleToString(H, _Digits)
+                        + " / L " + DoubleToString(L, _Digits), g_sesCol[i], 9);
+      else
+         DeleteChartLabel(g_pz, base + "lbl");
 
       if(InpDrawFib && rng > 0.0)
         {
          double lvl0   = L, lvl236 = L + 0.236 * rng, lvl382 = L + 0.382 * rng, lvl50 = L + 0.5 * rng;
          double lvl618 = L + (100 - InpZoneTopPct) / 100.0 * rng, lvl786 = L + (100 - InpZoneBotPct) / 100.0 * rng, lvl100 = H;
          DrawFibLine(base + "f0",   g_sesRangeEndTime[i], t2, lvl0,   g_sesCol[i], false);
+         DrawChartLabel(g_pz, base + "f0lbl",   t2, lvl0,   "  0%",    g_sesCol[i], 8);
          DrawFibLine(base + "f236", g_sesRangeEndTime[i], t2, lvl236, g_sesCol[i], false);
+         DrawChartLabel(g_pz, base + "f236lbl", t2, lvl236, "  23.6%", g_sesCol[i], 8);
          DrawFibLine(base + "f382", g_sesRangeEndTime[i], t2, lvl382, g_sesCol[i], false);
+         DrawChartLabel(g_pz, base + "f382lbl", t2, lvl382, "  38.2%", g_sesCol[i], 8);
          DrawFibLine(base + "f50",  g_sesRangeEndTime[i], t2, lvl50,  g_sesCol[i], false);
+         DrawChartLabel(g_pz, base + "f50lbl",  t2, lvl50,  "  50%",   g_sesCol[i], 8);
          DrawFibLine(base + "f618", g_sesRangeEndTime[i], t2, lvl618, g_sesCol[i], true);   // OTE zone edges
+         DrawChartLabel(g_pz, base + "f618lbl", t2, lvl618,
+                        "  " + DoubleToString(InpZoneTopPct, 1) + "% (zone)", g_sesCol[i], 9);
          DrawFibLine(base + "f786", g_sesRangeEndTime[i], t2, lvl786, g_sesCol[i], true);
+         DrawChartLabel(g_pz, base + "f786lbl", t2, lvl786,
+                        "  " + DoubleToString(InpZoneBotPct, 1) + "% (zone)", g_sesCol[i], 9);
          DrawFibLine(base + "f100", g_sesRangeEndTime[i], t2, lvl100, g_sesCol[i], false);
+         DrawChartLabel(g_pz, base + "f100lbl", t2, lvl100, "  100%",  g_sesCol[i], 8);
         }
       else
         {
          string f[] = {"f0","f236","f382","f50","f618","f786","f100"};
          for(int k = 0; k < ArraySize(f); k++) DeleteZoneObj(base + f[k]);
+         string flbl[] = {"f0lbl","f236lbl","f382lbl","f50lbl","f618lbl","f786lbl","f100lbl"};
+         for(int k = 0; k < ArraySize(flbl); k++) DeleteZoneObj(base + flbl[k]);
         }
      }
 
