@@ -801,7 +801,8 @@ input ENUM_STO_PRICE   InpStochPrice = STO_LOWHIGH; // Stochastic price mode
 input bool   InpUseSignal  = true;         // Read the signal line, not the main line
 input double InpKLevel     = 95.0;         // Exit level (100-x is used for sells)  [tested best now the trail does most of the work]
 input bool   InpUseStop    = true;         // Attach a stop at the broker
-input double InpStopATR    = 1.75;         // Stop distance (x ATR at entry)  [v3.18 tried 1.40, a Python-only
+input double InpStopATR    = 1.75;         // Stop distance (x ATR at entry) - real-confirmed best value
+                                            // [v3.18 tried 1.40, a Python-only
                                             // sweep suggested it won on both net AND drawdown on both real splits -
                                             // REVERTED after real testing showed that was wrong: two real Strategy
                                             // Tester runs (2024.08-2026.08 GOLD# M5, same Backtest/Forward split,
@@ -816,9 +817,9 @@ input double InpStopATR    = 1.75;         // Stop distance (x ATR at entry)  [v
                                             // over the extra profit - see the git history for the real numbers.
 input bool   InpUseTrail   = true;         // Trail the stop once the trade is in profit  [the single biggest lever tested this session]
 input double InpTrailTriggerATR = 0.5;     // Profit needed before the trail starts (x ATR)
-input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, lock in this fraction of the BEST
-                                            // favorable move seen so far (not a fixed ATR distance behind current
-                                            // price - see TrailStop()). Replaces the old InpTrailATR fixed-distance
+input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, lock in this fraction of the best move seen so far
+                                            // [not a fixed ATR distance behind current
+                                            // price - see TrailStop()]. Replaces the old InpTrailATR fixed-distance
                                             // trail: real trade data (Opus review, v3.16) showed that trail parking
                                             // the stop a fixed 0.3 ATR behind price was inside normal M5 bar noise
                                             // (99.7% of bars exceed 0.3 ATR of range) and was capping winners at
@@ -831,7 +832,9 @@ input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, l
                                             // yet confirmed by a real Strategy Tester run - sweep this in the
                                             // tester before trusting the exact number, same discipline as every
                                             // other untested default in this file.
-input double InpTrailRunnerATR = 0.0;      // v3.29, OFF by default (0 = off): once a trade's best bar-open move
+input double InpTrailRunnerATR = 0.0;      // Runner tighten (x ATR of best move) - OFF by default, not yet real-MT5-tested
+                                            // [suggested test value 6.0, see header for pass criteria - v3.29: once a
+                                            // trade's best bar-open move
                                             // reaches this many ATR, the give-back trail keeps InpTrailRunnerKeep of
                                             // it instead of InpTrailKeepFrac. Only touches the rare runner - ~22
                                             // trades a year reach 6 ATR - and nothing else. Why: about half (51%/54%)
@@ -846,7 +849,8 @@ input double InpTrailRunnerATR = 0.0;      // v3.29, OFF by default (0 = off): o
 input double InpTrailRunnerKeep = 0.60;    // Fraction of the peak move locked once InpTrailRunnerATR is reached
 input bool   InpUseBreakeven = true;       // Move the stop to entry once InpBreakevenTriggerATR of profit shows  [tested: costless, small clean win on both splits]
 input double InpBreakevenTriggerATR = 0.3; // Profit needed before the breakeven move (x ATR) - fires BEFORE the trail
-input double InpBreakevenBufferATR  = 0.0;  // Buffer past entry (x ATR, 0 = exact breakeven)  [tried 0.20 in v3.16
+input double InpBreakevenBufferATR  = 0.0;  // Buffer past entry (x ATR, 0 = exact breakeven) - real-confirmed best value
+                                            // [tried 0.20 in v3.16
                                             // (Opus review reasoned it should help, since 21% (BT) / 13.5% (FW) of
                                             // ALL trades were finishing within +/-$0.30 of exact breakeven after
                                             // moving favorably first) - REVERTED after two real Strategy Tester
@@ -858,7 +862,8 @@ input double InpBreakevenBufferATR  = 0.0;  // Buffer past entry (x ATR, 0 = exa
                                             // and was flat on forward (930.99->943.33) with worse drawdown on both.
                                             // Same shape of result as Aurelius_EA.mq5's own breakeven feature this
                                             // session: better win rate, worse or flat bottom line. Back to 0.0.
-input int    InpMaxBars    = 80;           // Bar limit on any trade  [reaches ~2-3% of trades under the v3.16
+input int    InpMaxBars    = 80;           // Bar limit on any trade (0 = off)
+                                            // [reaches ~2-3% of trades under the v3.16
                                             // give-back trail (corrected, v3.20 - previously documented as
                                             // "rarely reached"/"structurally unreachable", which was true of the
                                             // OLD fixed-distance trail but not this one) - and per a walk-forward
