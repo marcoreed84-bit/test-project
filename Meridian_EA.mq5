@@ -56,7 +56,8 @@
 //|  36.78% (8324.51) - WORSE than Aurelius's real 27.69%. Reconciled  |
 //|  the deal-by-deal balance curve: peak was 2023-06-09, trough was   |
 //|  2024-11-06 - a 17-MONTH drawdown before recovery, not one bad     |
-//|  trade. Yearly net: 2023 +20365, 2024 -2799 (the losing year the   |
+//|  trade. Yearly net: 2023 +365 (corrected - see the 2026-09-23 full-|
+//|  history note), 2024 -2799 (the losing year the                    |
 //|  drawdown traces to), 2025 +10218, 2026 +37116. The 0.01-lot /     |
 //|  3.0xATR-stop design was never checked against account size before |
 //|  this ran - a 20000 ZAR (~$1100) account carrying gold-CFD ATR     |
@@ -308,7 +309,9 @@
 //|  units elsewhere. The real v1.02 test is one 9-month window in one |
 //|  regime; a real 2023-2026 v1.02 run at the header's 20000 ZAR would|
 //|  be the like-for-like check against v1.00/v1.01 and is still       |
-//|  missing.                                                          |
+//|  missing. (A full-history v1.02 run came in the same day - on GOLD,|
+//|  not GOLD#, so still not like-for-like; see the 2026-09-23         |
+//|  full-history note below.)                                         |
 //|                                                                    |
 //|  v1.03 - CHART VISUALS (2026-09-23). CLOSES THE v1.00 "NO VISUAL   |
 //|  PANEL/WALLPAPER" KNOWN GAP BELOW, AT THE USER'S REQUEST ("all the |
@@ -440,6 +443,179 @@
 //|  sibling functions it ports. On first attach, check the Experts tab|
 //|  for the BG message and that the panel/lines appear.               |
 //|                                                                    |
+//|  v1.03 RESEARCH NOTE (2026-09-23, later the same day) - THE REAL   |
+//|  FULL-HISTORY v1.02 RUN. NO LOGIC CHANGE, #property version STAYS  |
+//|  1.03. v1.02 KEPT: the gap that run shows is mostly the SYMBOL and |
+//|  ACCOUNT it ran on, not v1.02's logic.                             |
+//|  research/meridian/fullhistory.py reproduces every number below in |
+//|  one run (sections A-K).                                           |
+//|                                                                    |
+//|  REAL MT5 STRATEGY TESTER RESULT, v1.02 FULL HISTORY (2026-09-23,  |
+//|  XM Global, symbol GOLD - NOT GOLD# - M5, 2023.01.01-2026.09.21,   |
+//|  20000 ZAR, 1:500, 62% real ticks, account 382043238 on XMGlobal-  |
+//|  MT5 13; every v1.02 input at its shipped default): 2287 trades, PF|
+//|  1.195009, win 24.62%, net +30957.06 ZAR = trade profit 34172.69 + |
+//|  swap -3215.63 (reconciled to the cent), Balance DD Maximal 6702.59|
+//|  (32.19%), Equity DD Maximal 6870.72 (32.90%). On its face that is |
+//|  worse than v1.00 (44899.83, PF 1.244) and v1.01 (51394.84, PF     |
+//|  1.282) on everything except drawdown.                             |
+//|                                                                    |
+//|  THE v1.00/v1.01 SOURCE REPORTS EXIST (CONFIRMED). The 2026-09-21  |
+//|  Meridian Backtest_1 (InpP150=150 EMA, stop 3.0) and Backtest_2_2.5|
+//|  (stop 2.5) match every headline figure in the v1.00/v1.01 sections|
+//|  to the cent. Both ran on account 1301959345, XMGlobal-MT5 6,      |
+//|  symbol GOLD#, 1:100, 84% real ticks. So the new run changed four  |
+//|  things at once, not one: logic (v1.01 -> v1.02), symbol (GOLD# -> |
+//|  GOLD), account/server, and leverage. Leverage does not matter at  |
+//|  0.01 lot: the reports' minimum margin levels are 2629% and 12674%.|
+//|                                                                    |
+//|  WHAT GOLD IS, vs GOLD# (CONFIRMED from real deals and fills):     |
+//|   - Swap. All 28 GOLD# reports in the uploads folder (two accounts,|
+//|     holds up to 63h50m) book exactly 0.00 swap. Every GOLD report  |
+//|     with at least one overnight hold books swap, and every one     |
+//|     without books 0.00. This run: -3215.63 ZAR, 329 overnight      |
+//|     holds, -1344.14 ZAR of it inside the max-drawdown window.      |
+//|   - Spread. On the 2147 bars where a real GOLD# run (v1.01 or BT2) |
+//|     and this GOLD run entered in the same direction, GOLD buys fill|
+//|     higher and sells lower around the same mid. That is a spread   |
+//|     about 15 / 14 / 20 / 25 points wider in 2023 / 2024 / 2025 /   |
+//|     2026.                                                          |
+//|   - Feed. A different server means slightly different tick volume  |
+//|     (which VWAP uses), slightly different bar closes near a thin   |
+//|     21/50 cross, and a slightly different instant when a stop is   |
+//|     touched.                                                       |
+//|                                                                    |
+//|  2026, REAL vs REAL - A CLEAN CHAIN. The four GOLD# datasets       |
+//|  covering 2026 plus this run's 2026 slice (entries                 |
+//|  2026-01-01..09-18, USD per 0.01 lot):                             |
+//|                                                                    |
+//|     v1.01 (150 EMA + S/R), GOLD#   473 trades  $2575.64  PF 1.649  |
+//|     BT1 (150 EMA, NO S/R), GOLD#   473 trades  $2522.93  PF 1.634  |
+//|     BT2 = v1.02, GOLD#             414 trades  $2250.28  PF 1.642  |
+//|     this run = v1.02, GOLD         407 trades  $1530.89  PF 1.434  |
+//|                                                                    |
+//|   - S/R filter, same symbol (BT1 -> v1.01): +$52.7. The            |
+//|     decomposition above modeled it as costing a little in 2026; on |
+//|     real fills it helps there too.                                 |
+//|   - 250 SMA swap, same symbol (v1.01 -> BT2): -$325.4 (-12.6%), PF |
+//|     flat. That is worse than the -$207 the simulator modeled for   |
+//|     2026.                                                          |
+//|   - Symbol, SAME LOGIC (BT2 -> GOLD): -$719.4 (-32%). 406 of GOLD's|
+//|     407 entries match BT2's to the bar and direction, so the signal|
+//|     is the same on both symbols. The 389 trades exiting on the same|
+//|     bar cost -$30.9 (spread). The 17 exiting on a different bar    |
+//|     cost -$124.7, nearly all of it one trade: on 2026-01-22 16:35  |
+//|     (long), GOLD's stop was hit and filled -16.13 while GOLD#'s    |
+//|     held and rode to +102.10. The remaining -$562.9 is 8 GOLD#     |
+//|     entries GOLD never took: five winners of +$75 to +$193 (two on |
+//|     the 01-30 / 02-03 crash-and-rebound days, ATR 19-24) and three |
+//|     small losers. Two of the eight are 01:05 session-open entries. |
+//|                                                                    |
+//|  2023-2025, WITH NO REAL SAME-SYMBOL PAIR. Two independent         |
+//|  estimates of the 250 SMA swap (S/R is on in both v1.01 and v1.02):|
+//|   - msim.py on GOLD# bars, deterministic: 2023 -41, 2024 +105, 2025|
+//|     +114 = +$178 (the 24-seed mean in the decomposition table      |
+//|     above: +$184).                                                 |
+//|   - Real fills only. Pair the real v1.01 (GOLD#) and real v1.02    |
+//|     (GOLD) trade lists by entry bar. Trades both configs took have |
+//|     identical exit rules, so their P/L difference is symbol only   |
+//|     (-65 / -31 / -103). The trades only one config took carry the  |
+//|     logic: -45 / +129 / +101 = +$185. That has the same sign as    |
+//|     msim in every year, and in 2026 the same split gives about -283|
+//|     once the 8 symbol-missed trades are taken out, against the real|
+//|     -325.                                                          |
+//|  Like for like, then, the 250 SMA vs 150 EMA over the full history |
+//|  is about -$145 (-4.5% of v1.01's real $3119). It is better in 2024|
+//|  and 2025 and worse in 2023 and 2026, and the 2026 trend year is   |
+//|  where it gives up net. A revert to 150 EMA fails this file's own  |
+//|  adoption bar (>= 3 of 4 periods) just as the original swap would  |
+//|  have.                                                             |
+//|                                                                    |
+//|  THE -20437.78 ZAR GAP (real v1.01 -> real v1.02), DECOMPOSED at   |
+//|  each year's realized ZAR/USD:                                     |
+//|                                                                    |
+//|     250 SMA swap (logic)             -2,000 to -2,150 ZAR  (~10%)  |
+//|     GOLD vs GOLD# price: spread,    -15,100 to -15,200 ZAR (~74%)  |
+//|       feed, missed trend-day entries                               |
+//|     GOLD swap                        -3,215.63 ZAR          (~16%) |
+//|                                                                    |
+//|  In USD the price part closes exactly: -$1058.2 = 2026 (-$325.4    |
+//|  logic, -$719.4 symbol) + 2023-2025 (-$13.5 = ~+$180 logic, ~-$195 |
+//|  symbol). About 90% of the gap is the move from GOLD# to GOLD, not |
+//|  v1.02.                                                            |
+//|                                                                    |
+//|  DRAWDOWN. The real 6702.59 (32.19%), sitting between v1.00 and    |
+//|  v1.01, is swap. With the swap removed, the same run's balance DD  |
+//|  is 5358.45 (25.55%) over the same 2023-06 -> 2024-11-06 stretch.  |
+//|  That is BELOW v1.01's real 6449.51 (29.00%) even with GOLD's wider|
+//|  spread working against it (INFERRED: a GOLD# v1.02 run should be  |
+//|  no deeper). The shallower worst stretch the simulator gave the 250|
+//|  SMA does show up on real full-history fills.                      |
+//|                                                                    |
+//|  THE OTHER CANDIDATE CAUSES, CHECKED:                              |
+//|   - Tick quality, 62% vs 84%: not the main cause. 98.7% of the USD |
+//|     price gap is in 2026 (-$1044.7 of -$1058.2), where this run's  |
+//|     fills look like real ticks: 6% / 15% of SL exits fill exactly  |
+//|     at the SL price, by half-year, vs 10% / 11% on BT2's 100%-real |
+//|     run. The likely synthetic stretch is 2023H2-2024H1 (49% / 41%  |
+//|     exact vs GOLD#'s 36-38% / 21-30%; INFERRED, since the report   |
+//|     does not say which months are real). There, matched trades exit|
+//|     on a different bar than msim 96 / 69 times vs v1.01's 29 / 29, |
+//|     but at a cost only ~$35 more than v1.01's.                     |
+//|   - EA-vs-Python structure (not stop-and-reverse, the stale-ticket |
+//|     bar, the Friday flatten): present in EVERY real run, so it can |
+//|     only matter through its interaction with the config, and that  |
+//|     is already inside msim's v1.01-vs-v1.02 number. Over 3.7 years |
+//|     the Friday flatten costs v1.02 14.6% of net (v1.01: 10.8%), in |
+//|     line with the 9-month window's 13.5%, not disproportionate.    |
+//|   - Leverage and margin: no effect (see above).                    |
+//|                                                                    |
+//|  WHY GOLD MISSES ENTRIES (not fully pinned down; there is no GOLD  |
+//|  bar export). Of msim's 2305 v1.02 entries on GOLD# bars, the real |
+//|  GOLD run skipped 65. They are 7x over-represented at the 01:xx    |
+//|  session open (17% vs 2.5% of entries taken), and skew to high     |
+//|  volatility (34% vs 20% above 1.5x the ATR median) and to thin     |
+//|  21/50 crosses (median 0.008 vs 0.018 ATR). That fits GOLD's wider |
+//|  session-open and high-volatility spread tripping                  |
+//|  InpMaxSpreadPoints=60, a limit set on GOLD#, plus feed noise      |
+//|  flipping marginal crosses. A flat +15-20 point spread in msim     |
+//|  reproduces GOLD's 2023-2025 per-year net well, but NOT 2026 and   |
+//|  NOT these misses, so most of it happens at tick level, not bar    |
+//|  level. In 2023-2025 the 54 misses were worth about +$40, near     |
+//|  zero. In 2026 the 11 were worth +$551 against ~$16 expected for   |
+//|  random trades: partly a real mechanism (blocking high-volatility  |
+//|  entries cuts off a trend system's fat tail) and partly bad luck in|
+//|  which trades flipped. Not tuned: without GOLD data any new spread |
+//|  limit would be a guess.                                           |
+//|                                                                    |
+//|  VERDICT: v1.02 KEPT - NO REVERT, NO PARTIAL REVERT. The full-     |
+//|  history run is still not like-for-like. Decomposed, the real      |
+//|  evidence says:                                                    |
+//|   - the S/R filter is net-positive in all four periods;            |
+//|   - the 250 SMA trades about 4% of net for a shallower worst       |
+//|     drawdown (about -$145 over 3.7 years, better in 2 of 4 years); |
+//|   - about 90% of the 31-40% gap comes from running on GOLD instead |
+//|     of GOLD#.                                                      |
+//|  That last point is the real lesson: the symbol is worth more than |
+//|  any logic change since v1.00. The one report from the live account|
+//|  (341980816, an Aurelius run) is on GOLD. On an account like that, |
+//|  expect GOLD's numbers (PF ~1.2 and ~33% equity DD on 20000 ZAR,   |
+//|  swap included), not GOLD#'s.                                      |
+//|                                                                    |
+//|  CORRECTION to the v1.00 section above: its "2023 +20365" had the  |
+//|  20000 deposit added in. 2023 was +364.74 by close year; with that,|
+//|  the four yearly figures sum to 44899.83. Fixed in place.          |
+//|                                                                    |
+//|  STILL MISSING - either run makes this like-for-like. Predictions, |
+//|  so the next real run can falsify this note:                       |
+//|   - v1.02 on GOLD#, account 1301959345, 2023.01.01-2026.09.19,     |
+//|     20000 ZAR: ~2300 trades, net ~49,000-52,000 ZAR (within ~5% of |
+//|     v1.01's 51394.84), balance DD under 29%.                       |
+//|   - OR v1.01 on GOLD, account 382043238, same window: net          |
+//|     ~31,000-35,000 ZAR, i.e. roughly 2000 ZAR ABOVE this run.      |
+//|  A GOLD M5 bar export (ExportBarData.mq5 on 382043238) would let   |
+//|  msim model GOLD directly and test InpMaxSpreadPoints there.       |
+//|                                                                    |
 //|  KNOWN GAPS (flagged, not fixed, so they don't get lost):          |
 //|   - RESOLVED in v1.03: "No visual panel/wallpaper" - see the v1.03 |
 //|     section above. The one piece left outside the code is the      |
@@ -447,6 +623,12 @@
 //|     to Meridian_Wallpaper.bmp, which has to be made and put in     |
 //|     <data folder>\MQL5\Images (until then PBackground() logs that 3|
 //|     times and gives up quietly).                                   |
+//|   - SYMBOL SENSITIVITY (2026-09-23 full-history note): every real  |
+//|     v1.00/v1.01 figure above is on swap-free GOLD#; GOLD costs     |
+//|     ~15-25 points more spread plus swap, and InpMaxSpreadPoints=60 |
+//|     was never checked on it - it plausibly blocks GOLD's session-  |
+//|     open / high-volatility entries. Needs a GOLD M5 bar export     |
+//|     before anything is tuned. Compare real runs on ONE symbol.     |
 //|   - Friday flatten is day-of-week + hour only - no full US-market  |
 //|     holiday calendar (IsMarketHoliday/DSTGapHourAdjustment ported  |
 //|     in every sibling EA) - a holiday weekend could still leave a   |
