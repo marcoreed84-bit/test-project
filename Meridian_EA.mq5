@@ -606,13 +606,16 @@
 //|  20000 deposit added in. 2023 was +364.74 by close year; with that,|
 //|  the four yearly figures sum to 44899.83. Fixed in place.          |
 //|                                                                    |
-//|  STILL MISSING - either run makes this like-for-like. Predictions, |
-//|  so the next real run can falsify this note:                       |
-//|   - v1.02 on GOLD#, account 1301959345, 2023.01.01-2026.09.19,     |
-//|     20000 ZAR: ~2300 trades, net ~49,000-52,000 ZAR (within ~5% of |
-//|     v1.01's 51394.84), balance DD under 29%.                       |
-//|   - OR v1.01 on GOLD, account 382043238, same window: net          |
-//|     ~31,000-35,000 ZAR, i.e. roughly 2000 ZAR ABOVE this run.      |
+//|  STILL MISSING - live account only from here on (2026-09-23: GOLD# |
+//|  demo set aside, all real runs go on the live GOLD account).       |
+//|  Falsifiable prediction so the next real run can falsify this note:|
+//|   - v1.01 config (InpPConfirm=150, InpConfirmMAMethod=EMA, rest    |
+//|     shipped defaults) on GOLD, account 382043238, 2023.01.01-      |
+//|     2026.09.19, 20000 ZAR: net ~31,000-35,000 ZAR, i.e. roughly    |
+//|     2000 ZAR ABOVE this run's 30,957.06 - isolates whether the     |
+//|     150 EMA -> 250 SMA logic swap costs real net on GOLD itself,   |
+//|     separate from the GOLD#->GOLD symbol-cost effect already       |
+//|     decomposed above.                                              |
 //|  A GOLD M5 bar export (ExportBarData.mq5 on 382043238) would let   |
 //|  msim model GOLD directly and test InpMaxSpreadPoints there.       |
 //|                                                                    |
