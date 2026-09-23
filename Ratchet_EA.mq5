@@ -729,9 +729,30 @@
 //|  -$100 and +$19 net a year; wick-OFF clearly negative). That matches v3.16's real    |
 //|  2024.08-2026.08 backtest split (-100.82, PF 0.866): this system earns in trend      |
 //|  years. That, more than any parameter here, is the honest risk statement.            |
+//|                                                                                      |
+//|  v3.30: InpTrailRunnerATR REAL-CONFIRMED, default 0.0 -> 6.0. Two paired real MT5     |
+//|  runs, same account (GOLD, 13,500 ZAR, same window as every run above), identical     |
+//|  in every input except InpTrailRunnerATR:                                             |
+//|    run (1) v3.29 defaults, runner=0.0: 362 trades, net 6,818.57 ZAR, PF 1.330288,      |
+//|      equity DD 4,947.47 ZAR (26.99%)                                                   |
+//|    run (2) runner=6.0:                356 trades, net 9,273.91 ZAR, PF 1.46342,        |
+//|      equity DD 3,138.71 ZAR (16.92%)                                                   |
+//|  Both pass criteria cleared: equity DD in ZAR fell 36.6% (required >=20%), net rose     |
+//|  not fell (required). Runner trail is now the default.                                 |
+//|                                                                                         |
+//|  HONEST FOOTNOTE, not a blocker: run (1) itself - the v3.29-defaults baseline - came     |
+//|  in at PF 1.330288, a hair under its own pass bar of "above 1.335" (miss of 0.0047),      |
+//|  and net 6,818.57 ZAR vs an expected >8,582.91 (within the ~1,600 ZAR noise band cited     |
+//|  for v3.29, but on the low side). This does not affect the v3.30 decision above, which      |
+//|  is a direct paired comparison between the two runs, not a re-check of v3.29 itself - but     |
+//|  it is close enough to the line that it is logged rather than quietly stepped over, same       |
+//|  discipline as everywhere else in this file. Symbol was GOLD, not GOLD# as in every earlier      |
+//|  Ratchet report - confirmed by the user to be the same underlying price feed (GOLD# is just       |
+//|  the demo-account label), and account size (13,500 vs 10,000 ZAR) does not affect the ZAR-basis     |
+//|  pass criteria since InpLotMode=0 (fixed lots, not balance-scaled).                                  |
 //+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
-#property version   "3.29"
+#property version   "3.30"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -832,11 +853,9 @@ input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, l
                                             // yet confirmed by a real Strategy Tester run - sweep this in the
                                             // tester before trusting the exact number, same discipline as every
                                             // other untested default in this file.
-input double InpTrailRunnerATR = 0.0;      // Runner tighten (x ATR of best move) - OFF by default, not yet real-MT5-tested
-                                            // [suggested test value 6.0, see header for pass criteria - v3.29: once a
-                                            // trade's best bar-open move
-                                            // reaches this many ATR, the give-back trail keeps InpTrailRunnerKeep of
-                                            // it instead of InpTrailKeepFrac. Only touches the rare runner - ~22
+input double InpTrailRunnerATR = 6.0;      // v3.30: REAL-CONFIRMED ON - once a trade's best bar-open move reaches
+                                            // this many ATR, the give-back trail keeps InpTrailRunnerKeep of it instead
+                                            // [of InpTrailKeepFrac. Only touches the rare runner - ~22
                                             // trades a year reach 6 ATR - and nothing else. Why: about half (51%/54%)
                                             // of both real 2026 max equity drawdowns is ONE runner handing back 70%
                                             // of a +4,200 ZAR float (see header v3.29). Simulator (2023-2026, 24
@@ -844,8 +863,10 @@ input double InpTrailRunnerATR = 0.0;      // Runner tighten (x ATR of best move
                                             // net neutral out-of-sample (2023-2025) and higher in 2026. Exit-only replay of the
                                             // REAL fills at 6.0/0.60: max equity DD 5,783->4,248 ZAR (Backtest_1) and
                                             // 5,487->3,395 (Backtest_2). NOT a v3.18-style cap (that bit every
-                                            // trade). NOT real-MT5-tested - suggested test value 6.0, pass criteria
-                                            // in the header. Off until a real run says otherwise.
+                                            // trade). REAL MT5 CONFIRMATION (v3.30, see header): paired same-account
+                                            // GOLD runs, 0.0 vs 6.0, both else identical - equity DD 4,947.47->3,138.71
+                                            // ZAR (-36.6%, required >=20%), net 6,818.57->9,273.91 ZAR (up, required
+                                            // not lower). Both pass criteria cleared. 0.0 remains available to disable.
 input double InpTrailRunnerKeep = 0.60;    // Fraction of the peak move locked once InpTrailRunnerATR is reached
 input bool   InpUseBreakeven = true;       // Move the stop to entry once InpBreakevenTriggerATR of profit shows  [tested: costless, small clean win on both splits]
 input double InpBreakevenTriggerATR = 0.3; // Profit needed before the breakeven move (x ATR) - fires BEFORE the trail
