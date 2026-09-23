@@ -547,8 +547,191 @@
 //|  on is shipping it FOR that real test, not because it's already trusted. Needs a real                |
 //|  Strategy Tester run before this default should be trusted over false.                                |
 //+------------------------------------------------------------------+
+//|  v3.29 (2026-09-23, Opus review): InpUseMomentumEntry default true -> false - the    |
+//|  real test v3.28 shipped it ON for came back, and momentum entry lost. Also, in the  |
+//|  same pass: the Backtest_1-vs-Backtest_2 drawdown "paradox" explained from the real  |
+//|  trades; this file's first sequential simulator validated against real fills         |
+//|  (research/ratchet/); wick-reject finally re-verified in isolation; an improvement   |
+//|  search that found one real drawdown lever, added OFF by default (InpTrailRunnerATR) |
+//|  until a real run confirms it.                                                       |
+//|                                                                                      |
+//|  THE TWO REAL REPORTS (XM Global GOLD#, M5, 2026.01.01-2026.09.21, 10,000 ZAR, 0.01  |
+//|  lots, 100% real ticks; every other input identical, checked line by line in both    |
+//|  Inputs blocks):                                                                     |
+//|                                                                                      |
+//|   BT1 mom OFF wick OFF  960 trades  11,590.72 ZAR  PF 1.206  eqDD 5,756.73 (29.24%)  |
+//|   BT2 mom ON  wick ON   443 trades   8,582.91 ZAR  PF 1.335  eqDD 5,460.00 (36.14%)  |
+//|                                                                                      |
+//|  Backtest_2 is exactly the shipped v3.28 defaults. Balance DD Maximal 3,592.65 vs    |
+//|  2,445.17. Deals parsed into round-trips by cumulative volume                        |
+//|  (research/ratchet/report.py): one out-leg per trip (no scale-out),                  |
+//|  profit+commission+swap sums to Total Net Profit to the cent, and the rebuilt balance|
+//|  drawdown matches the report's exactly. 897/960 and 410/443 exits are the broker-side|
+//|  SL - v3.16's "the stop geometry IS this system" still holds.                        |
+//|                                                                                      |
+//|  IMPORTANT - THIS PAIR IS NOT THE MOMENTUM TEST ON ITS OWN. It flips                 |
+//|  InpUseMomentumEntry AND InpUseWickReject together, so neither the header's momentum |
+//|  prediction nor the wick-reject question can be read off the raw Backtest_1 ->       |
+//|  Backtest_2 difference. Separated further down.                                      |
+//|                                                                                      |
+//|  THE DRAWDOWN "PARADOX", EXPLAINED (research/ratchet/paradox.py). Both real equity   |
+//|  curves rebuilt on real GOLD# M1 bars - floating P/L marked at each bar's high/low,  |
+//|  bid for longs, ask for shorts, at each trade's own realized ZAR/USD rate - landing  |
+//|  within 0.5% of each report's own figure (5,783 vs 5,757; 5,487 vs 5,460):           |
+//|  - It is the SAME drawdown in both runs: peak 2026-02-02 08:38, trough 2026-03-18    |
+//|    16:09, to the minute.                                                             |
+//|  - About half of it is ONE trade both configs took. The 2026-02-02 07:15 / 07:20 SELL|
+//|    floated +4,222 / +4,171 ZAR and was trailed out at +1,251 / +1,221: the give-back |
+//|    trail keeps 30% of the best BAR-OPEN price, so a runner hands back ~70% of its    |
+//|    float by design. That one giveback is 51% / 54% of each drawdown. The rest is six |
+//|    weeks of Feb-Mar chop realizing -1,148 / -894, plus -413 / -422 still floating at |
+//|    the trough.                                                                       |
+//|  - In ZAR, Backtest_2's drawdown is SMALLER (5,460 vs 5,757), and its balance        |
+//|    drawdown is 32% smaller. The percentage is higher only because it is measured from|
+//|    a lower equity peak (15,111 vs 19,687): by 2 Feb Backtest_1 had banked +5,465 and |
+//|    Backtest_2 only +940. The same 5,487 ZAR drawdown measured from Backtest_1's peak |
+//|    would read 27.9%.                                                                 |
+//|  - Why the lower peak: only 129 of Backtest_2's 443 entry bars coincide with         |
+//|    Backtest_1's. Two filter settings plus the one-position cascade produce almost    |
+//|    entirely different trade sequences. The 132 Backtest_1-only trades closed before  |
+//|    the peak made +4,701 ZAR, five of them January runners worth +1,020 to +1,803     |
+//|    each. With the top 5 trades = 107% (Backtest_1) / 120% (Backtest_2) of net, which |
+//|    handful of runners a config happens to catch sets both its net and the peak its   |
+//|    drawdown % is divided by.                                                         |
+//|  - So the paradox is concentration plus which trades survive the filters. It is NOT  |
+//|    timing or exposure: one position at a time, fixed 0.01 lots, average hold 43m42s  |
+//|    vs 43m20s - there is no way for this EA to stack exposure.                        |
+//|                                                                                      |
+//|  A VALIDATED SEQUENTIAL SIMULATOR (research/ratchet/sim.py, validate.py, noise.py).  |
+//|  This EA is single-position - OnTick() returns before the entry block whenever its   |
+//|  own position is open - and every exit feeds the cooldown and the 3-loss breaker that|
+//|  gate the next entry. So MSG_Trader_EA.mq5's v1.13-v1.15 lesson applies here: a      |
+//|  filter judged by deleting rows from a real trade list can look great and lose live. |
+//|  OnTick() was ported line by line: weekend flatten, the counters, session close, tail|
+//|  cap, give-back trail/breakeven at bar-open prices, Stochastic, MAXBARS, and the full|
+//|  entry gate chain. Checked against the real fills bar by bar:                        |
+//|  - 922/960 (96.0%) and 435/443 (98.2%) of real entries hit on the exact bar, same    |
+//|    direction every time.                                                             |
+//|  - On the 1,090 same-bar SL exits the simulated resting SL matches the real one (read|
+//|    from the deal comment, "sl 4378.70") to a median $0.07, with no bias. The         |
+//|    trail/breakeven arithmetic is exact; the cents are the entry-price offset below   |
+//|    feeding the breakeven level.                                                      |
+//|  - What bars can't show is measured instead. (1) The tester's random execution delay:|
+//|    real fills land a median 4-5s (up to 18s) after the bar open, sd ~0.11 ATR        |
+//|    (~$0.87) from its price. That routinely flips WHICH bar the breakeven/trail first |
+//|    engages - 2026-06-05 16:20 short, real +$1.55 vs +$95 from the bar open. (2) SL   |
+//|    slippage: every real SL fill is at or worse than its level, mean -0.026 ATR       |
+//|    (~-$0.15). Both are drawn per trade from the 1,357 matched trades, and every      |
+//|    config is judged over 24-48 seeds, never one path.                                |
+//|  - Result: trade counts within 1% of real (963-966 vs 960; 441 vs 443). Both real    |
+//|    nets sit inside the simulated spread - Backtest_1 at the 71st-88th percentile (the|
+//|    simulator is a little conservative on the wick-OFF config), Backtest_2 at the     |
+//|    35th-48th. Execution noise alone is worth $97-$146 (sd) of 9-month net on         |
+//|    ~$500-$630 - bigger than the whole real Backtest_1-vs-2 net gap.                  |
+//|                                                                                      |
+//|  MOMENTUM ENTRY - REAL VERDICT: IT LOSES.                                            |
+//|  - REAL fills: of Backtest_2's 443 trades, 90 were momentum-triggered (FreshAligned; |
+//|    trigger classified by bar-matching the simulator's own gate, 8 unmatched). They   |
+//|    LOST -3,182.78 ZAR at PF 0.44. The 345 pullback trades made +10,146.73 ZAR at PF  |
+//|    1.515.                                                                            |
+//|  - That static split overstates the fix (cascade), so the verdict comes from the     |
+//|    simulator: momentum ON minus OFF, 24 seeds per cell (momentum_test.py,            |
+//|    decompose.py). Net $, with closed-DD change in brackets:                          |
+//|                                                                                      |
+//|                    wick ON (shipped)    wick OFF (the header's own setting)          |
+//|   2023                 +1 (+29%)            -49 (+19%)                               |
+//|   2024                -73 (+39%)            -53 (+27%)                               |
+//|   2025                +98 (+18%)           +160 (+13%)                               |
+//|   2026 Jan-Sep        -62 (+11%)           -126 (+13%)                               |
+//|                                                                                      |
+//|  - 2026 under all three execution models (deterministic, dollar noise, ATR noise; 48 |
+//|    seeds): OFF beats ON on net and PF every time.                                    |
+//|  - Against the v3.28 header's own Python prediction (+16% trades, +16% net, same PF, |
+//|    maxDD +56%): the +16% trades REPLICATES (+13% to +16% with wick OFF, +22% to +29% |
+//|    with it on). "+16% net, same PF" does NOT - it only holds in 2025, gold's         |
+//|    strongest trend year. That modeling ran on 100,013 bars (~1.4 years) with the     |
+//|    pre-v3.16 fixed-distance trail. "maxDD +56%": same direction, smaller (+11% to    |
+//|    +39%).                                                                            |
+//|  - Mechanism: a momentum entry fires on the bar the stack first aligns, with no      |
+//|    pullback to lean on. In chop, it buys the end of the move that just created the   |
+//|    alignment.                                                                        |
+//|  - DEFAULT BACK TO false. Momentum OFF / wick ON is the best of the four corners on  |
+//|    2026: net $590 vs $528, PF 1.48 vs 1.34 (24 seeds, ATR noise).                    |
+//|                                                                                      |
+//|  WICK-REJECT, RE-VERIFIED IN ISOLATION AT LAST (the v3.21 caveat). With momentum OFF,|
+//|  wick ON vs OFF in the simulator: net -10 vs -193 (2023), -9 vs -61 (2024), 324 vs   |
+//|  386 (2025), 590 vs 540 (2026); closed DD 92 vs 278, 108 vs 157, 102 vs 162, 135 vs  |
+//|  316; 2026 PF 1.48 vs 1.16. Better in 3 of 4 years, drawdown cut by a third to two   |
+//|  thirds every year. Real fills agree: Backtest_2's wick-ON pullback trades ran PF    |
+//|  1.515 vs wick-OFF Backtest_1's 1.206. Stays ON - now for a tested reason, not just  |
+//|  "it's what the real runs had on".                                                   |
+//|                                                                                      |
+//|  IMPROVEMENT SEARCH - "FIND SOMETHING NEW" (candidates.py, robust_keep.py,           |
+//|  keep_real_replay.py). Base = momentum OFF / wick ON. Every candidate ran ONLY       |
+//|  through the sequential simulator, 2023 / 2024 / 2025 (out-of-sample for the         |
+//|  simulator) + the 2026 window. Bar fixed BEFORE running: better net in >=3 of 4      |
+//|  periods, better in 2026 under all 3 execution models, total closed DD not worse.    |
+//|  features.py screened entry-time features across all four years first. Alignment age,|
+//|  hour and distance-from-21 all flip sign between years - the same instability v3.16  |
+//|  found - so only one was carried forward.                                            |
+//|  - ATR-REGIME SKIP (no entry when ATR(14) sits below its own 25th percentile of the  |
+//|    last 2,000 bars): the one feature that is weakest-or-second-weakest in every year |
+//|    AND in the real 2026 pullback trades. Mechanism: spread + slippage are ~fixed     |
+//|    dollars, so they eat more of the ATR-scaled trail in a quiet tape. Net +29 / +18 /|
+//|    +6 / -24, drawdown lower every year, PF up everywhere. FAILS the bar - 2026 is    |
+//|    worse under all three execution models. A 15th-percentile version is worse (1/4). |
+//|    Not shipped; it is a real drawdown/PF lever, not a net one.                       |
+//|  - LONGER BREAKER (48 bars instead of 24): -7 / -19 / +5 / +16. FAIL.                |
+//|  - RUNNER TRAIL - aimed straight at the paradox finding (half of each real max       |
+//|    drawdown is one runner giving back 70%). Once a trade's best bar-open move reaches|
+//|    X ATR, keep Y of it instead of 0.30. This is NOT v3.18's rejected cap: that capped|
+//|    the give-back DISTANCE on every trade. This touches only the rare runner, ~22     |
+//|    trades a year at 6 ATR. The first pair tried split: 3 ATR/0.50 FAILED (1/4) and 5 |
+//|    ATR/0.60 PASSED (-6 / +5 / +27 / +92). So the one pass was stress-tested before   |
+//|    anything was believed:                                                            |
+//|                                                                                      |
+//|   12-cell grid X=4/5/6/8 x Y=0.5/0.6/0.7, paired seeds (robust_keep.py), net vs base:|
+//|     2026 window        every cell better: +29 to +149                                |
+//|     2023-2025 total    4 ATR cells -89 to -114 (worse); 5-8 ATR cells -20 to +47     |
+//|     equity DD          lower in ALL 12 cells                                         |
+//|   plateau centre 6 ATR/0.60: 2023 -2, 2024 0, 2025 +14 (se 5-10), 2026 +128 (se 29)  |
+//|                                                                                      |
+//|  - Honest read: a genuine drawdown lever, net-neutral out of sample. The 2026 gain is|
+//|    inside the window the idea came from, so it doesn't count as confirmation.        |
+//|    Exit-only replay of the REAL fills at 6 ATR/0.60 (keep_real_replay.py): Backtest_1|
+//|    42 trades reach it, net +$149, max equity DD 5,783 -> 4,248 ZAR (29.4% -> 19.5%). |
+//|    Backtest_2 22 trades, net +$128, 5,487 -> 3,395 ZAR (36.3% -> 22.5%). But the 5   |
+//|    ATR/0.60 neighbour replays to -$89 / +$58 - on 20-50 trades this is steep ground, |
+//|    exactly the v3.20 meta-finding's warning. Added as InpTrailRunnerATR (0 = OFF, the|
+//|    default) / InpTrailRunnerKeep=0.60. Picked from the MIDDLE of the >=5 ATR plateau,|
+//|    not its best cell (8 ATR/0.60), same discipline as InpTrailKeepFrac=0.30. v3.28   |
+//|    shipped an untested lever ON "for the test" and it lost; this one stays off until |
+//|    a real run earns it.                                                              |
+//|                                                                                      |
+//|  WHAT THE NEXT REAL RUNS SHOULD SHOW - written down BEFORE they exist                |
+//|  (v329_predict.py; same window, 10,000 ZAR, 48 seeds, range across the three         |
+//|  execution models):                                                                  |
+//|                                                                                      |
+//|   v3.29 defaults     ~360 trades  $585-654 (9.6-10.8k ZAR)   PF 1.47-1.54  eqDD ~32% |
+//|   + TrailRunnerATR=6 ~360 trades  $702-774 (11.6-12.7k ZAR)  PF 1.56-1.64  eqDD ~21% |
+//|   (v3.28, same model: $505-626, PF 1.32-1.41; real Backtest_2 was $510, PF 1.335)    |
+//|                                                                                      |
+//|  Pass criteria. (1) v3.29 defaults: 340-385 trades AND PF above v3.28's real 1.335.  |
+//|  Net is expected above 8,582.91 ZAR, but execution noise is ~1,600 ZAR sd, so one    |
+//|  run's net is not a pass/fail line. (2) InpTrailRunnerATR=6.0 becomes the default    |
+//|  only if Equity DD Maximal in ZAR (not %, see the paradox above) falls at least 20%  |
+//|  vs run (1) AND net is not lower than run (1). Anything short of both, it stays off. |
+//|                                                                                      |
+//|  CAVEATS. The simulator is validated against these two 2026 reports only; every      |
+//|  2023-2025 figure above is modeled, not real fills. The execution noise was measured |
+//|  on 2026 fills and scaled by ATR for earlier years. In the simulator, 2023 and 2024  |
+//|  are about breakeven at best for EVERY config tried (wick-ON configs between about   |
+//|  -$100 and +$19 net a year; wick-OFF clearly negative). That matches v3.16's real    |
+//|  2024.08-2026.08 backtest split (-100.82, PF 0.866): this system earns in trend      |
+//|  years. That, more than any parameter here, is the honest risk statement.            |
+//+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
-#property version   "3.28"
+#property version   "3.29"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -595,8 +778,13 @@ input double InpWickRejectRatio = 1.5;     // Wick must be at least this many ti
                                             // old finding from before the give-back trail existed. Now the default,
                                             // see InpUseWickReject's own comment - not re-verified against the
                                             // CURRENT trail as an isolated on/off test, only confirmed as "this is
-                                            // what every real run already had turned on".]
-input bool   InpUseMomentumEntry = true;   // ALSO fire on fresh full-stack alignment, no pullback required  [v3.28: Python-only so far (+16% trades, +16% net, same PF, +56% maxDD - the old inline comment here said +17% maxDD, which was stale/wrong against the header's own absolute numbers; corrected). Turned ON as the shipped default specifically so the next real MT5 Strategy Tester run tests it - this file's own header meta-finding is that Python-only results here have repeatedly NOT held up against real fills, so this needs a real confirmation before trusting it, same as every other unconfirmed number in this file. See header.]
+                                            // what every real run already had turned on". v3.29: NOW re-verified
+                                            // in isolation, through the validated sequential simulator with
+                                            // momentum OFF - closed drawdown cut by a third to two thirds in every
+                                            // year 2023-2026, PF 1.16->1.48 on the 2026 window, net better in 3 of
+                                            // 4 years (not 2025) - and in real fills the wick-ON pullback trades of
+                                            // Backtest_2 ran PF 1.515 vs wick-OFF Backtest_1's 1.206. See header.]
+input bool   InpUseMomentumEntry = false;  // ALSO fire on fresh full-stack alignment, no pullback required  [v3.29: back OFF - the real test v3.28 shipped it ON for came back a loser. In the real 2026-09-23 Backtest_2 (GOLD# M5, Jan-Sep 2026, shipped v3.28 defaults) the 90 momentum-triggered trades LOST -3,182.78 ZAR at PF 0.44 while the 345 pullback trades made +10,146.73 at PF 1.515. The validated sequential simulator (research/ratchet/, cascade included) agrees: momentum ON minus OFF, wick ON, net 2023 +1 / 2024 -73 / 2025 +98 / 2026 -62 (-11%), PF lower in 2024 and 2026, closed DD higher in all four years (+11% to +39%). The old "+16% net, same PF" only holds in 2025. See header v3.29.]
 input int    InpMomentumRunBars  = 8;      // Bars back that must NOT have been aligned, for a momentum entry to count as "fresh"
 input int    InpCooldown   = 1;            // Bars to wait after an exit
 
@@ -643,6 +831,19 @@ input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, l
                                             // yet confirmed by a real Strategy Tester run - sweep this in the
                                             // tester before trusting the exact number, same discipline as every
                                             // other untested default in this file.
+input double InpTrailRunnerATR = 0.0;      // v3.29, OFF by default (0 = off): once a trade's best bar-open move
+                                            // reaches this many ATR, the give-back trail keeps InpTrailRunnerKeep of
+                                            // it instead of InpTrailKeepFrac. Only touches the rare runner - ~22
+                                            // trades a year reach 6 ATR - and nothing else. Why: about half (51%/54%)
+                                            // of both real 2026 max equity drawdowns is ONE runner handing back 70%
+                                            // of a +4,200 ZAR float (see header v3.29). Simulator (2023-2026, 24
+                                            // seeds, cascade included): lower equity DD in all 12 grid cells tried;
+                                            // net neutral out-of-sample (2023-2025) and higher in 2026. Exit-only replay of the
+                                            // REAL fills at 6.0/0.60: max equity DD 5,783->4,248 ZAR (Backtest_1) and
+                                            // 5,487->3,395 (Backtest_2). NOT a v3.18-style cap (that bit every
+                                            // trade). NOT real-MT5-tested - suggested test value 6.0, pass criteria
+                                            // in the header. Off until a real run says otherwise.
+input double InpTrailRunnerKeep = 0.60;    // Fraction of the peak move locked once InpTrailRunnerATR is reached
 input bool   InpUseBreakeven = true;       // Move the stop to entry once InpBreakevenTriggerATR of profit shows  [tested: costless, small clean win on both splits]
 input double InpBreakevenTriggerATR = 0.3; // Profit needed before the breakeven move (x ATR) - fires BEFORE the trail
 input double InpBreakevenBufferATR  = 0.0;  // Buffer past entry (x ATR, 0 = exact breakeven)  [tried 0.20 in v3.16
@@ -1950,6 +2151,12 @@ void TrailStop()
         {
          double keep = MathMax(0.0, MathMin(1.0, InpTrailKeepFrac));
          double peakFav = isLong ? (g_peakFavPx - g_entryPrice) : (g_entryPrice - g_peakFavPx);
+         //--- v3.29 runner tighten (InpTrailRunnerATR, 0 = off): once the best
+         //--- bar-open move reaches InpTrailRunnerATR x ATR-at-entry, lock in the
+         //--- larger InpTrailRunnerKeep fraction instead - same [0,1] clamp and
+         //--- same monotonic "better" check below, so it can only ever tighten.
+         if(InpTrailRunnerATR > 0.0 && peakFav >= InpTrailRunnerATR * g_entryATR)
+            keep = MathMax(keep, MathMax(0.0, MathMin(1.0, InpTrailRunnerKeep)));
          double cand = isLong ? g_entryPrice + keep * peakFav
                                : g_entryPrice - keep * peakFav;
          if(!have || (isLong ? cand > bestSl : cand < bestSl)) { bestSl = cand; have = true; }
