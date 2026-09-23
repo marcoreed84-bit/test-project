@@ -464,9 +464,54 @@
 //|  calibrated value. NOT VALIDATED BY A REAL BACKTEST - the next real run needs to confirm this            |
 //|  outlier is actually gone and check what, if anything, the guard costs (expected: negligible,            |
 //|  since it should almost never fire).                                                                     |
+//|                                                                    |
+//|  v1.13 ADDS A REAL ENTRY FILTER in response to "can we reduce the losses". Re-parsed Backtest_1           |
+//|  (v1.12, clean MSG3-only, structural SL, 93 round-trips) and split by outcome. Every single               |
+//|  losing trade - 51 of 51 - is a ONE-LEG trade: it never even reached TP1. Since TP1 moves the             |
+//|  stop to breakeven (real-confirmed since v1.01, re-confirmed in the v1.11 header), no trade that          |
+//|  reaches TP1 can ever finish net-negative. So "smaller losses" cannot come from resizing the              |
+//|  stop - the SL and every TP level are all fixed R-multiples of the same risk, so shrinking risk           |
+//|  shrinks wins by the identical proportion (confirmed by comparing this run to InpFixedFibSL=true:         |
+//|  PF is virtually identical, 1.6536 vs 1.6548, net is just smaller because average risk is smaller         |
+//|  - a scale change, not a real edge). The only real lever is not taking the setups that were always        |
+//|  going to run straight to the original stop.                                                              |
+//|                                                                    |
+//|  CONFIRMED: risk size (SL distance) as a % of entry price predicts outcome, and not the way a              |
+//|  simple "smaller stop = safer" intuition would suggest - it is a VALLEY, not a slope. Quintiles by         |
+//|  risk% on Backtest_1: 44/22/39/67/52% win rate low to high, i.e. both the smallest and largest risk        |
+//|  trades do fine and the MIDDLE band is where it loses money. Re-measured independently on the real         |
+//|  EA's own 108 real M1 trades (completely separate calculation, same underlying real report used for       |
+//|  every prior version): same valley shape, 67/48/38/71/75% win rate by quintile. Tested the ~0.18-0.26%    |
+//|  band (real quintiles 2+3 combined, 44 of 108 real trades) against 20,000 random same-size removals       |
+//|  from the same 108 trades: the real dead-zone trades' combined net (-2,126.48) sits at the 0.31           |
+//|  percentile of that null distribution (mean random-removal net +9,136.55) - about 1 real trial in         |
+//|  300 would be this bad by chance. Removing it would take the real EA's own reported net from              |
+//|  22,358.79 to 24,485.27 (+9.5%) on 64 of 108 trades. Checked this is not a gold-price-drift artifact:      |
+//|  dead-zone trades span the full real entry-price range ($4,021.60-$5,399.50), not one period.              |
+//|                                                                    |
+//|  NOT ADOPTED: direction bias. Backtest_1 shows sell trades winning far more than buy trades (54.2%         |
+//|  vs 29.4%), which looks like an obvious second filter - but the real EA's OWN 108 trades show the          |
+//|  same skew (71.56% short vs 52.83% long, from every "Short/Long Trades (won%)" line in every real          |
+//|  report used throughout this file). Since the real EA does not filter by direction and still ships         |
+//|  with this same asymmetry, it reads as a real feature of this GOLD period's regime (trending market),      |
+//|  not a fixable flaw - filtering it here would be fitting this reconstruction to one period's direction     |
+//|  rather than reproducing the real EA's actual behaviour, so it was left alone.                             |
+//|                                                                    |
+//|  THE CHANGE: InpSkipDeadZone (default true) rejects a retracement-zone touch in CheckSessionSetups()       |
+//|  when the candidate risk (already computed by StructuralOrFibSL/InpFixedFibSL either way) falls            |
+//|  between InpDeadZoneMinPct and InpDeadZoneMaxPct of the entry price. It does not retire the range -        |
+//|  entry price still moves bar to bar inside the retracement zone, so a later touch at a different risk%    |
+//|  can still fire normally.                                                                                  |
+//|                                                                    |
+//|  STILL INFERRED: the EXACT 0.18/0.26 boundary is fit from a 108-real-trade sample (quintile edges,         |
+//|  not an independently re-validated cut), so treat the DIRECTION and EXISTENCE of the effect as             |
+//|  confirmed but the precise edges as approximate, likely to move slightly as more real data comes in.       |
+//|  NOT VALIDATED BY A REAL BACKTEST of this reconstruction with the filter live - the next real run          |
+//|  needs to check whether it reproduces a similar win-rate/net-profit lift here, not just on the real         |
+//|  EA's own trades used to derive it.                                                                        |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.12"
+#property version   "1.13"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -542,6 +587,11 @@ input double InpRangeRiskPct       = 30.8;    // real-confirmed IDENTICAL on M1 
                                                // see v1.07 header note. No period-specific override needed.
 input double InpMinExtensionPct    = 10.0;    // v1.07 M1 real-data fix - see header. M5 value was 15.0 - SET THIS
                                                // BACK TO 15.0 IF RUNNING ON M5.
+input bool   InpSkipDeadZone      = true;     // v1.13 real-data fix - see header. Skips entries whose risk-as-%-
+                                               // of-price falls in the dead zone below - CONFIRMED bad on the
+                                               // real EA's own 108 real trades (permutation p=0.0031).
+input double InpDeadZoneMinPct    = 0.18;     // % of entry price. Boundary fit from real data - approximate, see header.
+input double InpDeadZoneMaxPct    = 0.26;     // % of entry price. Boundary fit from real data - approximate, see header.
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
 input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
@@ -813,6 +863,22 @@ void UpdateSessionRanges(datetime barTime, double barHigh, double barLow)
      }
   }
 //+------------------------------------------------------------------+
+//| v1.13 real-data fix (see header): CONFIRMED on the real EA's own    |
+//| 108 real M1 trades (permutation p=0.0031) that risk-as-%-of-price   |
+//| between InpDeadZoneMinPct and InpDeadZoneMaxPct is a "dead zone" -  |
+//| win rate collapses there (43.2% real, vs 60-75% outside it) even    |
+//| though it sits in the MIDDLE of the risk-size range, not at either  |
+//| extreme. Boundary is fit from a 108-trade sample, so treat the      |
+//| EXISTENCE of the effect as confirmed but the exact edges as         |
+//| approximate - see header for the full analysis.                     |
+//+------------------------------------------------------------------+
+bool InRiskDeadZone(double entryPx, double slPx)
+  {
+   if(!InpSkipDeadZone) return(false);
+   double riskPct = MathAbs(entryPx - slPx) / entryPx * 100.0;
+   return(riskPct >= InpDeadZoneMinPct && riskPct <= InpDeadZoneMaxPct);
+  }
+//+------------------------------------------------------------------+
 //| INFERRED entry trigger (see header): after a session's range       |
 //| breaks in one direction, wait for a retracement back into the      |
 //| InpZoneTopPct/InpZoneBotPct fib zone of the (extension extreme ->  |
@@ -861,8 +927,10 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
          double extPct = (g_sesExtHigh[i] - H) / rng * 100.0;
          if(close1 <= zoneTop && close1 >= zoneBot && extPct >= InpMinExtensionPct)
            {
+            double slCand = StructuralOrFibSL(true, i, close1, rng, atr);
+            if(InRiskDeadZone(close1, slCand)) continue;
             sesIdx = i;
-            slPrice = StructuralOrFibSL(true, i, close1, rng, atr);
+            slPrice = slCand;
             return(1);
            }
         }
@@ -877,8 +945,10 @@ int CheckSessionSetups(double close1, double high1, double low1, double atr, int
          double extPct = (L - g_sesExtLow[i]) / rng * 100.0;
          if(close1 >= zoneBot && close1 <= zoneTop && extPct >= InpMinExtensionPct)
            {
+            double slCand = StructuralOrFibSL(false, i, close1, rng, atr);
+            if(InRiskDeadZone(close1, slCand)) continue;
             sesIdx = i;
-            slPrice = StructuralOrFibSL(false, i, close1, rng, atr);
+            slPrice = slCand;
             return(-1);
            }
         }
