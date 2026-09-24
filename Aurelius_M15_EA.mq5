@@ -779,6 +779,17 @@
 //|  InpMaxSlopeATR=1.25, InpUseSlopeSRBlock=true, InpPullbackMA=PB_21 - none of the ablation's Python        |
 //|  predictions were overturned by the real account, though test 2's PF leg and test 3's whole result        |
 //|  were both close calls, not clean sweeps.                                                                   |
+//|                                                                                                                |
+//|  QUEUED (2026-09-24): this file's OWN InpUsePrice21Exit/InpUseVwapExit are still Python-only -                |
+//|  the real tests done on Aurelius_EA.mq5's (M5) copies of these two inputs do NOT carry over, M5 and           |
+//|  M15 have independent, never-cross-tested copies. Two real MT5 tests still needed (symbol GOLD,                |
+//|  account 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle off from today's shipped defaults,          |
+//|  which now include the real-confirmed InpMaxSlopeATR=1.25/InpUseSlopeSRBlock=true/InpPullbackMA=PB_21):           |
+//|   1. InpUsePrice21Exit=false. Python claimed net/PF improve AND drawdown falls ~19-26% with it on. PASS            |
+//|      (keep true) only if reverting to false makes PF/net worse and drawdown does NOT improve. FAIL if               |
+//|      PF/net are flat or better with it off.                                                                          |
+//|   2. InpUseVwapExit=false. Python claimed net $1846.2->$1990.5, PF 1.51->1.54 with it on. Same PASS/FAIL              |
+//|      logic - keep true only if turning it off is a real, measured net/PF cost.                                        |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.53"
