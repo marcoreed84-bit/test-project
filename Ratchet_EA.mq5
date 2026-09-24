@@ -849,8 +849,8 @@ input bool   InpUseWickReject = true;      // Require the trigger candle's wick 
                                             // config under real test this whole time - true is. Old "off by
                                             // default" framing predates the give-back trail and was never
                                             // re-verified against it; flipped to match validated reality instead.]
-input double InpWickRejectRatio = 1.5;     // Wick must be at least this many times the body  [tested: real edge -
-                                            // PF 1.69->2.26, maxDD -59% - but trades LESS than half as often, an
+input double InpWickRejectRatio = 1.5;     // Wick must be at least this many times the body - tested, real edge on PF and drawdown.
+                                            // [PF 1.69->2.26, maxDD -59% - but trades LESS than half as often, an
                                             // old finding from before the give-back trail existed. Now the default,
                                             // see InpUseWickReject's own comment - not re-verified against the
                                             // CURRENT trail as an isolated on/off test, only confirmed as "this is
@@ -890,12 +890,12 @@ input double InpStopATR    = 1.75;         // Stop distance (x ATR at entry) - r
                                             // predicted. Back to 1.75, the only value with two full real-tick
                                             // confirmations (v3.17: BT net +58.76 PF 1.084, FW net +930.99 PF
                                             // 1.600). 1.40 remains available if lower drawdown is ever preferred
-                                            // over the extra profit - see the git history for the real numbers.
+                                            // over the extra profit - see the git history for the real numbers.]
 input bool   InpUseTrail   = true;         // Trail the stop once the trade is in profit  [the single biggest lever tested this session]
 input double InpTrailTriggerATR = 0.5;     // Profit needed before the trail starts (x ATR)
-input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, lock in this fraction of the best move seen so far
-                                            // [not a fixed ATR distance behind current
-                                            // price - see TrailStop()]. Replaces the old InpTrailATR fixed-distance
+input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, lock in this fraction of the best move seen so far - REAL MT5 CONFIRMED (v3.17): a real, meaningful win on both splits.
+                                            // [Not a fixed ATR distance behind current price - see
+                                            // TrailStop().] Replaces the old InpTrailATR fixed-distance
                                             // trail: real trade data (Opus review, v3.16) showed that trail parking
                                             // the stop a fixed 0.3 ATR behind price was inside normal M5 bar noise
                                             // (99.7% of bars exceed 0.3 ATR of range) and was capping winners at
@@ -904,13 +904,13 @@ input double InpTrailKeepFrac = 0.30;      // Give-back trail: once triggered, l
                                             // than the old fixed trail early) while a large move gets much more
                                             // room to keep developing. Python replay of both real MT5 test periods
                                             // (2024.08-2026.08, GOLD# M5) improved net/PF on both halves at every
-                                            // value tried from 0.25-0.35 - 0.30 was the middle of that range, NOT
-                                            // yet confirmed by a real Strategy Tester run - sweep this in the
-                                            // tester before trusting the exact number, same discipline as every
-                                            // other untested default in this file.
-input double InpTrailRunnerATR = 6.0;      // v3.30: REAL-CONFIRMED ON - once a trade's best bar-open move reaches
-                                            // this many ATR, the give-back trail keeps InpTrailRunnerKeep of it instead
-                                            // [of InpTrailKeepFrac. Only touches the rare runner - ~22
+                                            // value tried from 0.25-0.35 - 0.30 was the middle of that range. v3.17
+                                            // REAL MT5 CONFIRMATION: backtest net -100.82 -> +58.76 (PF 0.866 ->
+                                            // 1.084), forward net +442.38 -> +930.99 (PF 1.267 -> 1.600) - see
+                                            // header v3.17 for the full real numbers and real costs (longer
+                                            // average hold, higher forward equity drawdown).
+input double InpTrailRunnerATR = 6.0;      // v3.30: REAL-CONFIRMED ON - once a trade's best bar-open move reaches InpTrailRunnerATR, the give-back trail keeps InpTrailRunnerKeep of it instead of InpTrailKeepFrac.
+                                            // Only touches the rare runner - ~22
                                             // trades a year reach 6 ATR - and nothing else. Why: about half (51%/54%)
                                             // of both real 2026 max equity drawdowns is ONE runner handing back 70%
                                             // of a +4,200 ZAR float (see header v3.29). Simulator (2023-2026, 24
@@ -937,7 +937,7 @@ input double InpBreakevenBufferATR  = 0.0;  // Buffer past entry (x ATR, 0 = exa
                                             // the average loss - net profit dropped 66% on backtest (58.76->17.23)
                                             // and was flat on forward (930.99->943.33) with worse drawdown on both.
                                             // Same shape of result as Aurelius_EA.mq5's own breakeven feature this
-                                            // session: better win rate, worse or flat bottom line. Back to 0.0.
+                                            // session: better win rate, worse or flat bottom line. Back to 0.0.]
 input int    InpMaxBars    = 80;           // Bar limit on any trade (0 = off)
                                             // [reaches ~2-3% of trades under the v3.16
                                             // give-back trail (corrected, v3.20 - previously documented as
@@ -1003,18 +1003,13 @@ input color  InpColBB      = C'80,180,220';       // Bollinger Band colour - ste
 //--- v3.27 indicator-visibility inputs. Both cosmetic: nothing below is read by
 //--- any entry, exit, sizing or risk decision, and every draw they gate sits
 //--- behind g_skipCosmeticDraws exactly like the MA/BB lines above.
-input bool   InpShowTouchBand = true;             // Draw the InpTouchATR envelope around the 21 EMA - the
-                                                   // actual zone Touched21() tests a wick against, and this
-                                                   // EA's highest-frequency entry trigger. The 21 itself was
-                                                   // already drawn; the tolerance around it was not
-input color  InpColTouch   = C'128,128,0';        // Touch-band colour - InpCol21's yellow at ~half brightness,
-                                                   // so the band reads as a zone belonging to the 21 rather
-                                                   // than as a sixth MA (drawn STYLE_DOT too)
-input color  InpColBBMid   = C'40,90,110';        // Bollinger MIDDLE band (hBB buffer 0) - InpColBB dimmed,
-                                                   // drawn under the same InpShowBB toggle since it is part
-                                                   // of the same indicator, not a separate one. Without it
-                                                   // the upper/lower pair reads as two unrelated lines
-                                                   // instead of one envelope around its own basis
+input bool   InpShowTouchBand = true;             // Draw the InpTouchATR envelope around the 21 EMA - the actual zone Touched21() tests a wick against, and this EA's highest-frequency entry trigger.
+                                                   // The 21 itself was already drawn; the tolerance around it
+                                                   // was not.
+input color  InpColTouch   = C'128,128,0';        // Touch-band colour - InpCol21's yellow at ~half brightness, so the band reads as a zone belonging to the 21 rather than as a sixth MA (drawn STYLE_DOT too).
+input color  InpColBBMid   = C'40,90,110';        // Bollinger MIDDLE band (hBB buffer 0) - InpColBB dimmed, drawn under the same InpShowBB toggle since it is part of the same indicator, not a separate one.
+                                                   // Without it the upper/lower pair reads as two unrelated
+                                                   // lines instead of one envelope around its own basis.
 input color  InpChartBg    = clrBlack;            // Chart background - matches Aurelius/Fulcrum
 input color  InpBullCol    = C'0,150,255';        // Bullish candle - neon blue, same as Aurelius/Fulcrum
 input color  InpBearCol    = clrWhite;            // Bearish candle - neon white, same as Aurelius/Fulcrum
