@@ -20,11 +20,20 @@ import numpy as np
 from engine import P, POINT
 
 
-def simulate(ctx, extra_filter=None, params=None):
+def simulate(ctx, extra_filter=None, params=None, extra_exit=None):
     """extra_filter(ctx, i, is_buy) -> bool, optional additional entry gate
     (e.g. the S&R touch-and-reject condition), applied on top of the real
     shipped gates below - used to test a candidate filter against the
-    already-validated base gate, not in place of it."""
+    already-validated base gate, not in place of it.
+
+    extra_exit(ctx, i, is_buy) -> bool, optional additional exit trigger
+    (RESEARCH HOOK ONLY, never part of the real EA - e.g. a divergence-exit
+    candidate, research/divergence.py + divergence_exit_test.py). Checked
+    FIRST in the exit-priority chain below, right after the hard daily/Friday
+    session-close flatten and before Price21/VWAP/ALIGN_BREAK - by design,
+    since the whole point of an early-warning exit candidate is to fire
+    before those slower, already-shipped exits would. None (the default)
+    leaves every existing baseline byte-identical."""
     p = params or P
     n = ctx["n"]
     close, high, low = ctx["close"], ctx["high"], ctx["low"]
@@ -112,6 +121,8 @@ def simulate(ctx, extra_filter=None, params=None):
             fired = None
             if ctx["near_daily_close"][i] or ctx["friday_flatten"][i]:
                 fired = "SESSION_CLOSE"
+            if fired is None and extra_exit is not None and extra_exit(ctx, i, is_buy):
+                fired = "DIVERGENCE"
             if fired is None and p["use_price21_exit"]:
                 m21 = ctx["m21"][i]
                 if not np.isnan(m21) and atr[i] > 0:

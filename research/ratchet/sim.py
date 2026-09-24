@@ -89,6 +89,12 @@ class RP:
     entry_filter: Optional[Callable] = None      # f(ctx, t, dir, kind) -> bool (True = allow)
     stop_mult_fn: Optional[Callable] = None      # f(ctx, t, dir, kind) -> stop_atr override
     keep_fn: Optional[Callable] = None           # f(trade_state) -> keep fraction override
+    exit_fn: Optional[Callable] = None           # f(ctx, t, pos) -> reason or None, RESEARCH HOOK
+                                                  # ONLY (never part of the real EA) - checked right
+                                                  # after SESSION_CLOSE and before TAILCAP/trail/STOCH/
+                                                  # MAXBARS, e.g. a divergence-exit candidate
+                                                  # (research/divergence.py + divergence_exit_test.py).
+                                                  # None (default) leaves every baseline byte-identical.
 
 
 BASELINE = RP(wick=False, momentum=False)        # Backtest_1's config
@@ -256,6 +262,10 @@ def simulate(ctx, p=SHIPPED, start=WIN_START, end=WIN_END, record_signals=False)
             cur = bid if d > 0 else ask
             if p.close_before_break and 0 <= ctx["mins_to_close"][t] <= p.close_mins:
                 close(t, cur, "SESSION_CLOSE"); continue
+            if p.exit_fn is not None:
+                r = p.exit_fn(ctx, t, pos)
+                if r:
+                    close(t, cur, r); continue
             if p.tail_atr > 0 and (pos["entry"] - cur) * d >= p.tail_atr * pos["atr"]:
                 close(t, cur, "TAILCAP"); continue
             # TrailStop

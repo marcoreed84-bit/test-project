@@ -653,6 +653,22 @@
 //|     simulator check, not a cosmetic one. The drawn VWAP is         |
 //|     g_vwapValue as-is, so it shows this too (the attach-time       |
 //|     backfill does not).                                            |
+//|                                                                     |
+//|  RESEARCH NOTE (2026-09-23), Python-only, REJECTED - regular divergence (RSI(14)/    |
+//|  MACD-hist(12,26,9)/Stochastic(14,3), see research/divergence.py) as an EARLY EXIT,  |
+//|  layered on the real shipped v1.02 baseline via msim.py's exit_fn hook               |
+//|  (research/meridian/divergence_exit_test.py), same idea already tested on            |
+//|  Aurelius/Aurelius_M15 the same day. Single deterministic run (no Monte Carlo - a     |
+//|  first-pass screen only, see the script's own docstring), real GOLD# M5 data, 4       |
+//|  yearly periods (2023-2026) matching candidates.py's convention. 4-period net vs      |
+//|  baseline: RSI -1126.90 (0/4 periods better), MACD -1252.13 (1/4 better), STOCH       |
+//|  -1427.10 (1/4 better) - a clear net cost every year that matters (2025/2026, the     |
+//|  two periods with real trade volume and profit) despite closedDD improving in most    |
+//|  periods for MACD/STOCH (e.g. 2023 closedDD 144.03 vs baseline 238.15). REJECTED,      |
+//|  not pursued further - matches the same net-vs-drawdown tradeoff pattern found on      |
+//|  Aurelius_M15_EA.mq5 the same day, and the same overall verdict as Aurelius_EA.mq5's    |
+//|  clean M5 reject. See research/divergence_standalone/ for the separate "divergence      |
+//|  as its own standalone system" test (also rejected, independently, on GOLD M5/M15).      |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
 #property version   "1.03"

@@ -644,9 +644,58 @@
 //|  every measure - loosening to 0.40 trades some real drawdown headroom for the extra        |
 //|  net/PF, it doesn't get both for free. STILL NEEDED: tests 2 (InpUsePrice21Exit=false      |
 //|  alone) and 3 (InpUseVwapExit=false alone) - neither has been real-tested yet.             |
+//|                                                                                              |
+//|  RESEARCH NOTE (2026-09-23): tests 2 and 3 both came in, clean single-toggle runs     |
+//|  (live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, confirmed in each report's    |
+//|  own Inputs block - test 2 only InpUsePrice21Exit=false, test 3 only                    |
+//|  InpUseVwapExit=false, the other two candidates left on their shipped defaults each      |
+//|  time). Baseline is the 2026-09-22 real full-stack run: 929 trades, 36,338.93 ZAR,         |
+//|  PF 1.573425, Balance DD Maximal 21.49%/4,695.87.                                            |
+//|                                                                                                 |
+//|  TEST 2 (InpUsePrice21Exit=false): 920 trades, net 35,582.78 ZAR (-2.1%), PF 1.560164          |
+//|  (-0.84%), Balance DD Maximal 18.36%/3,993.01 (a real 14.5% relative IMPROVEMENT with it        |
+//|  off), Equity DD Relative 19.34%/4,255.30 (also better, -13.4%); Equity DD Maximal is the        |
+//|  one figure slightly worse (14.21% vs 13.78%). FAIL: this test's own pre-written criterion         |
+//|  needed a real PF drop of MORE than 1% to justify keeping it on - it only fell 0.84% - AND          |
+//|  needed DD to NOT improve with it off, but Balance DD and Equity DD Relative both clearly            |
+//|  improved. Both FAIL conditions triggered at once. InpUsePrice21Exit REVERTED to false (v1.48),        |
+//|  matching this file's own Python ablation finding for M5 (small, mixed effect - net/PF barely           |
+//|  move but closedDD improves without it) and the same real-test discipline already applied to              |
+//|  Ratchet_EA.mq5's momentum-entry filter (v3.29): a pre-written criterion failed for real, so the            |
+//|  candidate reverts, not stays on hope.                                                                        |
+//|                                                                                                                   |
+//|  TEST 3 (InpUseVwapExit=false): 929 trades (unchanged), net 35,754.64 ZAR (-1.6%), PF                            |
+//|  1.562056 (-0.72%, well inside the predicted ~3% redundancy band), Balance/Equity DD all                          |
+//|  marginally worse by 0.3-0.5 points either way - noise, not a direction. PASS: matches the                         |
+//|  ablation's own prediction that this lever is near-redundant. Left on (InpUseVwapExit=true                          |
+//|  unchanged) since turning it off doesn't help either - real-confirmed as low-priority, a                             |
+//|  candidate for later simplification rather than something actively earning its keep.                                  |
+//|                                                                                                                           |
+//|  NET RESULT: of the three M5 candidates stacked since v1.46, one is now real-confirmed                                   |
+//|  (InpMinSlopeATR=0.40), one is real-confirmed-but-redundant (InpUseVwapExit, left on),                                    |
+//|  and one failed its real test and was reverted (InpUsePrice21Exit, now false, v1.48).                                      |
+//|                                                                                                                                |
+//|  RESEARCH NOTE (2026-09-23), Python-only, REJECTED - regular divergence as an EARLY   |
+//|  EXIT: user's idea, prompted by a real chart of a short entered very late in an       |
+//|  extended downtrend - close the position early on the first RSI(14)/MACD-hist(12,26,  |
+//|  9)/Stochastic(14,3) regular divergence against it (see research/divergence.py for    |
+//|  the full swing-pivot/divergence construction), layered via sim.py's new extra_exit   |
+//|  hook on top of this file's real shipped baseline (research/aurelius/                 |
+//|  divergence_exit_test.py). GOLD# M5 data, 885-trade baseline: net=$2587.24 PF=1.8056  |
+//|  closedDD=$146.81 floatDD=$328.89. All three oscillators made it WORSE, not better:   |
+//|  RSI net=$1905.00 (-26.4%) PF=1.6012, MACD net=$1600.73 (-38.1%) PF=1.5062, STOCH     |
+//|  net=$1949.61 (-24.6%) PF=1.6136 - and drawdown did NOT clearly improve either (RSI    |
+//|  floatDD $362.53 vs baseline $328.89, worse; MACD/STOCH closedDD/floatDD both worse    |
+//|  too). REJECTED - exactly the failure mode flagged before testing: an early-warning   |
+//|  exit built on the same oscillator families fires often enough (384-402 divergence     |
+//|  exits out of ~900 baseline trades) to cut real winners short in this file's own long  |
+//|  sustained trend moves, for no offsetting drawdown benefit on M5. See                  |
+//|  Aurelius_M15_EA.mq5 for the M15 result (same script, different timeframe - a more     |
+//|  mixed picture there) and research/divergence_standalone/ for the separate "does       |
+//|  divergence work as its own standalone system" test (also rejected, independently).    |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.47"
+#property version   "1.48"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -822,12 +871,12 @@ input bool    InpUseMaxBars      = false;      // Force close after N bars
 input int     InpMaxBars         = 1000;       // N bars
 
 input group "=== Early exit: price closes through the 21 (optional) ==="
-input bool    InpUsePrice21Exit     = true;    // Exit as soon as price closes back through the 21, instead of waiting for the slower 21x50 alignment break  [NOT yet real-tested - validated in the Python model only, both train/hold splits agree: net/PF improve AND max drawdown falls ~19-26%. See header before trusting this default.]
+input bool    InpUsePrice21Exit     = false;   // Exit as soon as price closes back through the 21, instead of waiting for the slower 21x50 alignment break  [REJECTED (2026-09-23, real MT5, live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle test 2): failed its own pre-written PASS criterion - PF only fell 0.84% (below the required >1%) AND Balance DD Maximal improved 21.49%->18.36% with it off, both FAIL conditions at once. Reverted to false (v1.48). See header.]
 input double  InpPrice21BufferATR   = 0.7;     // How far past the 21 counts as "through" (x ATR) - filters normal noise right at the line
 input int     InpPrice21ConfirmBars = 8;       // Consecutive closed bars required past the buffer before exiting - filters normal pullback-to-50 wiggles that dip through the 21 and recover
 
 input group "=== Early exit: price closes through session VWAP (optional) ==="
-input bool    InpUseVwapExit        = true;    // Exit as soon as price closes back through the session VWAP  [NOT yet real-tested - validated in the Python model only, both train/hold splits agree: FULL net 1846.2->1990.5, PF 1.51->1.54. Independent of the price-21 exit (different line) - running both together is a genuine test of two unproven ideas at once, not a confound of an already-validated one, since NEITHER has real data yet. See header.]
+input bool    InpUseVwapExit        = true;    // Exit as soon as price closes back through the session VWAP  [REAL-CONFIRMED near-redundant (2026-09-23, real MT5, live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle test 3): PF moved only -0.72% with it off (1.573425->1.562056), trade count unchanged (929 either way) - matches the ablation's Python prediction that this lever rarely fires and barely matters. Left on (no real harm, and turning it off doesn't earn anything either) - a candidate for later simplification, not urgent. See header.]
 input double  InpVwapBufferATR      = 0.2;     // How far past VWAP counts as "through" (x ATR)
 input int     InpVwapConfirmBars    = 8;       // Consecutive closed bars required past the buffer before exiting
 

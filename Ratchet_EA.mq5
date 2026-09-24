@@ -750,6 +750,28 @@
 //|  Ratchet report - confirmed by the user to be the same underlying price feed (GOLD# is just       |
 //|  the demo-account label), and account size (13,500 vs 10,000 ZAR) does not affect the ZAR-basis     |
 //|  pass criteria since InpLotMode=0 (fixed lots, not balance-scaled).                                  |
+//|                                                                                                          |
+//|  RESEARCH NOTE (2026-09-23), Python-only, MIXED - regular divergence (RSI(14)/MACD-        |
+//|  hist(12,26,9)/Stochastic(14,3), see research/divergence.py) as an EARLY EXIT, layered      |
+//|  on the real shipped v3.30 baseline (SHIPPED, InpTrailRunnerATR=6.0) via sim.py's new        |
+//|  exit_fn hook (research/ratchet/divergence_exit_test.py), same idea tested the same day       |
+//|  on Aurelius/Aurelius_M15/Meridian - all three rejected it there. Ratchet's own result is       |
+//|  DIFFERENT: single deterministic run (seed=0, no entry_noise/sl_slip - a first-pass screen        |
+//|  only, not the noise.py-calibrated run validate.py/robust_keep.py require for an adoption          |
+//|  decision), real M5 data, 2026.01.01-2026.09.21 (SHIPPED's own window), 444-trade baseline:          |
+//|  net=$697.42 PF=1.465 win=68.2% closedDD=$122.03. RSI (net $692.66, -$4.76) and MACD (net              |
+//|  $688.14, -$9.28) are both essentially flat/noise - not the clear reject seen on the other               |
+//|  three EAs, but not a real gain either. STOCH is a genuine outlier: net $893.68 (+$196.26,                |
+//|  +28.1%), PF 1.465->1.625 (+10.9%), closedDD $122.03->$109.48 (-10.3%, also better), on 47                 |
+//|  divergence-triggered exits out of 453 trades - better on every measure at once, the bar               |
+//|  this file's own screening discipline treats as a real signal rather than noise. NOT A REAL              |
+//|  MT5 CANDIDATE YET: this is one deterministic Python run, well short of the noise-calibrated,              |
+//|  train/hold-robust bar every other real-tested lever in this file cleared first (see                        |
+//|  validate.py/robust_keep.py's own convention) - needs that fuller treatment before it earns                  |
+//|  a real MT5 test slot, not a straight promotion off one good number. See                                       |
+//|  research/divergence_standalone/ for the separate "divergence as its own standalone system"                     |
+//|  test (rejected there, independently, on GOLD M5/M15 - this file's result is specifically                        |
+//|  about divergence as an EXIT layered on Ratchet's own real entries, not a standalone system).                     |
 //+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
 #property version   "3.30"

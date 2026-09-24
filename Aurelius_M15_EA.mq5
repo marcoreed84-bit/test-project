@@ -717,6 +717,24 @@
 //|  STILL OPEN: test 2 (InpUseSlopeSRBlock=false with InpMaxSlopeATR held at 1.25,  |
 //|  so the block is actually exercised) and test 3 (InpPullbackMA=PB_50) - neither  |
 //|  has been real-tested yet, this run only answered test 1.                        |
+//|                                                                                    |
+//|  RESEARCH NOTE (2026-09-23), Python-only, REJECTED - same regular-divergence     |
+//|  EARLY-EXIT idea tested on Aurelius_EA.mq5 (M5, see that file's 2026-09-23 note   |
+//|  for the full construction), run here on this file's own M15 baseline via the    |
+//|  same script (research/aurelius/divergence_exit_test.py). GOLD# M15 data (405445 |
+//|  bars resampled from the M5 export), 401-trade baseline: net=$2722.37 PF=2.1335  |
+//|  closedDD=$201.92 floatDD=$255.67. Net/PF got worse with every oscillator - RSI   |
+//|  net=$2303.79 (-15.4%) PF=1.9405, MACD net=$2404.33 (-11.7%) PF=1.9959, STOCH     |
+//|  net=$2414.17 (-11.3%) PF=2.0151 - but unlike M5, the picture is genuinely mixed: |
+//|  MACD/STOCH's drawdown actually IMPROVED (closedDD $178.29 vs $201.92, floatDD    |
+//|  ~$206-216 vs $255.67), while RSI got worse on every measure (closedDD $236.75,   |
+//|  floatDD $283.94). REJECTED as a default - all three cost real net/PF, which this |
+//|  file's own screening bar requires a candidate NOT do - but the MACD/STOCH        |
+//|  drawdown improvement is a real, honest finding worth remembering if a future     |
+//|  opt-in "smoother equity curve, less net" variant is ever wanted; not pursued      |
+//|  further here since nothing asked for that tradeoff. See Aurelius_EA.mq5's own    |
+//|  note (M5, a clean reject on every measure, no such tradeoff) and                  |
+//|  research/divergence_standalone/ for the separate standalone-system test.          |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.52"
