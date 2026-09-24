@@ -753,9 +753,30 @@
 //|  down - the exact stale-status-label bug class this project already found and fixed on this                 |
 //|  file's InpUsePrice21Exit/InpUseVwapExit the same day. Fixed the leading label only; the                      |
 //|  0.40 default and every number in the comment are unchanged.                                                   |
+//|                                                                                                                  |
+//|  VISUAL AUDIT (2026-09-24), Opus review, cosmetic-only, no trading logic touched - two real                     |
+//|  defects found in DrawPanel()/PWatermark(), version bumped for both (real rendering fixes,                      |
+//|  not the MSG v1.16 style label-only precedent that stays version-flat):                                        |
+//|  1) LAYERING BUG: PBackground()/PWatermark() sat AFTER DrawPanel()'s `if(!InpShowPanel) return`                 |
+//|  early-out, so InpShowPanel=false silently killed the watermark too - even though                              |
+//|  InpShowPanel/InpWatermark are documented elsewhere in this portfolio as independent inputs.                    |
+//|  Vanguard_EA.mq5's own header already documents finding and fixing this exact bug in its copy                  |
+//|  of this panel code ("found in review"); it was never ported back to this file, the one the                    |
+//|  Vanguard panel was itself copied FROM. Fixed by moving both calls before the early-out.                        |
+//|  2) STALE LABELS: BIAS section rows b2/b3 ("M15   150", "H1    600") and STRATEGY's "pullback                   |
+//|  to" (pbName's PB_150 case, "150") still showed the pre-2026-09-07 MA periods. InpP150/InpM150                  |
+//|  moved to 250/MODE_SMA and InpP600/InpM600 to 500/MODE_SMMA that same day (see the MA input                     |
+//|  group above) but the panel captions were never updated - the panel was showing "150"/"600"                    |
+//|  next to bias readings actually computed off the 250- and 500-period MAs. Relabeled to                          |
+//|  "M15   250" / "H1    500" and pbName's third case to "250". These are still static text (the                  |
+//|  DEFAULT period, not a live InpP* read - same disclosed limitation as Aurelius_M15_EA.mq5's                     |
+//|  own labels), just accurate again.                                                                              |
+//|  Also re-verified by hand: ROWS/GAPS (39 in-position / 37 flat, GAPS=10) against the literal                    |
+//|  ty+= sequence, the panel's chart-height auto-shrink loop, and draw-call order (MA/level lines                  |
+//|  before DrawPanel(), panel always last) - all correct, no change needed there.                                  |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.48"
+#property version   "1.49"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -2744,6 +2765,15 @@ void ClosePosition(const string reason)
 //--- anywhere in this repo, so there's no local precedent to lean on.
 void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
   {
+   //--- background/watermark are documented as independent of the panel
+   //--- (InpShowPanel/InpWatermark are separate inputs) - drawn BEFORE
+   //--- the panel's own early-return (2026-09-24 fix: this file still had
+   //--- them nested AFTER the InpShowPanel check, silently killing the
+   //--- watermark too whenever the panel itself was switched off - the
+   //--- exact bug Vanguard_EA.mq5 already found and fixed in its own copy
+   //--- of this same panel code; never ported back here until now).
+   PBackground();
+   PWatermark();
    if(!InpShowPanel) { ObjectsDeleteAll(0, g_pp); return; }
 
    //--- see g_panelReclaim's own comment: true only reclaims top-of-stack
@@ -2752,9 +2782,6 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    //--- updates the existing objects' text/values in place, so live P&L
    //--- ticking doesn't visibly flash the whole panel.
    g_panelReclaim = reclaim;
-
-   PBackground();
-   PWatermark();
 
    int w = MathMax(InpPanelW, g_panelMinW);
    g_panelMinW = 0;   // re-measured fresh this cycle, used by the NEXT one
@@ -2833,8 +2860,8 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    double c = iClose(_Symbol, PERIOD_CURRENT, 1);
    PSection("s1", x, ty, w, rh, "BIAS"); ty += rh + 6;
    PRow("b1", x, ty, w, "M5    50",   !ok ? "-" : (c > m50   ? "UP":"DOWN"), ok ? (c > m50   ?1:0) : -1); ty += rh;
-   PRow("b2", x, ty, w, "M15   150",  !ok ? "-" : (c > m150  ? "UP":"DOWN"), ok ? (c > m150  ?1:0) : -1); ty += rh;
-   PRow("b3", x, ty, w, "H1    600",  !ok ? "-" : (c > m600  ? "UP":"DOWN"), ok ? (c > m600  ?1:0) : -1); ty += rh;
+   PRow("b2", x, ty, w, "M15   250",  !ok ? "-" : (c > m150  ? "UP":"DOWN"), ok ? (c > m150  ?1:0) : -1); ty += rh;
+   PRow("b3", x, ty, w, "H1    500",  !ok ? "-" : (c > m600  ? "UP":"DOWN"), ok ? (c > m600  ?1:0) : -1); ty += rh;
    PRow("b4", x, ty, w, "H4    2400", !ok ? "-" : (c > m2400 ? "UP":"DOWN"), ok ? (c > m2400 ?1:0) : -1); ty += rh + 6;
 
    //--- criteria ---------------------------------------------------
@@ -2873,7 +2900,7 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
                    (InpAlignMode == ALIGN_MID)  ? "MID"  :
                    (InpAlignMode == ALIGN_FAST) ? "FAST" : "PRICE";
    string pbName = (InpPullbackMA == PB_21) ? "21" :
-                   (InpPullbackMA == PB_50) ? "50" : "150";
+                   (InpPullbackMA == PB_50) ? "50" : "250";
    PSection("s5", x, ty, w, rh, "STRATEGY"); ty += rh + 6;
    PRow("d1", x, ty, w, "alignment", alName, -1); ty += rh;
    PRow("d2", x, ty, w, "pullback to", pbName, -1); ty += rh;
