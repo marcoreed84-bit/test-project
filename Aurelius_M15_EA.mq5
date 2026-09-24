@@ -916,7 +916,7 @@ input ENUM_APPLIED_PRICE InpPrice = PRICE_CLOSE; // Applied price (all)
 
 input group "=== Strategy ==="
 input ENUM_ALIGN   InpAlignMode  = ALIGN_MID;  // Alignment requirement
-input ENUM_PBMA    InpPullbackMA = PB_21;      // Which MA the pullback must reach - CANDIDATE UNDER TEST
+input ENUM_PBMA    InpPullbackMA = PB_21;      // Which MA the pullback must reach - REAL-CONFIRMED (2026-09-24, see below)
                                                 // (2026-09-10): was PB_50, never independently swept
                                                 // before. A Python sweep (pullback_ma_test.py, real M15
                                                 // data, shipped v1.48 config held fixed) found PB_21 a
@@ -1086,7 +1086,7 @@ input double  InpBankATR      = 4.0;       // Profit needed before banking (x AT
 input bool    InpBankNeed21   = true;      // Only bank when the 21 has turned against the trade
 
 input group "=== Momentum-shift entry filter (optional) ==="
-input bool    InpUseMomentum  = false;     // Require MACD histogram to be turning in the trade's favour right at entry  [validated in the Python model (net/PF improve on both splits) but NOT yet real-tested - queued behind the price-21 exit and VWAP-cross candidates, see header]
+input bool    InpUseMomentum  = false;     // Require MACD histogram to be turning in the trade's favour right at entry  [REJECTED (2026-09-24, real MT5, live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR): trade count collapsed 65% and net fell 40.1% - same shape as Aurelius_EA.mq5's (M5) own rejection. Stays false. See header.]
 
 input group "=== Protective stop (optional) ==="
 input bool    InpUseStopLoss     = true;       // Attach a stop loss  [tested for real: a real Strategy Tester run showed a 27.69% EQUITY drawdown vs only 9.76% BALANCE drawdown - a position floated ~$1,184 underwater with no price floor before recovering. Turned on at the existing wide 4.0 ATR distance specifically to test whether it caps that float without denting real profit - see header]
