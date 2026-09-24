@@ -469,7 +469,9 @@
 //|  blocked new entries on a flagged holiday the same place/way as the existing Friday                              |
 //|  no-entry rule. The daily settlement-break flatten (NearSessionClose/InpCloseBeforeBreak)                          |
 //|  is untouched - still bar-gated, but a missed daily-break gap is minutes, not days,                                  |
-//|  so it wasn't the risk this fix targets.                                                                                |
+//|  so it wasn't the risk this fix targets. CORRECTION (2026-09-24): that "minutes, not                                 |
+//|  days" assumption was never actually verified and turned out wrong on Aurelius_EA.mq5's                              |
+//|  identical mechanism - see this file's own 2026-09-24 note near the end of this header.                              |
 //+------------------------------------------------------------------+
 //|  v3.24: real GOLD# M5 price data (2023-2026) shows this broker's server        |
 //|  clock follows EU DST dates while gold's true session timing follows US          |
@@ -772,6 +774,23 @@
 //|  research/divergence_standalone/ for the separate "divergence as its own standalone system"                     |
 //|  test (rejected there, independently, on GOLD M5/M15 - this file's result is specifically                        |
 //|  about divergence as an EXIT layered on Ratchet's own real entries, not a standalone system).                     |
+//|                                                                                                                       |
+//|  RESEARCH NOTE (2026-09-24), DOCUMENTATION ONLY, no behavior changed - found while answering        |
+//|  the same question on Aurelius_EA.mq5 (shares this file's identical NearSessionClose/                |
+//|  InpCloseBeforeBreak code): the daily Mon-Thu settlement-break flatten does not reliably fire         |
+//|  on real GOLD data on this broker (SymbolInfoSessionTrade doesn't expose a usable intraday             |
+//|  boundary Mon-Thu, confirmed via real M15 Aurelius trade data - Friday's WeekendStillOpen()             |
+//|  mechanism is unaffected, it doesn't depend on the session table). NOT fixed here either, same           |
+//|  reasoning: the Mon-Thu break isn't a real market closure, so there is no gap-risk case for               |
+//|  forcing an exit, and this file's own real-confirmed numbers (v3.30, PF 1.465) were produced BY            |
+//|  the EA's actual behavior. QUANTIFIED IN PYTHON (sim.py's own mins_to_close construction, same              |
+//|  bug class as engine.py's near_daily_close): removing the daily-flatten assumption from sim.py's              |
+//|  SHIPPED baseline - reality (daily flatten off, matching real behavior) vs baseline (flatten on,               |
+//|  Python's prior assumption) - net $697.42->$616.10 (-11.7%), PF 1.465->1.401 (-4.4%), closedDD                  |
+//|  $122.03->$144.50 (+18.4% worse), on only 12 of 444 trades affected either way. UNLIKE                            |
+//|  Aurelius_EA.mq5's M5 result (where the same real-EA gap HELPS by Python's own model), here it               |
+//|  COSTS - a genuinely EA-specific result, not a general rule; see Aurelius_EA.mq5's own note for               |
+//|  the opposite-direction M5 finding. sim.py's own SHIPPED baseline is NOT changed by this note.                  |
 //+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
 #property version   "3.30"

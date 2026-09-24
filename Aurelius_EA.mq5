@@ -79,8 +79,10 @@
 //|  InpCloseBeforeBreak now ON by default (was off): InpCloseOnFriday|
 //|  already force-flattened before the weekend, but a position could |
 //|  sit open straight through the daily Mon-Thu settlement break -   |
-//|  inconsistent. Now both closes work the same way, same fix        |
-//|  already made to Ratchet_EA.mq5 this session.                     |
+//|  inconsistent. INTENDED to make both closes work the same way,    |
+//|  same fix already made to Ratchet_EA.mq5 this session - see the   |
+//|  2026-09-24 research note below: on real GOLD data this does NOT  |
+//|  actually happen, the Mon-Thu side never reliably fires.          |
 //|                                                                  |
 //|  CONSOLIDATED (v1.26): the SOLIDUS/AURELIUS/IMPERATOR/TRIUMPHUS/  |
 //|  CONFLUENS preset switcher is removed - AURELIUS was the only     |
@@ -409,7 +411,9 @@
 //|  and blocked new entries on a flagged holiday the same place/way as the existing                     |
 //|  Friday no-entry rule. The daily Mon-Thu settlement-break flatten (NearSessionClose/                  |
 //|  InpCloseBeforeBreak) is untouched - still bar-gated, but a missed daily-break gap                     |
-//|  is minutes, not days, so it wasn't the risk this fix targets.                                          |
+//|  is minutes, not days, so it wasn't the risk this fix targets. CORRECTION (2026-09-24):                |
+//|  that "minutes, not days" assumption was never actually verified and turned out wrong -                |
+//|  see the 2026-09-24 research note near the end of this header.                                         |
 //+------------------------------------------------------------------+
 //|  v1.41: real GOLD# M5 price data (2023-2026) shows this broker's server        |
 //|  clock follows EU DST dates while gold's true session timing follows US          |
@@ -693,6 +697,55 @@
 //|  Aurelius_M15_EA.mq5 for the M15 result (same script, different timeframe - a more     |
 //|  mixed picture there) and research/divergence_standalone/ for the separate "does       |
 //|  divergence work as its own standalone system" test (also rejected, independently).    |
+//|                                                                                          |
+//|  RESEARCH NOTE (2026-09-24) - InpCloseBeforeBreak's Mon-Thu side does NOT reliably     |
+//|  fire on real GOLD data, DOCUMENTATION ONLY, no behavior changed. Found while           |
+//|  answering "does Aurelius hold positions across daily close/open during the week":      |
+//|  pulling round-trips from the 2026-09-22 real full-history M15 report, a position       |
+//|  opened Tue 2024-10-15 15:15 and did not close until Fri 2024-10-18 22:00 - 3 days 6     |
+//|  hours, spanning two ordinary (non-holiday) Mon-Thu settlement breaks - despite          |
+//|  InpCloseBeforeBreak=true being the shipped default since the InpCloseOnFriday note      |
+//|  above. NearSessionClose()/MinutesToSessionClose() depends on SymbolInfoSessionTrade()   |
+//|  reporting a genuine intraday session boundary for GOLD Mon-Thu on this broker - it      |
+//|  evidently does not (Friday's flatten is unaffected: WeekendStillOpen() is a separate,   |
+//|  explicit-deadline, tick-level mechanism, not session-table-dependent, and real data      |
+//|  confirms IT works). M5's three longest real holds (2-3.5 days) are all explained by      |
+//|  genuine US market holidays instead (Good Friday 2024, both Thanksgiving weekends) -      |
+//|  a different, already-understood gap class (see v1.40 above), not this one.               |
+//|                                                                                             |
+//|  DECISION: NOT fixed to actually force a daily flatten. The Mon-Thu "settlement break"     |
+//|  is a broker bookkeeping event, not a real market closure (GOLD keeps trading through      |
+//|  it) - unlike the weekend, there is no real gap-risk case for forcing an exit there, and    |
+//|  this file's own real-confirmed numbers (PF 1.573 M5, PF 1.89 M15) were produced BY the     |
+//|  EA's actual behavior, i.e. without this ever firing Mon-Thu - so "fixing" it to really      |
+//|  flatten daily would be an untested strategy change, not a bug fix, and would need its        |
+//|  own real MT5 confirmation before shipping like anything else in this file.                    |
+//|                                                                                                   |
+//|  QUANTIFIED IN PYTHON (research/aurelius/daily_flatten_reality_test.py) - separately, this        |
+//|  session's engine.py has modeled the OPPOSITE all along: build_context()'s                        |
+//|  near_daily_close = mins_to_midnight<=5 fires unconditionally every day (no                        |
+//|  SymbolInfoSessionTrade dependency), so every Python-only screen this session (the                  |
+//|  InpMinSlopeATR sweep, the ablation study, the divergence screens) has quietly assumed a              |
+//|  daily flatten the real EA doesn't perform. Comparing engine.py's own baseline against a               |
+//|  "reality" variant (near_daily_close forced to never fire, Friday flatten untouched) on the             |
+//|  same GOLD# M5 data: net $2587.24->$2956.08 (+14.3%), PF 1.8056->1.9352 (+7.2%), trades               |
+//|  885->878, closedDD $146.81->$160.68 (worse), floatDD unchanged ($328.89 either way) - the              |
+//|  real EA's actual (non-)behavior is BETTER by this file's own model, not worse: letting a              |
+//|  good trade ride past the fictional daily cutoff beats forcing an exit and a fresh re-entry              |
+//|  (which pays spread again and can miss the re-entry criteria). This plausibly explains why              |
+//|  real M5 confirmations have tracked at or above Python's predictions all session rather than             |
+//|  below. M15's own near_daily_close is a separate, harmless artifact worth knowing: it is ZERO             |
+//|  (never true) across all 85,445 M15 bars - 15-minute-spaced bar timestamps can never land                 |
+//|  within the <=5-minute-to-midnight window that threshold checks, so M15's Python baseline has              |
+//|  ALWAYS behaved as "no daily flatten" by accident, matching real M15 behavior for a different              |
+//|  reason than the real EA's SymbolInfoSessionTrade gap - confirmed by the reality-variant run               |
+//|  coming back byte-identical to baseline for M15 (401 trades, same net/PF/DD exactly). Not fixed,           |
+//|  since no past M15 number in this file was ever affected by it either way. Engine.py's M5              |
+//|  near_daily_close is NOT changed by this note - flagging the gap honestly and sizing it was              |
+//|  the ask; whether to correct engine.py's own baseline for future screens is a separate call.            |
+//|  Ratchet_EA.mq5 shares the identical real-EA bug (same NearSessionClose/InpCloseBeforeBreak              |
+//|  pattern) but the SAME Python diagnostic there points the OPPOSITE way - removing its daily              |
+//|  flatten assumption COSTS net/PF/drawdown, not helps - see that file's own 2026-09-24 note.             |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.48"

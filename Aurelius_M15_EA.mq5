@@ -735,6 +735,19 @@
 //|  further here since nothing asked for that tradeoff. See Aurelius_EA.mq5's own    |
 //|  note (M5, a clean reject on every measure, no such tradeoff) and                  |
 //|  research/divergence_standalone/ for the separate standalone-system test.          |
+//|                                                                                     |
+//|  RESEARCH NOTE (2026-09-24), DOCUMENTATION ONLY, no behavior changed - this file    |
+//|  shares Aurelius_EA.mq5's InpCloseBeforeBreak/NearSessionClose code verbatim; see    |
+//|  that file's own 2026-09-24 note for the full finding (a real M15 trade held 3 days  |
+//|  6 hours across two ordinary Mon-Thu settlement breaks - the mechanism does not       |
+//|  reliably fire on real GOLD data) and the reasoning for NOT forcing a real daily      |
+//|  flatten (no real gap-risk case, and this file's own real-confirmed PF 1.89 result     |
+//|  was produced by the EA's actual, not-flattening behavior). One M15-specific          |
+//|  footnote: engine.py's near_daily_close construction (mins_to_midnight<=5) can          |
+//|  never be true on 15-minute-spaced bars, so this file's Python baseline has always       |
+//|  modeled zero daily flattens too, by accident - confirmed directly, not assumed          |
+//|  (0 of 85,445 M15 bars). No past M15 Python-only number in this file was affected          |
+//|  by that either way.                                                                        |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.52"
