@@ -715,8 +715,7 @@ input group "=== Signal: 21/50 cross, slow-confirm + VWAP + S/R confirmed ==="
 input int    InpP21             = 21;
 input int    InpP50             = 50;
 input ENUM_MA_METHOD InpFastMAMethod = MODE_EMA;   // 21/50 method - EMA confirmed best, see header
-input int    InpPConfirm        = 250;      // v1.02: was 150 (named InpP150) - see header, SMA beat EMA
-                                             // at every period tested, 250 was the best of those
+input int    InpPConfirm        = 250;      // v1.02: was 150 (named InpP150) - see header, SMA beat EMA at every period tested, 250 was the best of those.
 input ENUM_MA_METHOD InpConfirmMAMethod = MODE_SMA; // v1.02: was MODE_EMA (shared with 21/50) - see header
 input int    InpSRDays          = 3;        // trailing completed D1 bars checked for the nearest level
 input double InpMinSRDistATR    = 0.50;     // reject entries this close (xATR) to that level - see header
@@ -742,13 +741,13 @@ input ulong  InpMagic           = 750731;
 input string InpTradeComment    = "Meridian";
 
 input group "=== Cross-EA signal (for Vanguard_M15_EA.mq5's optional conflict filter) ==="
-input bool    InpPublishPosition = true;       // Publish this EA's real position direction via a terminal
-                                                // global variable, so Vanguard_M15_EA.mq5 (attached to its own
-                                                // chart) can optionally avoid entering directly against an
-                                                // already-open Meridian position - see Vanguard_M15_EA.mq5's own
-                                                // header for the full design. Purely a broadcast: Meridian's
-                                                // own trading is completely unaffected whether this is on or
-                                                // off, or whether anything is even reading it.
+input bool    InpPublishPosition = true;       // Publish this EA's real position direction via a terminal global variable, so Vanguard_M15_EA.mq5 can optionally avoid entering against it.
+                                                // Vanguard_M15_EA.mq5 (attached to its own chart) reads this
+                                                // to optionally avoid entering directly against an
+                                                // already-open Meridian position - see Vanguard_M15_EA.mq5's
+                                                // own header for the full design. Purely a broadcast:
+                                                // Meridian's own trading is completely unaffected whether
+                                                // this is on or off, or whether anything is even reading it.
 
 //--- v1.03: everything below is cosmetic only - nothing in these three groups
 //--- is read by any entry, exit, sizing or risk decision, and every draw they
@@ -777,32 +776,25 @@ input int     InpPanelSize   = 8;                 // Font size
 
 input group "=== Chart theme and drawn indicators (v1.03) ==="
 input bool    InpApplyTheme  = true;              // Recolour the chart
-input bool    InpHideTradeMarks = true;           // Hide MT5's own trade arrows/SL lines - replaced by the
-                                                  // labelled entry/stop lines below, in this file's palette
+input bool    InpHideTradeMarks = true;           // Hide MT5's own trade arrows/SL lines - replaced by the labelled entry/stop lines below, in this file's palette.
 input color   InpChartBg     = clrBlack;          // Chart background - same as Aurelius/Fulcrum/Ratchet
 input color   InpBullCol     = C'0,150,255';      // Bullish candle - neon blue, same as Aurelius/Fulcrum/Ratchet
 input color   InpBearCol     = clrWhite;          // Bearish candle - neon white, same as Aurelius/Fulcrum/Ratchet
 input bool    InpShowMAs     = true;              // Draw the 21/50/confirm MAs this EA trades on
 input bool    InpShowVWAP    = true;              // Draw the session VWAP CheckForEntry() gates on
-input int     InpMAHistoryBars = 2500;            // Bars of MA/VWAP line history kept drawn (bounded, so a
-                                                  // long-running live EA doesn't accumulate objects forever -
-                                                  // 2500 M5 bars is ~8.7 days, same as the siblings)
+input int     InpMAHistoryBars = 2500;            // Bars of MA/VWAP line history kept drawn (bounded, so a long-running live EA doesn't accumulate objects forever - 2500 M5 bars is ~8.7 days, same as the siblings).
 input color   InpCol21       = clrYellow;         // 21 line colour - same as the siblings' 21
-input color   InpCol50       = C'255,140,0';      // 50 line colour - neon orange (NOT white: it would vanish
-                                                  // into the white bear candles, see Aurelius v1.37)
-input color   InpColConfirm  = C'191,0,255';      // InpPConfirm line (250 SMA) - neon purple, the colour the
-                                                  // siblings give this same "former 150" slot
+input color   InpCol50       = C'255,140,0';      // 50 line colour - neon orange (NOT white: it would vanish into the white bear candles, see Aurelius v1.37).
+input color   InpColConfirm  = C'191,0,255';      // InpPConfirm line (250 SMA) - neon purple, the colour the siblings give this same "former 150" slot.
 input color   InpColVWAP     = C'0,255,255';      // VWAP colour - neon aqua, same as Aurelius's InpColVWAP
 input bool    InpShowLineLabels = true;           // Caption each MA/VWAP line at its right-hand end
-input bool    InpShowTradeLevels = true;          // Draw the OPEN position's entry and safety stop, each with
-                                                  // an on-chart caption (MSG_Trader_EA.mq5 v1.16 pattern)
+input bool    InpShowTradeLevels = true;          // Draw the OPEN position's entry and safety stop, each with an on-chart caption (MSG_Trader_EA.mq5 v1.16 pattern).
 input color   InpColEntryLine = C'150,166,192';   // Entry line - InpTextCol's silver-grey (a level, not news)
 input color   InpColStopLine  = C'255,61,90';     // Safety-stop line - InpNoCol's hot red
 input bool    InpShowSR      = true;              // Draw the prior-InpSRDays D1 high/low the S/R filter measures
 input bool    InpShowSRZone  = true;              // ...plus the +/- InpMinSRDistATR x ATR no-entry band around each
 input color   InpColSR       = C'120,144,176';    // S/R level colour - same as Aurelius/Fulcrum's InpColSR
-input color   InpColSRZone   = C'60,72,88';       // No-entry band - InpColSR at half brightness (drawn dotted),
-                                                  // so it reads as a zone belonging to the level, not a level
+input color   InpColSRZone   = C'60,72,88';       // No-entry band - InpColSR at half brightness (drawn dotted), so it reads as a zone belonging to the level, not a level of its own.
 
 input group "=== Wallpaper & watermark (v1.03) ==="
 input string  InpBackgroundBMP = "Meridian_Wallpaper.bmp"; // .bmp file in <data folder>\MQL5\Images (empty = none)
