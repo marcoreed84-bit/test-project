@@ -157,6 +157,20 @@
 //|  not assumed, per the user's own direct requirement. NOT yet run    |
 //|  through a real MT5 Strategy Tester - needs that before this        |
 //|  specific number is trusted the way v1.00's fixed-lot numbers are.  |
+//|                                                                    |
+//|  VISUAL AUDIT (2026-09-24), Opus review - CHECKED, NO ISSUE FOUND,   |
+//|  #property version stays 1.04. Re-verified by hand: ROWS/GAPS (26     |
+//|  in-position / 25 flat, GAPS=10) against the literal ty+= sequence;    |
+//|  the chart-height auto-shrink loop; draw order (UpdateSignalLines()/    |
+//|  UpdateVWAPLine()/UpdateLevelLines() before DrawPanel(), panel always    |
+//|  last); and PBackground()/PWatermark() are already drawn BEFORE the       |
+//|  InpShowPanel early-out in this file (this is the already-correct          |
+//|  order Aurelius_EA.mq5/Aurelius_M15_EA.mq5/Meridian_EA.mq5/Ratchet_EA.mq5   |
+//|  were all found missing today and fixed to match). No indicator label        |
+//|  in this file hardcodes a period/method - "descending line"/"ascending        |
+//|  line"/"breakout this bar" describe the trendline signal generically,         |
+//|  not a tunable MA period, so there is nothing here that can go stale the        |
+//|  way Aurelius_EA.mq5's MA-period labels just did.                                |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
 #property version   "1.04"

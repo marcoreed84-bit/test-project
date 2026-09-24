@@ -189,6 +189,16 @@
 //|  net - reinforces staying at the shipped default OFF, not a case for turning it on.        |
 //|  A real, literal dual-EA forward/demo run (not a Strategy Tester replay) would be           |
 //|  the only way to get a cleaner answer, if this is ever revisited.                            |
+//|                                                                                               |
+//|  VISUAL AUDIT (2026-09-24), Opus review - CHECKED, NO ISSUE FOUND, #property version stays     |
+//|  1.05. Re-verified by hand: ROWS/GAPS (27 in-position / 26 flat, GAPS=10) against the literal    |
+//|  ty+= sequence - this is the file that already caught a real off-by-one here earlier today,       |
+//|  the c6 (Meridian position) row addition, so re-counted it especially carefully; the chart-         |
+//|  height auto-shrink loop; draw order (UpdateSignalLines()/UpdateVWAPLine()/UpdateLevelLines()        |
+//|  before DrawPanel(), panel always last); and PBackground()/PWatermark() are already drawn             |
+//|  BEFORE the InpShowPanel early-out - this is the already-correct order Aurelius_EA.mq5/                |
+//|  Aurelius_M15_EA.mq5/Meridian_EA.mq5/Ratchet_EA.mq5 were all found missing today and fixed to            |
+//|  match. No indicator label in this file hardcodes a period/method.                                        |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
 #property version   "1.05"
