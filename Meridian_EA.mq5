@@ -606,18 +606,23 @@
 //|  20000 deposit added in. 2023 was +364.74 by close year; with that,|
 //|  the four yearly figures sum to 44899.83. Fixed in place.          |
 //|                                                                    |
-//|  STILL MISSING - live account only from here on (2026-09-23: GOLD# |
-//|  demo set aside, all real runs go on the live GOLD account).       |
-//|  Falsifiable prediction so the next real run can falsify this note:|
-//|   - v1.01 config (InpPConfirm=150, InpConfirmMAMethod=EMA, rest    |
-//|     shipped defaults) on GOLD, account 382043238, 2023.01.01-      |
-//|     2026.09.19, 20000 ZAR: net ~31,000-35,000 ZAR, i.e. roughly    |
-//|     2000 ZAR ABOVE this run's 30,957.06 - isolates whether the     |
-//|     150 EMA -> 250 SMA logic swap costs real net on GOLD itself,   |
-//|     separate from the GOLD#->GOLD symbol-cost effect already       |
-//|     decomposed above.                                              |
-//|  A GOLD M5 bar export (ExportBarData.mq5 on 382043238) would let   |
-//|  msim model GOLD directly and test InpMaxSpreadPoints there.       |
+//|  RESOLVED (2026-09-24): the falsifiable prediction above came in - v1.01 config              |
+//|  (InpPConfirm=150, InpConfirmMAMethod=EMA, rest shipped defaults) on GOLD, account 382043238,  |
+//|  2023.01.01-2026.09.21, 20000 ZAR: 2595 trades, net 31,419.46 ZAR, PF 1.17296, Balance DD        |
+//|  Maximal 42.49%, Equity DD Maximal 43.38%. Compared directly against v1.02's own same-account,     |
+//|  same-window real run (2287 trades, net 31,026.26, PF 1.1957, Balance DD Maximal 32.75%, Equity      |
+//|  DD Maximal 33.45%): net is +393.20 (+1.27%) for 150-EMA - technically inside the predicted           |
+//|  31,000-35,000 ZAR band, but nowhere near the "roughly 2000 ZAR above" this note originally            |
+//|  expected, a weak pass on that one number alone. The fuller picture is not a case for reverting:         |
+//|  PF is WORSE for 150-EMA (1.17296 vs 1.1957, -1.9%), it needed 13.5% MORE trades (2595 vs 2287) to        |
+//|  get there, and Balance/Equity DD are both dramatically worse (~30% relatively worse on both              |
+//|  measures - 42.49%/43.38% vs 32.75%/33.45%). VERDICT: v1.02 (250 SMA, currently shipped) CONFIRMED         |
+//|  as the right default - the 150 EMA -> 250 SMA logic swap does NOT cost real net on GOLD itself (the       |
+//|  original worry this note existed to test), and reverting to 150 EMA would trade a marginal, barely-        |
+//|  inside-the-band net gain for meaningfully worse risk-adjusted performance. No code change - #property       |
+//|  version stays 1.05, this closes out the pending prediction with a real result, not a logic change.           |
+//|  A GOLD M5 bar export (ExportBarData.mq5 on 382043238) would let msim model GOLD directly and test              |
+//|  InpMaxSpreadPoints there - still open, unrelated to the above.                                                   |
 //|                                                                    |
 //|  KNOWN GAPS (flagged, not fixed, so they don't get lost):          |
 //|   - RESOLVED in v1.03: "No visual panel/wallpaper" - see the v1.03 |

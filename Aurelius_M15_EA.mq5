@@ -770,6 +770,15 @@
 //|  level lines before DrawPanel(), panel always last); and the BIAS section's "med 50"/"mid 150"/           |
 //|  "slow 200"/"macro 1200" labels, which - unlike Aurelius_EA.mq5's now-fixed b2/b3 - already match         |
 //|  this file's own current InpP50/InpP150/InpP600/InpP2400 defaults (50/150/200/1200) exactly.              |
+//|                                                                                                             |
+//|  RESEARCH NOTE (2026-09-24): tests 2 and 3 both came in, both clean single-toggle runs (live GOLD  |
+//|  382043238, 2023.01.01-2026.09.21, 20000 ZAR). Test 2 (InpUseSlopeSRBlock=false): PASS via the DD    |
+//|  leg of its own criterion - stays ON, real-confirmed. Test 3 (InpPullbackMA=PB_50): PASS, narrowly -  |
+//|  PB_21 stays the default, real-confirmed. See each input's own comment above for the full numbers.     |
+//|  All three prioritized M15 tests from the 2026-09-23 ablation are now real-confirmed:                   |
+//|  InpMaxSlopeATR=1.25, InpUseSlopeSRBlock=true, InpPullbackMA=PB_21 - none of the ablation's Python        |
+//|  predictions were overturned by the real account, though test 2's PF leg and test 3's whole result        |
+//|  were both close calls, not clean sweeps.                                                                   |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.53"
@@ -891,8 +900,20 @@ input ENUM_PBMA    InpPullbackMA = PB_21;      // Which MA the pullback must rea
                                                 // same real MT5 test for efficiency - both are individually
                                                 // Python-validated, but if the combined real result is
                                                 // mixed, they'll need testing separately to attribute which
-                                                // one is responsible. NEEDS A REAL MT5 BACKTEST before
-                                                // trusting this over PB_50 - Python-only so far.
+                                                // one is responsible. REAL-CONFIRMED (2026-09-24, live GOLD
+                                                // 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle
+                                                // - InpMaxSlopeATR left at its own real-confirmed 1.25):
+                                                // PB_50 gave 428 trades (identical count to PB_21's own
+                                                // 428), net 42,144.39 ZAR vs PB_21's 42,250.37 (-0.25%), PF
+                                                // 1.889537 vs 1.89025 (-0.04%, essentially flat) - but
+                                                // Balance DD Maximal 7.36% vs PB_21's 7.29% and Equity DD
+                                                // Maximal 9.92% vs 9.86%, both very slightly worse with
+                                                // PB_50. Test 3's own PASS criterion (PB_21's real DD comes
+                                                // back lower than PB_50's) is satisfied, if narrowly - PB_21
+                                                // stays the default, now real-confirmed. HONEST CAVEAT: the
+                                                // margin is small on every measure, this is a real pass but
+                                                // not a dramatic one. See the 2026-09-24 research note near
+                                                // the end of this header.
 input double  InpPullbackTolATR  = 0.25;       // Touch tolerance (x ATR)
 input int     InpPullbackBars    = 10;         // Bars allowed from touch to entry
 input bool    InpUseSlope        = true;       // Require a minimum slope
@@ -997,10 +1018,18 @@ input bool    InpUseSlopeSRBlock = true;   // Block entries where the trend is s
                                             // both runs). If what you actually want is a smaller worst-case
                                             // drawdown, this input does not deliver that - it makes the
                                             // system better, not meaningfully less scary in a bad stretch.
-                                            // Needs a real MT5 Strategy Tester run before trusting this
-                                            // over InpUseSlopeSRBlock=false, same discipline as every other
-                                            // number in this file - shipped ON specifically so the next
-                                            // real test exercises it.
+                                            // REAL-CONFIRMED (2026-09-24, live GOLD 382043238,
+                                            // 2023.01.01-2026.09.21, 20000 ZAR, InpMaxSlopeATR held at 1.25
+                                            // so the block is actually exercised): reverting to false gave
+                                            // 439 trades (+2.6%), net 42,378.62 ZAR (+0.3%, essentially
+                                            // flat), PF 1.85452 (-1.9%, just short of the >=2% FAIL bar) -
+                                            // but Balance DD Maximal rose 7.29%->7.88% and Equity DD
+                                            // Maximal rose 9.86%->11.79%, both measurably worse with it
+                                            // off. Test 2's own PASS criterion (PF drop >=2% OR DD
+                                            // measurably worse) is satisfied via the DD leg - stays ON,
+                                            // now real-confirmed, not just the Python permutation result
+                                            // above. See the 2026-09-24 research note near the end of this
+                                            // header.
 input double  InpSlopeSRBlockSlope = 1.00; // Slope threshold (x ATR, via the existing SlopeATR()) - only
                                             // blocks when slope is AT OR ABOVE this AND the S/R distance
                                             // below is also at or above its own threshold, simultaneously
