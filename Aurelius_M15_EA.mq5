@@ -799,6 +799,22 @@
 //|  Both M15 candidate sets (the 2026-09-23 ablation's three, and these two) are now fully real-confirmed:                  |
 //|  InpMaxSlopeATR=1.25, InpUseSlopeSRBlock=true, InpPullbackMA=PB_21, InpUsePrice21Exit=false (v1.54),                       |
 //|  InpUseVwapExit=true. Nothing left Python-only on this file.                                                                |
+//|                                                                                                                                |
+//|  RESEARCH NOTE (2026-09-24), 3 real MT5 tests (live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR)                         |
+//|  against today's baseline (430 trades, net 43,828.08 ZAR, PF 1.909888, Balance DD Maximal 6.94%, Equity                        |
+//|  DD Maximal 10.69% - the same report already confirming InpUsePrice21Exit=false above):                                          |
+//|                                                                                                                                      |
+//|  1. InpUseMomentum=true: 151 trades (-64.9%), net 26,243.57 (-40.1%), PF 2.602409 (+36.3%). Same shape as                            |
+//|     Aurelius_EA.mq5's (M5) own rejection - PF jumps but trade count collapses so hard that absolute net                               |
+//|     falls a lot. REJECTED. Stays false.                                                                                                  |
+//|                                                                                                                                            |
+//|  2. InpUseStaleExit=true: 434 trades (+0.9%), net 43,760.53 (-0.15%), PF 1.909818 (~0%), Balance DD                                       |
+//|     Maximal 6.57% (very slightly better), Equity DD Maximal 10.41% (very slightly better). A complete                                      |
+//|     non-event - every delta is within noise. No benefit shown, no reason to add it. REJECTED. Stays false.                                    |
+//|                                                                                                                                                  |
+//|  3. InpUseBreakeven=true: 458 trades (+6.5%), net 39,484.03 (-9.9%), PF 1.93147 (+1.1%), Balance DD                                             |
+//|     Maximal 8.69% (worse), Equity DD Maximal 12.81% (worse). Real net cost, both DD measures worse, only                                         |
+//|     a small PF gain to show for it. REJECTED. Stays false. Matches M5's own breakeven rejection.                                                    |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.54"

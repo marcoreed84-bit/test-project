@@ -774,6 +774,41 @@
 //|  Also re-verified by hand: ROWS/GAPS (39 in-position / 37 flat, GAPS=10) against the literal                    |
 //|  ty+= sequence, the panel's chart-height auto-shrink loop, and draw-call order (MA/level lines                  |
 //|  before DrawPanel(), panel always last) - all correct, no change needed there.                                  |
+//|                                                                                                                   |
+//|  RESEARCH NOTE (2026-09-24), 5 real MT5 tests (live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR)               |
+//|  against TODAY's baseline (InpMinSlopeATR=0.40, InpUsePrice21Exit=false, InpUseVwapExit=true - the same             |
+//|  report already used as this baseline: 920 trades, net 35,582.78 ZAR, PF 1.560164, Balance DD Maximal               |
+//|  18.36%, Equity DD Maximal 14.21%):                                                                                    |
+//|                                                                                                                          |
+//|  1. InpUseStopLoss=false (re-check - the original real test predates the baseline above): 808 trades,                   |
+//|     net 38,649.11 (+8.6%), PF 1.600978 (+2.6%), Balance DD Maximal 7.61% (less than half!), Equity DD                     |
+//|     Maximal 15.07% (slightly worse, 14.21%->15.07%). NOT a clean re-confirmation of the stop - net/PF/                     |
+//|     Balance DD all now favor OFF. KEPT ON regardless: the stop exists specifically to cap EQUITY float                      |
+//|     risk (see its own original comment - a real position floated ~$1,184 underwater pre-stop), and Equity                   |
+//|     DD is the one measure that still (marginally) favors keeping it. A single bad tail event outside this                    |
+//|     window is a real risk a DD-percentage stat doesn't fully capture. Flagged honestly as a close call, not                   |
+//|     a clean pass, not reverted on backtest stats alone.                                                                         |
+//|                                                                                                                                    |
+//|  2. InpStopATR=4.0 (re-check of the old rejected value): 836 trades, net 36,283.02 (+2.0%), PF 1.544654                          |
+//|     (-1.0%), Balance DD Maximal 10.33% (much better than 2.5's 18.36%), Equity DD Maximal 17.94% (worse                           |
+//|     than 2.5's 14.21%). The v1.36 "2.5 beats 4.0 on EVERY measure" finding does NOT hold against today's                          |
+//|     baseline - Balance DD now clearly favors 4.0, Equity DD still favors 2.5, net/PF are both close either                        |
+//|     way. Genuinely inconclusive, not a clean call. KEPT AT 2.5 (status quo) since Equity DD - the more                             |
+//|     tail-risk-sensitive measure - still favors it, but this is flagged as a real, no-longer-clean result that                      |
+//|     would benefit from a proper sweep rather than a single re-check if it matters more later.                                       |
+//|                                                                                                                                         |
+//|  3. InpUseMomentum=true: 359 trades (-61.0%), net 13,713.80 (-61.5%), PF 1.53826 (-1.4%). REJECTED - the                              |
+//|     MACD-histogram-turn filter is far more restrictive than the Python model suggested, cutting trade                                 |
+//|     count by more than half for no offsetting benefit. Stays false.                                                                     |
+//|                                                                                                                                            |
+//|  4. InpUseStaleExit=true: 929 trades (+1.0%), net 35,111.48 (-1.3%), PF 1.550817 (-0.6%), Balance DD                                      |
+//|     Maximal 18.18% (marginally better), Equity DD Maximal 13.35% (better). Every delta is within a point                                    |
+//|     or two - real, but noise-level, no clean case either way. REJECTED (small net cost, no clear                                              |
+//|     compensating benefit worth the added complexity). Stays false.                                                                              |
+//|                                                                                                                                                    |
+//|  5. InpUseBreakeven=true: 1007 trades (+9.5%), net 31,223.73 (-12.3%), PF 1.572518 (+0.8%), Balance DD                                            |
+//|     Maximal 16.15% (better), Equity DD Maximal 16.35% (worse). A real, meaningful net cost not offset by                                            |
+//|     the small PF gain or the mixed DD picture. REJECTED. Stays false.                                                                                 |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.49"
