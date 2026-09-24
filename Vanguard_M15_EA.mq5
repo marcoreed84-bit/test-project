@@ -156,11 +156,9 @@
 //|  deliberately unlike InpUseAureliusFilter's default-on: that one     |
 //|  reused an already-proven, already-running M5 mechanism; this is     |
 //|  the FIRST time this broadcast/read mechanism has ever been wired    |
-//|  to Meridian. Stays off until a real paired A/B test is run - GOLD,  |
-//|  account 382043238, 2023.01.01-2026.09.21, 20000 ZAR,                |
-//|  InpUseMeridianFilter=false vs true, otherwise identical shipped     |
-//|  defaults, same account/window/deposit as this session's other       |
-//|  real confirmations - ready to queue.                                |
+//|  to Meridian. Stays off - see the 2026-09-24 real A/B replay note     |
+//|  below and the DECISION (2026-09-24) after it: closed, not queued     |
+//|  further.                                                              |
 //|                                                                        |
 //|  RESEARCH NOTE (2026-09-24) - real A/B replay, NOT a fresh MT5 run:     |
 //|  MT5's Strategy Tester runs one EA in isolation per pass, so             |
@@ -189,6 +187,11 @@
 //|  net - reinforces staying at the shipped default OFF, not a case for turning it on.        |
 //|  A real, literal dual-EA forward/demo run (not a Strategy Tester replay) would be           |
 //|  the only way to get a cleaner answer, if this is ever revisited.                            |
+//|                                                                                               |
+//|  DECISION (2026-09-24): user chose to leave it here rather than run the forward/demo         |
+//|  test above - closed, not queued further. InpUseMeridianFilter stays default OFF on the       |
+//|  strength of the real A/B replay alone. Revisit only if someone specifically wants to spend     |
+//|  the real elapsed time on a live dual-EA demo run - nothing else is pending on this input.        |
 //|                                                                                               |
 //|  VISUAL AUDIT (2026-09-24), Opus review - CHECKED, NO ISSUE FOUND, #property version stays     |
 //|  1.05. Re-verified by hand: ROWS/GAPS (27 in-position / 26 flat, GAPS=10) against the literal    |
