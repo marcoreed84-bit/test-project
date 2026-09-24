@@ -791,9 +791,23 @@
 //|  Aurelius_EA.mq5's M5 result (where the same real-EA gap HELPS by Python's own model), here it               |
 //|  COSTS - a genuinely EA-specific result, not a general rule; see Aurelius_EA.mq5's own note for               |
 //|  the opposite-direction M5 finding. sim.py's own SHIPPED baseline is NOT changed by this note.                  |
+//|                                                                                                                   |
+//|  VISUAL AUDIT (2026-09-24), Opus review, cosmetic-only, no trading logic touched, version bumped for            |
+//|  a real rendering fix: LAYERING BUG - PBackground()/PWatermark() sat AFTER DrawPanel()'s                        |
+//|  `if(!InpShowPanel) return` early-out, so InpShowPanel=false silently killed the watermark too, even            |
+//|  though InpShowPanel/InpWatermark are documented elsewhere in this portfolio as independent inputs -            |
+//|  same bug found and fixed today in Aurelius_EA.mq5/Aurelius_M15_EA.mq5/Meridian_EA.mq5. Fixed by                |
+//|  moving both calls before the early-out.                                                                        |
+//|  Also checked and found correct, no change: ROWS/GAPS (33, GAPS=10, already fixed once - see the                |
+//|  2026-09-06 note above) hand-recounted again against the literal ty+= sequence and still correct; the           |
+//|  chart-height auto-shrink loop; draw order (UpdateMALines()/BB/touch-band segments before DrawPanel(),          |
+//|  panel always last); and the BIAS section's "M5 50"/"M15 150"/"H1 600"/"H4 2400" labels, which match            |
+//|  this file's own current InpP21/InpP50/InpP150/InpP600/InpP2400 defaults (21/50/150/600/2400) exactly           |
+//|  - unlike Aurelius_EA.mq5's now-fixed b2/b3 rows, none of Ratchet's MA periods were re-tuned this               |
+//|  session, so no label went stale here.                                                                          |
 //+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
-#property version   "3.30"
+#property version   "3.31"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -2298,6 +2312,16 @@ void CurrentPositions(bool &haveLong, bool &haveShort)
 //+------------------------------------------------------------------+
 void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim = true)
   {
+   // background/watermark are documented as independent of the panel
+   // (InpShowPanel/InpWatermark are separate inputs) - drawn BEFORE the
+   // panel's own early-return (2026-09-24 fix: this file had them nested
+   // AFTER the InpShowPanel check, silently killing the watermark too
+   // whenever the panel itself was switched off - same bug found and
+   // fixed today in Aurelius_EA.mq5/Aurelius_M15_EA.mq5/Meridian_EA.mq5,
+   // matching Vanguard_EA.mq5's already-correct order for this same
+   // panel code family).
+   PBackground();
+   PWatermark();
    if(!InpShowPanel) { ObjectsDeleteAll(0, g_pp); return; }
    // See g_panelReclaim's own comment: true only reclaims top-of-stack
    // (once per new bar, when a new MA/BB line segment was actually drawn);
@@ -2305,8 +2329,6 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim = t
    // handler) passes false so PRect/PText update objects in place instead
    // of tearing them down every cycle.
    g_panelReclaim = reclaim;
-   PBackground();
-   PWatermark();
 
    int w = MathMax(InpPanelW, g_panelMinW);
    g_panelMinW = 0;   // re-measured fresh this cycle, used by the NEXT one
