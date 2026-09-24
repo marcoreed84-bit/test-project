@@ -189,8 +189,7 @@ input double InpSafetyStopATR     = 4.0;     // validated best cell - see header
 input int    InpATRPeriod         = 14;
 input bool   InpUseStaleExit      = true;    // cut a non-performing trade loose early - see header (v1.04)
 input int    InpStaleBars         = 225;     // ~18.75h on M5 - real, Python-validated optimum, see header
-input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below
-                                              // this once InpStaleBars have elapsed
+input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below this once InpStaleBars have elapsed.
 
 input group "=== Risk (ATR-inverse sizing - see header) ==="
 input double InpBaseLots           = 0.01;    // lot size AT the reference ATR below
@@ -206,17 +205,16 @@ input group "=== Notifications ==="
 input bool   InpPushNotifications  = true;
 
 input group "=== Cross-EA signal (v1.03 - optional, Aurelius conflict filter) ==="
-input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius_EA.mq5 (its own M5 chart) is
-                                                // ALREADY holding the opposite direction right now - real,
-                                                // Python-validated (research/aurelius/
+input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius_EA.mq5 (its own M5 chart) is already holding the opposite direction right now - real, Python-validated.
+                                                // (research/aurelius/
                                                 // vanguard_aurelius_position_filter_test.py): net $2989.87 ->
                                                 // $3059.94, barely touches trade count (Aurelius is flat 87%
                                                 // of the time). If Aurelius isn't attached, or hasn't updated
                                                 // recently, Vanguard trades completely normally - see
                                                 // CheckAureliusConflict()'s own header.
-input int    InpAureliusStaleSecs = 900;       // Treat the signal as absent if it hasn't updated in this long
-                                                // (15 min default - a few Aurelius M5 bars) - covers Aurelius
-                                                // being removed, crashed, or never attached in the first place.
+input int    InpAureliusStaleSecs = 900;       // Treat the signal as absent if it hasn't updated in this long (15 min default - a few Aurelius M5 bars).
+                                                // Covers Aurelius being removed, crashed, or never attached
+                                                // in the first place.
 
 input group "=== Misc ==="
 input ulong  InpMagic              = 750801;
@@ -261,22 +259,19 @@ input color   InpNoCol       = C'255,61,90';      // Not met - hot red
 input color   InpShadowCol   = C'6,8,14';         // Drop shadow
 input string  InpPanelFont   = "Consolas";        // Font
 input int     InpPanelSize   = 8;                 // Font size
-input string  InpBackgroundBMP = "";              // Optional background image (.bmp in MQL5\Images) - empty by
-                                                   // default, no Vanguard-branded image exists yet
+input string  InpBackgroundBMP = "";              // Optional background image (.bmp in MQL5\Images) - empty by default, no Vanguard-branded image exists yet.
 input int     InpBgWidth       = 1290;            // Image width (px) - for centring only
 input int     InpBgHeight      = 720;             // Image height (px) - for centring only
 
 input group "=== Chart theme ==="
 input bool    InpApplyTheme      = true;          // Recolour the chart
-input bool    InpHideTradeMarks  = true;          // Hide MT5's own buy/sell/SL/TP arrows and lines - the panel
-                                                   // and signal lines are meant to be the only things on this chart
+input bool    InpHideTradeMarks  = true;          // Hide MT5's own buy/sell/SL/TP arrows and lines - the panel and signal lines are meant to be the only things on this chart.
 input bool    InpShowSignalLine  = true;          // Draw the live descending/ascending trendline as an extending ray
 input color   InpColDesc         = C'255,61,90';  // Descending line (resistance / sell-side) - hot red
 input color   InpColAsc          = C'0,230,118';  // Ascending line (support / buy-side) - neon green
 input bool    InpShowVWAPLine    = true;          // Draw session VWAP (live only from attach time - see header)
 input color   InpColVWAP         = C'0,255,255';  // VWAP line colour - neon aqua
-input int     InpVwapHistoryBars = 400;           // How many recent bars of VWAP line to keep drawn (bounded,
-                                                   // purged the same way as the signal-line history would be)
+input int     InpVwapHistoryBars = 400;           // How many recent bars of VWAP line to keep drawn (bounded, purged the same way as the signal-line history would be).
 input bool    InpShowTradeLevels = true;          // Draw the OPEN position's entry and stop-loss as horizontal lines
 input color   InpColEntryLine    = C'150,166,192';// Entry-price line
 input color   InpColStopLine     = C'255,61,90';  // Stop-loss line

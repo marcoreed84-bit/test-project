@@ -216,11 +216,10 @@ input group "=== Exit ==="
 input double InpSafetyStopATR     = 3.0;     // validated best cell on M15 - see header
 input int    InpATRPeriod         = 14;
 input bool   InpUseStaleExit      = true;    // cut a non-performing trade loose early - see header (v1.04)
-input int    InpStaleBars         = 75;      // ~18.75h on M15 - real, INDEPENDENTLY-derived M15 optimum
-                                              // (matches the M5 file's own separately-swept 225 bars in
-                                              // real-world time - not a shared/copied value)
-input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below
-                                              // this once InpStaleBars have elapsed
+input int    InpStaleBars         = 75;      // ~18.75h on M15 - real, INDEPENDENTLY-derived M15 optimum.
+                                              // (Matches the M5 file's own separately-swept 225 bars in
+                                              // real-world time - not a shared/copied value.)
+input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below this once InpStaleBars have elapsed.
 
 input group "=== Risk (ATR-inverse sizing - see header) ==="
 input double InpBaseLots           = 0.01;    // lot size AT the reference ATR below
@@ -236,31 +235,26 @@ input group "=== Notifications ==="
 input bool   InpPushNotifications  = true;
 
 input group "=== Cross-EA signal (v1.03 - optional, Aurelius conflict filter) ==="
-input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius_M15_EA.mq5 (its own M15 chart)
-                                                // is ALREADY holding the opposite direction right now - real,
-                                                // Python-validated on the M5 pair (research/aurelius/
+input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius_M15_EA.mq5 (its own M15 chart) is already holding the opposite direction right now - real, Python-validated on the M5 pair.
+                                                // (research/aurelius/
                                                 // vanguard_aurelius_position_filter_test.py); reused unchanged
                                                 // here since the mechanism (broadcast + stale-check) is
                                                 // timeframe-independent. If Aurelius_M15_EA isn't attached, or
                                                 // hasn't updated recently, Vanguard trades completely normally.
-input int    InpAureliusStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long
-                                                // (45 min default - a few Aurelius M15 bars, scaled up from
-                                                // the M5 pair's 15 min default) - covers Aurelius being
-                                                // removed, crashed, or never attached in the first place.
+input int    InpAureliusStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long (45 min default - a few Aurelius M15 bars, scaled up from the M5 pair's 15 min default).
+                                                // Covers Aurelius being removed, crashed, or never attached
+                                                // in the first place.
 
 input group "=== Cross-EA signal (v1.05 - optional, Meridian conflict filter, NOT YET CONFIRMED) ==="
-input bool   InpUseMeridianFilter = false;     // Skip an entry only if Meridian_EA.mq5 (its own M5 chart) is
-                                                // ALREADY holding the opposite direction right now - real
-                                                // evidence for the underlying disagreement pattern (see
-                                                // header), but NOT YET real-MT5-confirmed as a filter, unlike
-                                                // InpUseAureliusFilter - DEFAULT OFF until a real paired A/B
-                                                // test is run (see header for the exact test config). Composes
-                                                // with InpUseAureliusFilter - either filter blocking is enough
-                                                // to skip the entry.
-input int    InpMeridianStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long
-                                                // (45 min default, same as InpAureliusStaleSecs - no evidence
-                                                // yet to pick a different number). Covers Meridian being
-                                                // removed, crashed, or never attached in the first place.
+input bool   InpUseMeridianFilter = false;     // Skip an entry only if Meridian_EA.mq5 (its own M5 chart) is already holding the opposite direction right now - real evidence for the disagreement pattern, but NOT YET real-MT5-confirmed as a filter. Default off.
+                                                // Unlike InpUseAureliusFilter - DEFAULT OFF until a real paired
+                                                // A/B test is run (see header for the exact test config, and
+                                                // the 2026-09-24 Python replay that leans toward it costing
+                                                // net, reinforcing OFF). Composes with InpUseAureliusFilter -
+                                                // either filter blocking is enough to skip the entry.
+input int    InpMeridianStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long (45 min default, same as InpAureliusStaleSecs - no evidence yet to pick a different number).
+                                                // Covers Meridian being removed, crashed, or never attached
+                                                // in the first place.
 
 input group "=== Misc ==="
 input ulong  InpMagic              = 750802;
@@ -291,15 +285,13 @@ input color   InpNoCol       = C'255,61,90';      // Not met - hot red
 input color   InpShadowCol   = C'6,8,14';         // Drop shadow
 input string  InpPanelFont   = "Consolas";        // Font
 input int     InpPanelSize   = 8;                 // Font size
-input string  InpBackgroundBMP = "";              // Optional background image (.bmp in MQL5\Images) - empty by
-                                                   // default, no Vanguard-branded image exists yet
+input string  InpBackgroundBMP = "";              // Optional background image (.bmp in MQL5\Images) - empty by default, no Vanguard-branded image exists yet.
 input int     InpBgWidth       = 1290;            // Image width (px) - for centring only
 input int     InpBgHeight      = 720;             // Image height (px) - for centring only
 
 input group "=== Chart theme ==="
 input bool    InpApplyTheme      = true;          // Recolour the chart
-input bool    InpHideTradeMarks  = true;          // Hide MT5's own buy/sell/SL/TP arrows and lines - the panel
-                                                   // and signal lines are meant to be the only things on this chart
+input bool    InpHideTradeMarks  = true;          // Hide MT5's own buy/sell/SL/TP arrows and lines - the panel and signal lines are meant to be the only things on this chart.
 input bool    InpShowSignalLine  = true;          // Draw the live descending/ascending trendline as an extending ray
 input color   InpColDesc         = C'255,61,90';  // Descending line (resistance / sell-side) - hot red
 input color   InpColAsc          = C'0,230,118';  // Ascending line (support / buy-side) - neon green
