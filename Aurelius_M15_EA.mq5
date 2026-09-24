@@ -757,9 +757,22 @@
 //|  default and every number in the comment are unchanged. InpPullbackMA and InpUseSlopeSRBlock          |
 //|  checked too - both correctly still say Python-only/CANDIDATE UNDER TEST, since tests 2 and 3           |
 //|  in the same ablation note are still open (not yet real-tested) - left as-is.                            |
+//|                                                                                                            |
+//|  VISUAL AUDIT (2026-09-24), Opus review, cosmetic-only, no trading logic touched, version bumped          |
+//|  for a real rendering fix (not a label-only note): LAYERING BUG - PBackground()/PWatermark() sat          |
+//|  AFTER DrawPanel()'s `if(!InpShowPanel) return` early-out, so InpShowPanel=false silently killed          |
+//|  the watermark too, even though InpShowPanel/InpWatermark are documented elsewhere in this                |
+//|  portfolio as independent inputs. Vanguard_M15_EA.mq5's own header already documents finding and          |
+//|  fixing this exact bug in its copy of this panel code; never ported back here (same miss just             |
+//|  fixed in Aurelius_EA.mq5 today). Fixed by moving both calls before the early-out.                        |
+//|  Also checked and found correct, no change: ROWS/GAPS (40 in-position / 38 flat, GAPS=10) hand-           |
+//|  recounted against the literal ty+= sequence; the chart-height auto-shrink loop; draw order (MA/          |
+//|  level lines before DrawPanel(), panel always last); and the BIAS section's "med 50"/"mid 150"/           |
+//|  "slow 200"/"macro 1200" labels, which - unlike Aurelius_EA.mq5's now-fixed b2/b3 - already match         |
+//|  this file's own current InpP50/InpP150/InpP600/InpP2400 defaults (50/150/200/1200) exactly.              |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.52"
+#property version   "1.53"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -2854,6 +2867,16 @@ void ClosePosition(const string reason)
 //--- anywhere in this repo, so there's no local precedent to lean on.
 void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
   {
+   //--- background/watermark are documented as independent of the panel
+   //--- (InpShowPanel/InpWatermark are separate inputs) - drawn BEFORE
+   //--- the panel's own early-return (2026-09-24 fix: this file still had
+   //--- them nested AFTER the InpShowPanel check, silently killing the
+   //--- watermark too whenever the panel itself was switched off - the
+   //--- exact bug Vanguard_M15_EA.mq5 already found and fixed in its own
+   //--- copy of this same panel code; never ported back here until now,
+   //--- same miss as Aurelius_EA.mq5's own 2026-09-24 fix).
+   PBackground();
+   PWatermark();
    if(!InpShowPanel) { ObjectsDeleteAll(0, g_pp); return; }
 
    //--- see g_panelReclaim's own comment: true only reclaims top-of-stack
@@ -2862,9 +2885,6 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    //--- updates the existing objects' text/values in place, so live P&L
    //--- ticking doesn't visibly flash the whole panel.
    g_panelReclaim = reclaim;
-
-   PBackground();
-   PWatermark();
 
    int w = MathMax(InpPanelW, g_panelMinW);
    g_panelMinW = 0;   // re-measured fresh this cycle, used by the NEXT one
