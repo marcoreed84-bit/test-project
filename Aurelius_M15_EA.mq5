@@ -780,19 +780,28 @@
 //|  predictions were overturned by the real account, though test 2's PF leg and test 3's whole result        |
 //|  were both close calls, not clean sweeps.                                                                   |
 //|                                                                                                                |
-//|  QUEUED (2026-09-24): this file's OWN InpUsePrice21Exit/InpUseVwapExit are still Python-only -                |
-//|  the real tests done on Aurelius_EA.mq5's (M5) copies of these two inputs do NOT carry over, M5 and           |
-//|  M15 have independent, never-cross-tested copies. Two real MT5 tests still needed (symbol GOLD,                |
-//|  account 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle off from today's shipped defaults,          |
-//|  which now include the real-confirmed InpMaxSlopeATR=1.25/InpUseSlopeSRBlock=true/InpPullbackMA=PB_21):           |
-//|   1. InpUsePrice21Exit=false. Python claimed net/PF improve AND drawdown falls ~19-26% with it on. PASS            |
-//|      (keep true) only if reverting to false makes PF/net worse and drawdown does NOT improve. FAIL if               |
-//|      PF/net are flat or better with it off.                                                                          |
-//|   2. InpUseVwapExit=false. Python claimed net $1846.2->$1990.5, PF 1.51->1.54 with it on. Same PASS/FAIL              |
-//|      logic - keep true only if turning it off is a real, measured net/PF cost.                                        |
+//|  RESOLVED (2026-09-24): both queued tests came in, clean single-toggle runs (live GOLD 382043238,      |
+//|  2023.01.01-2026.09.21, 20000 ZAR). Baseline (both true): 428 trades, net 42,250.37 ZAR, PF 1.89025,     |
+//|  Balance DD Maximal 7.29%, Equity DD Maximal 9.86%.                                                        |
+//|                                                                                                               |
+//|  TEST 1 (InpUsePrice21Exit=false): 430 trades, net 43,828.08 (+3.7%), PF 1.909888 (+1.04%), Balance DD        |
+//|  Maximal 6.94% (better), Equity DD Maximal 10.69% (worse). FAIL - both PF and net came back BETTER with        |
+//|  it off, the opposite of the Python prediction (which claimed net/PF improve AND drawdown falls with it        |
+//|  ON). REVERTED to false (v1.54) - matches Aurelius_EA.mq5's (M5) own real rejection of this identical           |
+//|  lever, now confirmed on both timeframes.                                                                         |
+//|                                                                                                                     |
+//|  TEST 2 (InpUseVwapExit=false): 409 trades, net 34,663.32 (-18.0%), PF 1.717994 (-9.1%), Balance DD              |
+//|  Maximal 9.47% (worse), Equity DD Maximal 20.99% (more than double the baseline's 9.86%). Clean, large             |
+//|  PASS - InpUseVwapExit stays true, now real-confirmed. Genuinely valuable here, unlike M5's near-                    |
+//|  redundant finding for this same lever - a real, honest timeframe-specific difference, not a                          |
+//|  contradiction (M5 and M15 have independent copies of this input, always have).                                        |
+//|                                                                                                                           |
+//|  Both M15 candidate sets (the 2026-09-23 ablation's three, and these two) are now fully real-confirmed:                  |
+//|  InpMaxSlopeATR=1.25, InpUseSlopeSRBlock=true, InpPullbackMA=PB_21, InpUsePrice21Exit=false (v1.54),                       |
+//|  InpUseVwapExit=true. Nothing left Python-only on this file.                                                                |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.53"
+#property version   "1.54"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1092,12 +1101,12 @@ input bool    InpUseMaxBars      = false;      // Force close after N bars
 input int     InpMaxBars         = 1000;       // N bars
 
 input group "=== Early exit: price closes through the 21 (optional) ==="
-input bool    InpUsePrice21Exit     = true;    // Exit as soon as price closes back through the 21, instead of waiting for the slower 21x50 alignment break  [NOT yet real-tested - validated in the Python model only, both train/hold splits agree: net/PF improve AND max drawdown falls ~19-26%. See header before trusting this default.]
+input bool    InpUsePrice21Exit     = false;   // Exit as soon as price closes back through the 21, instead of waiting for the slower 21x50 alignment break  [REJECTED (2026-09-24, real MT5, live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle test): contradicted the Python prediction - reverting to false gave BETTER net (+3.7%), PF (+1.04%) and Balance DD (7.29%->6.94%), only Equity DD Maximal was worse off. Both FAIL conditions (PF/net better with it off) triggered. Reverted to false (v1.54) - matches Aurelius_EA.mq5's (M5) own rejection of this same lever. See header.]
 input double  InpPrice21BufferATR   = 0.7;     // How far past the 21 counts as "through" (x ATR) - filters normal noise right at the line
 input int     InpPrice21ConfirmBars = 8;       // Consecutive closed bars required past the buffer before exiting - filters normal pullback-to-50 wiggles that dip through the 21 and recover
 
 input group "=== Early exit: price closes through session VWAP (optional) ==="
-input bool    InpUseVwapExit        = true;    // Exit as soon as price closes back through the session VWAP  [NOT yet real-tested - validated in the Python model only, both train/hold splits agree: FULL net 1846.2->1990.5, PF 1.51->1.54. Independent of the price-21 exit (different line) - running both together is a genuine test of two unproven ideas at once, not a confound of an already-validated one, since NEITHER has real data yet. See header.]
+input bool    InpUseVwapExit        = true;    // Exit as soon as price closes back through the session VWAP  [REAL-CONFIRMED (2026-09-24, real MT5, live GOLD 382043238, 2023.01.01-2026.09.21, 20000 ZAR, single-toggle test): a clean, large PASS - reverting to false cost 18.0% of net, 9.1% of PF, and more than doubled Equity DD Maximal (9.86%->20.99%). Genuinely valuable on M15, unlike Aurelius_EA.mq5's (M5) near-redundant finding for this same lever - a real timeframe-specific difference. Stays true. See header.]
 input double  InpVwapBufferATR      = 0.2;     // How far past VWAP counts as "through" (x ATR)
 input int     InpVwapConfirmBars    = 8;       // Consecutive closed bars required past the buffer before exiting
 
