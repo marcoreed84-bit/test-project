@@ -746,6 +746,13 @@
 //|  Ratchet_EA.mq5 shares the identical real-EA bug (same NearSessionClose/InpCloseBeforeBreak              |
 //|  pattern) but the SAME Python diagnostic there points the OPPOSITE way - removing its daily              |
 //|  flatten assumption COSTS net/PF/drawdown, not helps - see that file's own 2026-09-24 note.             |
+//|                                                                                                            |
+//|  RESEARCH NOTE (2026-09-24) - Opus review, no logic change, #property version stays 1.48:                 |
+//|  InpMinSlopeATR's own inline comment still opened with "CANDIDATE UNDER TEST (2026-09-10)"                 |
+//|  even though the same comment already documents a REAL-CONFIRMED (2026-09-23) result further               |
+//|  down - the exact stale-status-label bug class this project already found and fixed on this                 |
+//|  file's InpUsePrice21Exit/InpUseVwapExit the same day. Fixed the leading label only; the                      |
+//|  0.40 default and every number in the comment are unchanged.                                                   |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.48"
@@ -836,8 +843,12 @@ input int     InpPullbackBars    = 10;         // Bars allowed from touch to ent
 input bool    InpUseSlope        = true;       // Require a minimum slope
 input ENUM_SLOPEMA InpSlopeMA    = SLOPE_50;   // Which MA the slope reads
 input int     InpSlopeBars       = 20;         // Bars used for the slope
-input double  InpMinSlopeATR     = 0.40;       // Minimum slope (x ATR) - CANDIDATE UNDER TEST (2026-09-10):
-                                                // was 0.50, never independently swept before. A Python
+input double  InpMinSlopeATR     = 0.40;       // Minimum slope (x ATR) - REAL-CONFIRMED (2026-09-23, see
+                                                // below; originally shipped as CANDIDATE UNDER TEST
+                                                // 2026-09-10, status label was stale - Opus review caught
+                                                // this comment still said "candidate" after the real
+                                                // confirmation below had already landed). Was 0.50 before
+                                                // this change, never independently swept before that. A Python
                                                 // sweep (gate_loosen_test.py, real M5 data, shipped legs/
                                                 // ALIGN_MID/stop=2.5 held fixed) found 0.40 a genuine local
                                                 // optimum - beats 0.50 on EVERY measure at once: net

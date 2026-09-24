@@ -748,6 +748,15 @@
 //|  modeled zero daily flattens too, by accident - confirmed directly, not assumed          |
 //|  (0 of 85,445 M15 bars). No past M15 Python-only number in this file was affected          |
 //|  by that either way.                                                                        |
+//|                                                                                               |
+//|  RESEARCH NOTE (2026-09-24) - Opus review, no logic change, #property version stays 1.52:      |
+//|  InpMaxSlopeATR's own inline comment still opened with "CANDIDATE UNDER TEST (2026-09-10)"       |
+//|  even though the ablation's own 2026-09-23 RESEARCH NOTE above already says this input "is       |
+//|  now real-confirmed (not just Python)" - the same stale-status-label bug class this project        |
+//|  already found and fixed elsewhere the same day. Fixed the leading label only; the 1.25              |
+//|  default and every number in the comment are unchanged. InpPullbackMA and InpUseSlopeSRBlock          |
+//|  checked too - both correctly still say Python-only/CANDIDATE UNDER TEST, since tests 2 and 3           |
+//|  in the same ablation note are still open (not yet real-tested) - left as-is.                            |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
 #property version   "1.52"
@@ -883,7 +892,11 @@ input double  InpMinSlopeATR     = 0.20;       // Minimum slope (x ATR) - 0.50->
                                                 // every threshold from 0.20-0.30 an improvement over the
                                                 // shipped 0.50, not just this exact number.
 input double  InpMaxSlopeATR   = 1.25;      // Max slope - blocks over-extended entries (0 = off) -
-                                             // CANDIDATE UNDER TEST (2026-09-10): was 1.00. An EARLIER
+                                             // REAL-CONFIRMED (2026-09-23, see below; originally shipped
+                                             // as CANDIDATE UNDER TEST 2026-09-10, status label was stale -
+                                             // Opus review caught this comment still said "candidate" after
+                                             // the real confirmation below had already landed). Was 1.00
+                                             // before this change. An EARLIER
                                              // Opus sweep (widening up to 1.30) found more net profit but
                                              // much worse drawdown, and was left unchanged at the time -
                                              // but that test predates InpMinSRDistATR's 0.50->1.50
