@@ -125,9 +125,45 @@
 //|  $430.73->$414.17 (-3.8%), walk-forward unchanged at 4/5. All 20    |
 //|  real top-winning trades preserved - explicitly checked. NOT yet    |
 //|  run through a real MT5 Strategy Tester.                            |
+//|                                                                    |
+//|  v1.05 ADDS InpUseMeridianFilter (2026-09-24) - OPTIONAL, DEFAULT    |
+//|  OFF. Same broadcast/read mechanism as InpUseAureliusFilter (v1.03), |
+//|  wired to Meridian_EA.mq5's new v1.04 InpPublishPosition instead of  |
+//|  Aurelius's - the two filters compose (either one blocking is enough |
+//|  to skip the entry).                                                 |
+//|                                                                    |
+//|  REAL MT5 CROSS-REFERENCE (2026-09-24, live GOLD, account 382043238, |
+//|  2023.01.01-2026.09.21, 20000 ZAR, Meridian_EA.mq5 v1.03 shipped     |
+//|  defaults vs this file's v1.04 shipped defaults with                 |
+//|  InpUseAureliusFilter=false): opposite-direction overlap 11.6% of    |
+//|  the time (matches the Python research/overlap/ study's own          |
+//|  prediction almost exactly, 11.6-12.1%); when opposite, Meridian's   |
+//|  own trade was profitable while Vanguard M15's was not 35.0% of the  |
+//|  (overlap-duration-weighted) time, vs Vanguard M15 alone profitable  |
+//|  22.8% of the time (both profitable 15.9%, both losing 26.4%) -      |
+//|  excluding the ambiguous both-won/both-lost cases, Meridian is right |
+//|  35.0/(35.0+22.8) = 60.6% of the time they disagree, a real,         |
+//|  moderate edge, comparable in size to the already-shipped Aurelius   |
+//|  M15 filter's own justification (56.8-61.6% in the Python overlap    |
+//|  study). The SAME real cross-reference on Vanguard_EA.mq5 (M5, not   |
+//|  M15) found only a coin-flip (22.0% vs 24.1%) - that is why this     |
+//|  filter exists HERE ONLY, not on Vanguard_EA.mq5.                    |
+//|                                                                    |
+//|  NOT YET REAL-MT5-CONFIRMED AS A FILTER: the evidence above is for   |
+//|  the real Meridian-vs-Vanguard-M15 disagreement pattern, NOT for     |
+//|  this filter's own effect on Vanguard M15's results once switched    |
+//|  on - that is a separate, still-untested claim. Ships default OFF,  |
+//|  deliberately unlike InpUseAureliusFilter's default-on: that one     |
+//|  reused an already-proven, already-running M5 mechanism; this is     |
+//|  the FIRST time this broadcast/read mechanism has ever been wired    |
+//|  to Meridian. Stays off until a real paired A/B test is run - GOLD,  |
+//|  account 382043238, 2023.01.01-2026.09.21, 20000 ZAR,                |
+//|  InpUseMeridianFilter=false vs true, otherwise identical shipped     |
+//|  defaults, same account/window/deposit as this session's other       |
+//|  real confirmations - ready to queue.                                |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -172,6 +208,20 @@ input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius
 input int    InpAureliusStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long
                                                 // (45 min default - a few Aurelius M15 bars, scaled up from
                                                 // the M5 pair's 15 min default) - covers Aurelius being
+                                                // removed, crashed, or never attached in the first place.
+
+input group "=== Cross-EA signal (v1.05 - optional, Meridian conflict filter, NOT YET CONFIRMED) ==="
+input bool   InpUseMeridianFilter = false;     // Skip an entry only if Meridian_EA.mq5 (its own M5 chart) is
+                                                // ALREADY holding the opposite direction right now - real
+                                                // evidence for the underlying disagreement pattern (see
+                                                // header), but NOT YET real-MT5-confirmed as a filter, unlike
+                                                // InpUseAureliusFilter - DEFAULT OFF until a real paired A/B
+                                                // test is run (see header for the exact test config). Composes
+                                                // with InpUseAureliusFilter - either filter blocking is enough
+                                                // to skip the entry.
+input int    InpMeridianStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long
+                                                // (45 min default, same as InpAureliusStaleSecs - no evidence
+                                                // yet to pick a different number). Covers Meridian being
                                                 // removed, crashed, or never attached in the first place.
 
 input group "=== Misc ==="
@@ -289,6 +339,12 @@ int      g_barLastBreakoutDir = 0;
 //--- files hard-lock to M15 anyway (see each OnInit).
 string   g_aurGVarName = "";
 int      g_lastAurDir = 0;   // cosmetic only - the panel's "Aurelius position" row, refreshed every new bar
+
+//--- cross-EA signal reader (v1.05 - see InpUseMeridianFilter). Matches
+//--- Meridian_EA.mq5's own writer-side name exactly - Meridian has no
+//--- M5/M15 variants, so no timeframe suffix on either end.
+string   g_meridianGVarName = "";
+int      g_lastMeridianDir = 0;   // cosmetic only - the panel's "Meridian position" row, refreshed every new bar
 double   g_entryATR = 0.0;   // ATR at entry, remembered for the stale-exit profit threshold (v1.04) - see
                               // Vanguard_EA.mq5's identical comment for the full reasoning
 
@@ -490,6 +546,37 @@ bool AureliusBlocksEntry(int dir)
   {
    int aurDir = ReadAureliusDir();
    return(aurDir != 0 && aurDir != dir);
+  }
+//+------------------------------------------------------------------+
+//| Reads Meridian_EA.mq5's real, broadcast position direction         |
+//| (v1.05 - see InpUseMeridianFilter's header): +1/-1 = Meridian       |
+//| currently holds that side, 0 = flat, absent, or stale (hasn't       |
+//| updated within InpMeridianStaleSecs - covers Meridian never          |
+//| attached, removed, or crashed). Called once per new bar regardless   |
+//| of Vanguard's own position state, purely so the panel can always      |
+//| show Meridian's current status. Mirrors ReadAureliusDir() exactly -    |
+//| see its own comment for why TimeLocal(), not TimeCurrent(), is right.  |
+//+------------------------------------------------------------------+
+int ReadMeridianDir()
+  {
+   if(!InpUseMeridianFilter) return(0);
+   if(!GlobalVariableCheck(g_meridianGVarName)) return(0);   // Meridian never attached this session
+   datetime lastSet = (datetime)GlobalVariableTime(g_meridianGVarName);
+   if(TimeLocal() - lastSet > InpMeridianStaleSecs) return(0);   // attached before, not actively updating now
+   return (int)GlobalVariableGet(g_meridianGVarName);
+  }
+//+------------------------------------------------------------------+
+//| True only when this bar's breakout direction `dir` should be       |
+//| BLOCKED because Meridian is ALREADY holding the opposite side      |
+//| right now - see Vanguard_M15_EA.mq5's own v1.05 header for the     |
+//| real cross-reference evidence (NOT YET a real-MT5-confirmed filter |
+//| effect - see header). Meridian flat/absent/stale (0) never          |
+//| blocks - Vanguard trades completely normally.                       |
+//+------------------------------------------------------------------+
+bool MeridianBlocksEntry(int dir)
+  {
+   int merDir = ReadMeridianDir();
+   return(merDir != 0 && merDir != dir);
   }
 //+------------------------------------------------------------------+
 //| Fractal swing check - is the bar at shift=(InpFractalK+1) a        |
@@ -1012,12 +1099,13 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    //--- discipline as Aurelius's own derivation (it found a real off-by-
    //--- one doing this by guesswork instead): every PSection/PRow call
    //--- advances ty by rh (ROWS) and every section boundary adds a
-   //--- further +6 (GAPS). In-position: a0 + s1+g1-g3 + s2+c1-c5 (v1.03
-   //--- added c5, Aurelius position) + s3+d1-d4 + s4+p1-p4 + s5+q1-q4 =
-   //--- 26 rh-rows, 10 gap-boundaries. Flat: identical through s4, but
-   //--- p4 there only advances +6 (no rh) - one row shorter (25), same
-   //--- 10 gap-boundaries (p4's +6 and s5's own gap both still happen).
-   const int ROWS = (haveLong || haveShort) ? 26 : 25, GAPS = 10;
+   //--- further +6 (GAPS). In-position: a0 + s1+g1-g3 + s2+c1-c6 (v1.03
+   //--- added c5, Aurelius position; v1.05 added c6, Meridian position) +
+   //--- s3+d1-d4 + s4+p1-p4 + s5+q1-q4 = 27 rh-rows, 10 gap-boundaries.
+   //--- Flat: identical through s4, but p4 there only advances +6 (no
+   //--- rh) - one row shorter (26), same 10 gap-boundaries (p4's +6 and
+   //--- s5's own gap both still happen).
+   const int ROWS = (haveLong || haveShort) ? 27 : 26, GAPS = 10;
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
    int guard = 0;
@@ -1105,7 +1193,16 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
       aurState = (g_barLastBreakoutDir != 0 && g_lastAurDir != g_barLastBreakoutDir) ? 0 : 1;
    PRow("c5", x, ty, w, "Aurelius position",
         !InpUseAureliusFilter ? "filter off" : (g_lastAurDir > 0 ? "LONG" : g_lastAurDir < 0 ? "SHORT" : "flat/absent"),
-        aurState); ty += rh + 6;
+        aurState); ty += rh;
+   //--- same red-only-when-actively-blocking pattern as c5 above, mirrored
+   //--- for Meridian's v1.05 filter (see header - NOT YET real-MT5-
+   //--- confirmed as a filter, default off).
+   int merState = -1;
+   if(InpUseMeridianFilter && g_lastMeridianDir != 0)
+      merState = (g_barLastBreakoutDir != 0 && g_lastMeridianDir != g_barLastBreakoutDir) ? 0 : 1;
+   PRow("c6", x, ty, w, "Meridian position",
+        !InpUseMeridianFilter ? "filter off" : (g_lastMeridianDir > 0 ? "LONG" : g_lastMeridianDir < 0 ? "SHORT" : "flat/absent"),
+        merState); ty += rh + 6;
 
    //--- strategy ------------------------------------------------------
    PSection("s3", x, ty, w, rh, "STRATEGY"); ty += rh + 6;
@@ -1352,6 +1449,7 @@ void CheckForEntry(int breakoutDir)
    if(sr >= 0.0 && sr < InpMinSRDistATR) return;
 
    if(AureliusBlocksEntry(breakoutDir)) return;
+   if(InpUseMeridianFilter && MeridianBlocksEntry(breakoutDir)) return;
 
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = isBuy ? px - InpSafetyStopATR * atr : px + InpSafetyStopATR * atr;
@@ -1395,6 +1493,9 @@ int OnInit()
    //--- "M15" literal, matching Aurelius_M15_EA.mq5's own writer-side
    //--- name - see its header note.
    g_aurGVarName = "AURELIUS_POSDIR_M15_" + _Symbol;
+   //--- matching Meridian_EA.mq5's own writer-side name exactly - no
+   //--- timeframe suffix on either end, see g_meridianGVarName's comment.
+   g_meridianGVarName = "MERIDIAN_POSDIR_" + _Symbol;
 
    SeedVWAP();
    SyncPositionState();
@@ -1473,6 +1574,7 @@ void OnTick()
       UpdateVWAPLine();
       UpdateLevelLines();
       g_lastAurDir = ReadAureliusDir();
+      g_lastMeridianDir = ReadMeridianDir();
       bool hl, hs;
       CurrentPositions(hl, hs);
       if(InpShowPanel) DrawPanel(hl, hs, true);

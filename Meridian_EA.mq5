@@ -669,9 +669,18 @@
 //|  Aurelius_M15_EA.mq5 the same day, and the same overall verdict as Aurelius_EA.mq5's    |
 //|  clean M5 reject. See research/divergence_standalone/ for the separate "divergence      |
 //|  as its own standalone system" test (also rejected, independently, on GOLD M5/M15).      |
+//|                                                                                            |
+//|  v1.04 ADDS InpPublishPosition (2026-09-24) - CROSS-EA SIGNAL ONLY, NO LOGIC CHANGE.       |
+//|  Broadcasts this EA's real position direction via a terminal global variable                |
+//|  ("MERIDIAN_POSDIR_"+_Symbol), once per new bar, mirroring Aurelius_EA.mq5/                  |
+//|  Aurelius_M15_EA.mq5's own InpPublishPosition exactly. Purely a broadcast - Meridian's        |
+//|  own entries, exits, sizing and risk are completely unaffected whether this is on or off,      |
+//|  or whether anything is even reading it. Built so Vanguard_M15_EA.mq5 (v1.05) can               |
+//|  OPTIONALLY skip entering directly against an already-open Meridian position - see that          |
+//|  file's own header for the real cross-reference evidence and why it ships opt-in there.            |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -706,6 +715,15 @@ input bool   InpPushNotifications = true;
 input group "=== Misc ==="
 input ulong  InpMagic           = 750731;
 input string InpTradeComment    = "Meridian";
+
+input group "=== Cross-EA signal (for Vanguard_M15_EA.mq5's optional conflict filter) ==="
+input bool    InpPublishPosition = true;       // Publish this EA's real position direction via a terminal
+                                                // global variable, so Vanguard_M15_EA.mq5 (attached to its own
+                                                // chart) can optionally avoid entering directly against an
+                                                // already-open Meridian position - see Vanguard_M15_EA.mq5's own
+                                                // header for the full design. Purely a broadcast: Meridian's
+                                                // own trading is completely unaffected whether this is on or
+                                                // off, or whether anything is even reading it.
 
 //--- v1.03: everything below is cosmetic only - nothing in these three groups
 //--- is read by any entry, exit, sizing or risk decision, and every draw they
@@ -780,6 +798,11 @@ int h21 = INVALID_HANDLE, h50 = INVALID_HANDLE, h150 = INVALID_HANDLE;
 //--- fixed across every other EA in this project)
 ulong    g_ticket  = 0;
 int      g_posDir  = 0;      // +1 long, -1 short, 0 flat
+
+//--- cross-EA signal (see InpPublishPosition) - no M5/M15 variant suffix
+//--- needed, unlike Aurelius's writer-side name: Meridian has no timeframe
+//--- siblings, so there's nothing for this name to collide with.
+string   g_posDirGVarName = "";
 
 //--- single-latch new-bar gate (called exactly once per tick - the
 //--- double-call pattern found and fixed in Slipstream/Tailwind this
@@ -2054,6 +2077,10 @@ int OnInit()
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
 
+   //--- see g_posDirGVarName's own comment - no timeframe suffix, Meridian
+   //--- has no M5/M15 variants to collide with.
+   g_posDirGVarName = "MERIDIAN_POSDIR_" + _Symbol;
+
    h21  = iMA(_Symbol, PERIOD_M5, InpP21,      0, InpFastMAMethod,    PRICE_CLOSE);
    h50  = iMA(_Symbol, PERIOD_M5, InpP50,      0, InpFastMAMethod,    PRICE_CLOSE);
    h150 = iMA(_Symbol, PERIOD_M5, InpPConfirm, 0, InpConfirmMAMethod, PRICE_CLOSE);
@@ -2205,6 +2232,17 @@ void OnTick()
       ManageOpenPosition();
    else
       CheckForEntry();
+
+   //--- cross-EA signal (see InpPublishPosition's header) - broadcasts
+   //--- this EA's real position direction once per new bar via a
+   //--- terminal global variable, for Vanguard_M15_EA.mq5's OWN,
+   //--- separate, optional conflict filter to read. Purely a
+   //--- broadcast - has no effect on this EA's own trading whatsoever.
+   //--- g_posDir is already fresh here: both ManageOpenPosition() and
+   //--- CheckForEntry() call SyncPositionState() themselves before
+   //--- returning, so this reads this bar's real, final position state.
+   if(InpPublishPosition)
+      GlobalVariableSet(g_posDirGVarName, (double)g_posDir);
 
    // v1.03 visuals, AFTER this bar's trading decision (so a position opened
    // or closed just now is drawn now, not a bar late) and skipped entirely
