@@ -843,10 +843,8 @@ input double  InpRiskPct         = 1.0;        // Risk per trade (% of balance) 
 input double  InpMaxLots         = 1.0;        // Hard cap on size
 
 input group "=== Moving averages (M15-NATIVE - see header) ==="
-input int     InpP21   = 30;                   // MA 21->30 period (2026-09-07, real MT5-confirmed): an
-                                                // Opus sweep found this on a broad plateau (28-40 all
-                                                // improve, not a single lucky point), paired with
-                                                // InpMinSlopeATR's loosened threshold below. Real result:
+input int     InpP21   = 30;                   // MA 21->30 period (2026-09-07, real MT5-confirmed): an Opus sweep found this on a broad plateau (28-40 all improve, not a single lucky point), paired with InpMinSlopeATR's loosened threshold below.
+                                                // Real result:
                                                 // net $1,539.18 (200/SMMA,1200/EMA baseline) ->
                                                 // $1,902.57 (+23.6%), PF basically flat (1.657->1.666).
                                                 // REAL COST: Balance DD more than doubled, $169.53
@@ -858,57 +856,52 @@ input int     InpP21   = 30;                   // MA 21->30 period (2026-09-07, 
                                                 // equivalent M5 config (Aurelius_EA.mq5 v1.45) on every
                                                 // single metric, but know the drawdown is real before
                                                 // running this live.
-input int     InpP50   = 50;                   // MA 50 period - unchanged, same reason as InpP21; on M5
-                                                // this WAS the fast/medium tier only - on M15 it directly
-                                                // IS the "M15-scale" tier Aurelius_EA.mq5's 150 used to
-                                                // approximate, so nothing needs rescaling here either
-input int     InpP150  = 150;                  // MA 150 period - unchanged: its own distinct, valid M15
-                                                // period (not trying to re-encode "M15-equivalent" anymore -
-                                                // the chart itself already provides that once run natively
-                                                // on M15, per the user's own catch that a naive period
-                                                // rescale would have made this redundant with InpP50)
-input int     InpP600  = 200;                  // MA 600->200: rescaled from Aurelius_EA.mq5's 600 to
-                                                // preserve its ORIGINAL design intent (50-period-on-H1
-                                                // equivalent: 600 M5-bars = 3000min = 50 H1-bars; on M15,
-                                                // that's 200 M15-bars, not the same 600). Then FURTHER
-                                                // refined by the M15 MA sweep below (2026-09-07): SMMA
-                                                // beat both EMA and the original SMA at this period, on
-                                                // every metric simultaneously - see InpM600 below.
-input int     InpP2400 = 1200;                 // MA 2400->1200: NOT the naive 800 (=2400/3, the same H4-
-                                                // equivalent rescale InpP600 got). The M15 MA sweep found
-                                                // net profit climbs steadily from macro=600 up to a real,
-                                                // non-monotonic local peak at 1200 (best combined net+PF
-                                                // of the whole sweep - beats both the naive-800 rescale
-                                                // AND Aurelius_EA.mq5's own raw-M5-period-on-M15 config),
-                                                // then degrades 1400-1600 before partially recovering by
-                                                // 2400. Python screen only (see m15_lib.py sweep, logged
-                                                // in SESSION_NOTES.md item 23) - NEEDS real MT5 confirmation,
-                                                // same caveat as every Python-only finding in this system.
+input int     InpP50   = 50;                   // MA 50 period - unchanged, same reason as InpP21.
+                                                // On M5 this WAS the fast/medium tier only - on M15 it
+                                                // directly IS the "M15-scale" tier Aurelius_EA.mq5's 150
+                                                // used to approximate, so nothing needs rescaling here
+                                                // either.
+input int     InpP150  = 150;                  // MA 150 period - unchanged: its own distinct, valid M15 period.
+                                                // (Not trying to re-encode "M15-equivalent" anymore - the
+                                                // chart itself already provides that once run natively on
+                                                // M15, per the user's own catch that a naive period rescale
+                                                // would have made this redundant with InpP50.)
+input int     InpP600  = 200;                  // MA 600->200: rescaled from Aurelius_EA.mq5's 600 to preserve its original design intent (50-period-on-H1 equivalent).
+                                                // 600 M5-bars = 3000min = 50 H1-bars; on M15, that's 200
+                                                // M15-bars, not the same 600. Then further refined by the
+                                                // M15 MA sweep below (2026-09-07): SMMA beat both EMA and
+                                                // the original SMA at this period, on every metric
+                                                // simultaneously - see InpM600 below.
+input int     InpP2400 = 1200;                 // MA 2400->1200: NOT the naive 800 (=2400/3, the same H4-equivalent rescale InpP600 got) - Python screen only, needs real MT5 confirmation.
+                                                // The M15 MA sweep found net profit climbs steadily from
+                                                // macro=600 up to a real, non-monotonic local peak at 1200
+                                                // (best combined net+PF of the whole sweep - beats both
+                                                // the naive-800 rescale AND Aurelius_EA.mq5's own
+                                                // raw-M5-period-on-M15 config), then degrades 1400-1600
+                                                // before partially recovering by 2400. (See m15_lib.py
+                                                // sweep, logged in SESSION_NOTES.md item 23 - same caveat
+                                                // as every Python-only finding in this system.)
 input ENUM_MA_METHOD InpM21   = MODE_EMA;      // MA 21 method - unchanged
-input ENUM_MA_METHOD InpM50   = MODE_EMA;      // MA 50 method - unchanged (a single-leg sweep found
-                                                // MODE_SMA here roughly doubles risk-adjusted quality -
-                                                // PF ~1.95, maxDD roughly halved - at a real cost in trade
-                                                // count/net profit; left at EMA as the net-profit-first
-                                                // default, worth testing MODE_SMA separately if a more
-                                                // conservative profile is ever wanted)
-input ENUM_MA_METHOD InpM150  = MODE_EMA;      // MA 150 method - unchanged (the sweep found SMA/SMMA here
-                                                // both hurt badly - this leg is sensitive, leave alone)
-input ENUM_MA_METHOD InpM600  = MODE_SMMA;     // MA 600 method - MODE_SMMA (2026-09-07 M15 sweep): beat
-                                                // both the original MODE_SMA (Aurelius_EA.mq5's inherited
-                                                // default) and this file's own interim MODE_EMA on every
-                                                // metric simultaneously (net, PF, drawdown, win rate) at a
-                                                // similar trade count - the "wins on every measure" bar
-                                                // this session uses before taking a finding seriously.
-                                                // NOTE: on real M5 data (Aurelius_EA.mq5's own timeframe)
-                                                // the SAME sweep also found MODE_SMMA beats both SMA and
-                                                // EMA at this leg (net +25% over the shipped SMA default) -
-                                                // so this may be a genuine cross-timeframe finding, not an
-                                                // M15-only quirk. UPDATE (2026-09-07): SMMA is now real-
-                                                // tested too - net $1,539.18/PF 1.657/Balance DD 5.59% -
-                                                // beats both SMA ($1460.59/1.818/4.05%) on net profit
-                                                // and EMA ($1406.91/1.754/5.39%) on every metric, though
-                                                // SMA still has the best PF/DD of the three. Adopted as
-                                                // the default here regardless, since it's the base this
+input ENUM_MA_METHOD InpM50   = MODE_EMA;      // MA 50 method - unchanged; a single-leg sweep found MODE_SMA here roughly doubles risk-adjusted quality but at a real cost in trade count/net profit.
+                                                // (PF ~1.95, maxDD roughly halved, vs EMA.) Left at EMA as
+                                                // the net-profit-first default - worth testing MODE_SMA
+                                                // separately if a more conservative profile is ever wanted.
+input ENUM_MA_METHOD InpM150  = MODE_EMA;      // MA 150 method - unchanged; the sweep found SMA/SMMA here both hurt badly - this leg is sensitive, leave alone.
+input ENUM_MA_METHOD InpM600  = MODE_SMMA;     // MA 600 method - MODE_SMMA (2026-09-07 M15 sweep): beat both MODE_SMA and MODE_EMA on every metric simultaneously, real MT5 confirmed.
+                                                // (Aurelius_EA.mq5's inherited default) and this file's own
+                                                // interim MODE_EMA on every metric simultaneously (net, PF,
+                                                // drawdown, win rate) at a similar trade count - the "wins
+                                                // on every measure" bar this session uses before taking a
+                                                // finding seriously. NOTE: on real M5 data (Aurelius_EA.mq5's
+                                                // own timeframe) the SAME sweep also found MODE_SMMA beats
+                                                // both SMA and EMA at this leg (net +25% over the shipped
+                                                // SMA default) - so this may be a genuine cross-timeframe
+                                                // finding, not an M15-only quirk. UPDATE (2026-09-07): SMMA
+                                                // is now real-tested too - net $1,539.18/PF 1.657/Balance DD
+                                                // 5.59% - beats both SMA ($1460.59/1.818/4.05%) on net
+                                                // profit and EMA ($1406.91/1.754/5.39%) on every metric,
+                                                // though SMA still has the best PF/DD of the three. Adopted
+                                                // as the default here regardless, since it's the base this
                                                 // file's other real-tested improvements (InpP21/
                                                 // InpMinSlopeATR below) were layered on top of.
 input ENUM_MA_METHOD InpM2400 = MODE_EMA;      // MA 2400 method - unchanged
@@ -955,18 +948,16 @@ input int     InpPullbackBars    = 10;         // Bars allowed from touch to ent
 input bool    InpUseSlope        = true;       // Require a minimum slope
 input ENUM_SLOPEMA InpSlopeMA    = SLOPE_50;   // Which MA the slope reads
 input int     InpSlopeBars       = 20;         // Bars used for the slope
-input double  InpMinSlopeATR     = 0.20;       // Minimum slope (x ATR) - 0.50->0.20 (2026-09-07): paired
-                                                // with InpP21's 21->30 change above - see that input's
-                                                // comment for the combined real MT5 numbers. Checked as
-                                                // a plateau, not one lucky value: the Opus sweep found
-                                                // every threshold from 0.20-0.30 an improvement over the
-                                                // shipped 0.50, not just this exact number.
-input double  InpMaxSlopeATR   = 1.25;      // Max slope - blocks over-extended entries (0 = off) -
-                                             // REAL-CONFIRMED (2026-09-23, see below; originally shipped
-                                             // as CANDIDATE UNDER TEST 2026-09-10, status label was stale -
-                                             // Opus review caught this comment still said "candidate" after
-                                             // the real confirmation below had already landed). Was 1.00
-                                             // before this change. An EARLIER
+input double  InpMinSlopeATR     = 0.20;       // Minimum slope (x ATR) - 0.50->0.20 (2026-09-07): paired with InpP21's 21->30 change above, real MT5 confirmed together.
+                                                // See InpP21's comment for the combined real MT5 numbers.
+                                                // Checked as a plateau, not one lucky value: the Opus sweep
+                                                // found every threshold from 0.20-0.30 an improvement over
+                                                // the shipped 0.50, not just this exact number.
+input double  InpMaxSlopeATR   = 1.25;      // Max slope - blocks over-extended entries (0 = off) - REAL-CONFIRMED (2026-09-23, live GOLD real MT5 test, full detail below).
+                                             // Originally shipped as CANDIDATE UNDER TEST 2026-09-10,
+                                             // status label was stale - Opus review caught this comment
+                                             // still said "candidate" after the real confirmation below
+                                             // had already landed. Was 1.00 before this change. An EARLIER
                                              // Opus sweep (widening up to 1.30) found more net profit but
                                              // much worse drawdown, and was left unchanged at the time -
                                              // but that test predates InpMinSRDistATR's 0.50->1.50
@@ -1004,8 +995,8 @@ input double  InpMinVolRatio  = 1.30;      // Min volume vs that average
 input group "=== S/R proximity filter ==="
 input bool    InpUseSRDist    = true;      // Skip entries sitting on a previous-days level
 input int     InpSRDays       = 3;         // Previous days used for the level
-input double  InpMinSRDistATR = 1.50;      // Min distance from the level (x ATR) - REAL MT5 CONFIRMED
-                                            // (2026-09-09): was 0.50, never independently swept before
+input double  InpMinSRDistATR = 1.50;      // Min distance from the level (x ATR) - REAL MT5 CONFIRMED (2026-09-09).
+                                            // Was 0.50, never independently swept before
                                             // 2026-09-08's Python sweep (sr_dist_test.py, shipped M15
                                             // v1.45 config, stop=2.5 held fixed) found 1.50 a genuine
                                             // local optimum - and the real backtest CONFIRMED it, beating
@@ -1028,10 +1019,10 @@ input double  InpMinSRDistATR = 1.50;      // Min distance from the level (x ATR
                                             // it), so that filter was NOT added.
 
 input group "=== Combined slope x S/R block (optional) ==="
-input bool    InpUseSlopeSRBlock = true;   // Block entries where the trend is steep AND far from S/R at
-                                            // once - a real, permutation-confirmed Python finding (2026-
-                                            // 09-16, m15/stoch/s21_slope_sr_filter.py + earlier
-                                            // m15/multi/ work), NOT yet real-tested. Neither InpMaxSlopeATR
+input bool    InpUseSlopeSRBlock = true;   // Block entries where the trend is steep AND far from S/R at once - REAL-CONFIRMED (2026-09-24, live GOLD 382043238, see below).
+                                            // Originally a real, permutation-confirmed Python finding
+                                            // (2026-09-16, m15/stoch/s21_slope_sr_filter.py + earlier
+                                            // m15/multi/ work). Neither InpMaxSlopeATR
                                             // nor InpMinSRDistATR alone catches this - it is specifically
                                             // the COMBINATION (steep slope AND already far from the nearest
                                             // level) that marks a real, distinct bad-signal class: only
@@ -1066,11 +1057,8 @@ input bool    InpUseSlopeSRBlock = true;   // Block entries where the trend is s
                                             // now real-confirmed, not just the Python permutation result
                                             // above. See the 2026-09-24 research note near the end of this
                                             // header.
-input double  InpSlopeSRBlockSlope = 1.00; // Slope threshold (x ATR, via the existing SlopeATR()) - only
-                                            // blocks when slope is AT OR ABOVE this AND the S/R distance
-                                            // below is also at or above its own threshold, simultaneously
-input double  InpSlopeSRBlockSR    = 6.00; // S/R distance threshold (x ATR, via the existing
-                                            // SRDistanceATR()) - see InpUseSlopeSRBlock's own comment
+input double  InpSlopeSRBlockSlope = 1.00; // Slope threshold (x ATR, via the existing SlopeATR()) - only blocks when slope is at or above this AND the S/R distance below is also at or above its own threshold, simultaneously.
+input double  InpSlopeSRBlockSR    = 6.00; // S/R distance threshold (x ATR, via the existing SRDistanceATR()) - see InpUseSlopeSRBlock's own comment.
 
 input group "=== Scale in (optional) ==="
 input bool    InpUseScale     = false;     // Add to a position that is winning  [tested in the Python model: net profit improves on BOTH train/hold splits at every setting tried (e.g. +130/+68% at 3.0 ATR) - but every setting also raises max drawdown 1.2-2.4x and cuts win rate from 34% to 23-29%. It does this by adding size right as a trade "confirms the trend" - which is often close to the local top - so it specifically makes the profit-give-back pattern WORSE, not better, on the trades that reverse after the add. Left OFF: this system's give-back problem is the whole reason for this session's testing, and scale-in trades raw return for exactly the risk being managed away.]
@@ -1090,8 +1078,8 @@ input bool    InpUseMomentum  = false;     // Require MACD histogram to be turni
 
 input group "=== Protective stop (optional) ==="
 input bool    InpUseStopLoss     = true;       // Attach a stop loss  [tested for real: a real Strategy Tester run showed a 27.69% EQUITY drawdown vs only 9.76% BALANCE drawdown - a position floated ~$1,184 underwater with no price floor before recovering. Turned on at the existing wide 4.0 ATR distance specifically to test whether it caps that float without denting real profit - see header]
-input double  InpStopATR         = 2.5;        // Stop distance (x ATR at entry) - 1.5 REAL-TESTED AND
-                                                // REJECTED (2026-09-09, M15). A Python sweep (stop_sweep.py)
+input double  InpStopATR         = 2.5;        // Stop distance (x ATR at entry) - 1.5 REAL-TESTED AND REJECTED (2026-09-09, M15). Stays at 2.5.
+                                                // A Python sweep (stop_sweep.py)
                                                 // predicted tighter stops would win on almost every measure,
                                                 // including LOWER dollar drawdown - real MT5 disagreed: vs
                                                 // this 2.5 default (net $2,404.76, PF 2.070, Balance DD
@@ -1112,7 +1100,7 @@ input double  InpStopATR         = 2.5;        // Stop distance (x ATR at entry)
                                                 // v1.36 corrected-ATR baseline: 2.5 beat 4.0 on EVERY measure
                                                 // in backtest (net +32.5%, PF better, equity DD -11.4%, worst
                                                 // loss -37%) and traded a real but favorable risk/reward on
-                                                // forward (net -6.1%, DD -17.2%, worst loss -14%). New default.
+                                                // forward (net -6.1%, DD -17.2%, worst loss -14%). New default.]
 input bool    InpUseMaxBars      = false;      // Force close after N bars
 input int     InpMaxBars         = 1000;       // N bars
 
@@ -1127,55 +1115,57 @@ input double  InpVwapBufferATR      = 0.2;     // How far past VWAP counts as "t
 input int     InpVwapConfirmBars    = 8;       // Consecutive closed bars required past the buffer before exiting
 
 input group "=== Early exit: stale losing trade (optional) ==="
-input bool    InpUseStaleExit    = false;      // 0 = off (NOT yet real-tested). A genuinely different axis from
-                                                // InpStopATR/fixed-distance stops: the EA's own real test found the
-                                                // worst equity float ISN'T a trade running past a wide distance -
-                                                // it recovers or exits via ALIGN_BREAK before ever reaching one.
-                                                // That's a DURATION problem, not a distance one, so a distance
-                                                // stop structurally can't fix it. This closes a trade once it has
-                                                // been open InpStaleBars bars AND is still losing more than
-                                                // InpStaleMinLossATR - regardless of price distance. Python-
-                                                // validated (2023-2026, same entry gate/exit stack as shipped):
-                                                // at 48 bars (4h) the worst single-trade float fell ~9% (-61.4 ->
-                                                // -56.1) at ~0% net cost; at 60 bars (5h) it doesn't touch the
-                                                // worst trade at all but net/PF improve on both splits anyway
-                                                // (a separate, free finding). Needs a real Strategy Tester run
-                                                // before trusting either number, same as everything else in this
-                                                // file marked Python-only.
+input bool    InpUseStaleExit    = false;      // Close a trade early once it's been open InpStaleBars bars and is still losing more than InpStaleMinLossATR - REJECTED (2026-09-24, real MT5, live GOLD 382043238): a complete non-event, no benefit shown. Stays false. See header.
+                                                // A genuinely different axis from InpStopATR/fixed-distance
+                                                // stops: the EA's own real test found the worst equity float
+                                                // ISN'T a trade running past a wide distance - it recovers or
+                                                // exits via ALIGN_BREAK before ever reaching one. That's a
+                                                // DURATION problem, not a distance one, so a distance stop
+                                                // structurally can't fix it, regardless of price distance.
+                                                // Originally Python-validated only (2023-2026, same entry
+                                                // gate/exit stack as shipped): at 48 bars (4h) the worst
+                                                // single-trade float fell ~9% (-61.4 -> -56.1) at ~0% net cost;
+                                                // at 60 bars (5h) it doesn't touch the worst trade at all but
+                                                // net/PF improve on both splits anyway (a separate, free
+                                                // finding). The real MT5 run above showed those Python numbers
+                                                // don't translate into a real edge: 434 trades (+0.9%), net
+                                                // 43,760.53 (-0.15%), PF 1.909818 (~0%), Balance DD Maximal
+                                                // 6.57% (very slightly better), Equity DD Maximal 10.41%
+                                                // (very slightly better) - every delta within noise.
 input int     InpStaleBars       = 48;         // Bars open before this exit is even considered (48 = 4h at M5)
 input double  InpStaleMinLossATR = 0.5;        // Still-losing threshold, x ATR at entry
 
 input group "=== Breakeven + moderate trail (optional) ==="
-input bool    InpUseBreakeven    = false;      // 0 = off (NOT yet real-tested). Requested directly after watching a
-                                                // trade float +$2000 profit, then reverse all the way to a loss by
-                                                // the time ALIGN_BREAK finally fired - a real gap, since ALIGN_BREAK
-                                                // only reacts to the STACK breaking, not to giving back an already-
-                                                // large winner. This does NOT close the trade at the trigger - the
-                                                // whole point is staying in if it's only a pullback, not guessing
-                                                // whether it's a real reversal. It only moves the stop, once, to
-                                                // lock in InpBreakevenLockATR beyond entry (never loosens it, never
-                                                // moves it back) once floating profit reaches InpBreakevenATR x the
-                                                // entry ATR. A moderate move deliberately, not tight: this system's
-                                                // own header already found every tested early-profit-lock variant
-                                                // (InpUseBank) lost against not banking at all, because a handful
-                                                // of huge winners carry the whole edge - the same risk applies here
-                                                // if the trigger/trail are set too tight. Needs a real Strategy
-                                                // Tester run before trusting the Python numbers below, same as
-                                                // every other optional exit in this file.
+input bool    InpUseBreakeven    = false;      // Move the stop to breakeven once InpBreakevenATR of profit shows - REJECTED (2026-09-24, real MT5, live GOLD 382043238): real net cost, both DD measures worse. Stays false. See header.
+                                                // Requested directly after watching a trade float +$2000
+                                                // profit, then reverse all the way to a loss by the time
+                                                // ALIGN_BREAK finally fired - a real gap, since ALIGN_BREAK
+                                                // only reacts to the STACK breaking, not to giving back an
+                                                // already-large winner. This does NOT close the trade at the
+                                                // trigger - the whole point is staying in if it's only a
+                                                // pullback, not guessing whether it's a real reversal. It only
+                                                // moves the stop, once, to lock in InpBreakevenLockATR beyond
+                                                // entry (never loosens it, never moves it back) once floating
+                                                // profit reaches InpBreakevenATR x the entry ATR. A moderate
+                                                // move deliberately, not tight: this system's own header
+                                                // already found every tested early-profit-lock variant
+                                                // (InpUseBank) lost against not banking at all, because a
+                                                // handful of huge winners carry the whole edge - the same risk
+                                                // applies here if the trigger/trail are set too tight. The real
+                                                // MT5 run above confirmed that risk: 458 trades (+6.5%), net
+                                                // 39,484.03 (-9.9%), PF 1.93147 (+1.1%), Balance DD Maximal
+                                                // 8.69% (worse), Equity DD Maximal 12.81% (worse) - real net
+                                                // cost, both DD measures worse, only a small PF gain.
 input double  InpBreakevenATR     = 2.0;       // Floating profit (x entry ATR) that triggers the move to breakeven
-input double  InpBreakevenLockATR = 0.10;      // How far past pure entry to lock (x entry ATR) - covers spread/
-                                                // commission so it isn't a dead-even exit
-input bool    InpUseTrailAfterBE  = false;     // Keep trailing further once breakeven has been locked (independent
-                                                // toggle - breakeven-only is a smaller, separable change from also
-                                                // trailing after it)
-input double  InpTrailGiveBackATR = 3.0;       // Trail distance behind the trade's best price since entry (x entry
-                                                // ATR) once past breakeven - wide on purpose, see InpUseBreakeven
+input double  InpBreakevenLockATR = 0.10;      // How far past pure entry to lock (x entry ATR) - covers spread/commission so it isn't a dead-even exit.
+input bool    InpUseTrailAfterBE  = false;     // Keep trailing further once breakeven has been locked - an independent toggle, since breakeven-only is a smaller, separable change from also trailing after it.
+input double  InpTrailGiveBackATR = 3.0;       // Trail distance behind the trade's best price since entry (x entry ATR) once past breakeven - wide on purpose, see InpUseBreakeven.
 
 input group "=== Safety ==="
-input int     InpMagic           = 750015;     // Magic number - DELIBERATELY different from Aurelius_EA.mq5's
-                                                // 750004 so the two can run on the same account/symbol at the
-                                                // same time without one's position tracking/circuit-breaker
-                                                // state ever mixing with the other's
+input int     InpMagic           = 750015;     // Magic number - DELIBERATELY different from Aurelius_EA.mq5's 750004.
+                                                // So the two can run on the same account/symbol at the same
+                                                // time without one's position tracking/circuit-breaker state
+                                                // ever mixing with the other's.
 input int     InpMaxSpreadPoints = 60;         // Skip entries above this spread (0 = off)
 input int     InpSlippage        = 20;         // Max deviation (points)
 input double  InpMaxDailyLossPct = 0.0;        // Stop trading after this daily loss % (0 = off)
@@ -1213,49 +1203,44 @@ input int     InpBgWidth       = 1290;           // Image width (px) - for centr
 input int     InpBgHeight      = 720;            // Image height (px) - for centring only
 input group "=== Chart theme ==="
 input bool    InpApplyTheme = true;              // Recolour the chart
-input bool    InpHideTradeMarks = true;          // Hide MT5's own buy/sell/SL/TP arrows and lines - the panel
-                                                  // and MA lines are meant to be the only things on this chart
+input bool    InpHideTradeMarks = true;          // Hide MT5's own buy/sell/SL/TP arrows and lines - the panel and MA lines are meant to be the only things on this chart.
 input bool    InpShowMAs    = true;              // Draw the moving averages on the chart, each its own neon colour
-input int     InpMAHistoryBars = 2500;           // How many recent bars of MA line history to keep drawn (bounded,
-                                                  // so a long-running live EA doesn't accumulate objects forever)
+input int     InpMAHistoryBars = 2500;           // How many recent bars of MA line history to keep drawn (bounded, so a long-running live EA doesn't accumulate objects forever).
 input color   InpCol21      = clrYellow;         // MA 21 line colour
-input color   InpCol50      = C'255,140,0';      // MA 50 line colour - neon orange (NOT white:
-                                                  // InpBearCol/CHART_COLOR_CHART_DOWN are also
-                                                  // white, and the 50 hugs price closely enough
-                                                  // to vanish into bearish candle bodies/wicks)
+input color   InpCol50      = C'255,140,0';      // MA 50 line colour - neon orange, deliberately NOT white.
+                                                  // (InpBearCol/CHART_COLOR_CHART_DOWN are also white, and
+                                                  // the 50 hugs price closely enough to vanish into bearish
+                                                  // candle bodies/wicks.)
 input color   InpCol150     = C'191,0,255';      // MA 150 line colour - neon purple
 input color   InpCol600     = C'255,20,147';     // MA 600 line colour - neon pink
 input color   InpCol2400    = C'57,255,20';      // MA 2400 line colour - neon green
 input bool    InpShowVWAP   = true;              // Draw the session VWAP this EA's own exit logic already reads
 input color   InpColVWAP    = C'0,255,255';      // VWAP line colour - neon aqua, distinct from the 5 MAs
-input int     InpVwapHistoryBars = 400;          // VWAP resets every session, so a long backfill window doesn't
-                                                  // add anything - kept separate from InpMAHistoryBars, and
-                                                  // small, so the OnInit backfill (SessionVWAP() re-walks up to
-                                                  // 400 bars EVERY call - see its own header) stays fast
+input int     InpVwapHistoryBars = 400;          // VWAP resets every session, so a long backfill window doesn't add anything.
+                                                  // Kept separate from InpMAHistoryBars, and small, so the
+                                                  // OnInit backfill (SessionVWAP() re-walks up to 400 bars
+                                                  // EVERY call - see its own header) stays fast.
 //--- v1.44 indicator-visibility inputs. Every one of these is cosmetic only:
 //--- nothing below is read by any entry, exit, sizing or risk decision, and
 //--- every draw they gate sits behind g_skipCosmeticDraws like the MA lines.
-input bool    InpShowTradeLevels = true;         // Draw the OPEN position's entry and stop-loss as horizontal
-                                                  // lines. InpHideTradeMarks (below, on by default) switches
-                                                  // MT5's own CHART_SHOW_TRADE_LEVELS off, which left the real
-                                                  // stop invisible with nothing replacing it - these two lines
-                                                  // are the replacement, in this file's own palette
-input color   InpColEntryLine = C'150,166,192';   // Entry-price line - same silver-grey as InpTextCol (a level,
-                                                  // not a state: neither good nor bad news on its own)
+input bool    InpShowTradeLevels = true;         // Draw the OPEN position's entry and stop-loss as horizontal lines.
+                                                  // InpHideTradeMarks (above, on by default) switches MT5's
+                                                  // own CHART_SHOW_TRADE_LEVELS off, which left the real stop
+                                                  // invisible with nothing replacing it - these two lines are
+                                                  // the replacement, in this file's own palette.
+input color   InpColEntryLine = C'150,166,192';   // Entry-price line - same silver-grey as InpTextCol (a level, not a state: neither good nor bad news on its own).
 input color   InpColStopLine  = C'255,61,90';     // Stop-loss line - same hot red as InpNoCol
-input bool    InpShowSR      = true;              // Draw the prior-InpSRDays daily high/low the S/R proximity
-                                                  // filter actually measures against. Independent of
-                                                  // InpUseSRDist on purpose: the levels are worth seeing even
-                                                  // when the filter that reads them is switched off
-input color   InpColSR       = C'120,144,176';    // S/R level colour - InpSectionCol's silver, dimmed roughly
-                                                  // in half so a static daily level never competes with the
-                                                  // live MA lines for attention
-input bool    InpShowPullbackBand = true;         // Draw the InpPullbackTolATR envelope around the pullback MA -
-                                                  // the actual band PullbackOK() tests price against, and the
-                                                  // one entry condition with no visible geometry until now
-input color   InpColPullback = C'128,70,0';       // Pullback band colour - InpCol50's neon orange at ~half
-                                                  // brightness, so the band reads as a zone belonging to that
-                                                  // line rather than as a sixth MA (drawn STYLE_DOT too)
+input bool    InpShowSR      = true;              // Draw the prior-InpSRDays daily high/low that the S/R proximity filter actually measures against.
+                                                  // Independent of InpUseSRDist on purpose: the levels are
+                                                  // worth seeing even when the filter that reads them is
+                                                  // switched off.
+input color   InpColSR       = C'120,144,176';    // S/R level colour - InpSectionCol's silver, dimmed roughly in half so a static daily level never competes with the live MA lines for attention.
+input bool    InpShowPullbackBand = true;         // Draw the InpPullbackTolATR envelope around the pullback MA.
+                                                  // The actual band PullbackOK() tests price against, and the
+                                                  // one entry condition with no visible geometry until now.
+input color   InpColPullback = C'128,70,0';       // Pullback band colour - InpCol50's neon orange at ~half brightness.
+                                                  // Reads as a zone belonging to that line rather than as a
+                                                  // sixth MA (drawn STYLE_DOT too).
 input color   InpChartBg    = clrBlack;           // Chart background - matches Ratchet/Slipstream/Tailwind/AuRebound
 input color   InpBullCol    = C'0,150,255';       // Bullish candle - neon blue, same as Ratchet/Slipstream/Tailwind/AuRebound
 input color   InpBearCol    = clrWhite;           // Bearish candle - neon white, same as Ratchet/Slipstream/Tailwind/AuRebound
@@ -1266,12 +1251,12 @@ input int     InpWaterSize  = 42;                // Watermark font size
 input string  InpWaterFont  = "Arial Black";     // Watermark font
 
 input group "=== Cross-EA signal (for Vanguard_M15_EA.mq5's optional conflict filter) ==="
-input bool    InpPublishPosition = true;       // Publish this EA's real position direction via a terminal
-                                                // global variable, so Vanguard_M15_EA.mq5 (attached to its own
-                                                // chart) can optionally avoid entering directly against an
-                                                // already-open Aurelius position - see Vanguard_M15_EA.mq5's own
-                                                // header for the full design. Purely a broadcast: Aurelius's
-                                                // own trading is completely unaffected whether this is on or
+input bool    InpPublishPosition = true;       // Publish this EA's real position direction via a terminal global variable, so Vanguard_M15_EA.mq5 can optionally avoid entering against it.
+                                                // Vanguard_M15_EA.mq5 (attached to its own chart) reads this
+                                                // to optionally avoid entering directly against an
+                                                // already-open Aurelius position - see Vanguard_M15_EA.mq5's
+                                                // own header for the full design. Purely a broadcast:
+                                                // Aurelius's own trading is completely unaffected whether this is on or
                                                 // off, or whether anything is even reading it.
 
 input group "=== Logging ==="
