@@ -678,9 +678,29 @@
 //|  or whether anything is even reading it. Built so Vanguard_M15_EA.mq5 (v1.05) can               |
 //|  OPTIONALLY skip entering directly against an already-open Meridian position - see that          |
 //|  file's own header for the real cross-reference evidence and why it ships opt-in there.            |
+//|                                                                                                      |
+//|  VISUAL AUDIT (2026-09-24), Opus review, cosmetic-only, no trading logic touched, version bumped     |
+//|  for a real rendering fix: LAYERING BUG - PBackground()/PWatermark() sat AFTER DrawPanel()'s          |
+//|  `if(!InpShowPanel) return` early-out, so InpShowPanel=false silently killed the watermark too,        |
+//|  even though InpShowPanel/InpWatermark are documented elsewhere in this portfolio as independent         |
+//|  inputs - same bug found and fixed today in Aurelius_EA.mq5/Aurelius_M15_EA.mq5/Ratchet_EA.mq5.            |
+//|  Fixed by moving both calls before the early-out.                                                            |
+//|  Also checked and found correct, no change: ROWS/GAPS (29, GAPS=8) hand-recounted against the                |
+//|  literal ty+= sequence; the chart-height auto-shrink loop; draw order (MA/VWAP/level lines and                 |
+//|  chart-label captions before DrawPanel(), panel always last); and every line label/caption text -              |
+//|  "close vs " + cfName, the l1-l6 legend rows, entry/SL captions - all built via MALabel()/live                  |
+//|  variables, not a hardcoded period/method string, so none of them can go stale the way Aurelius_EA's             |
+//|  b2/b3 rows just did.                                                                                             |
+//|  FLAGGED, NOT FIXED (needs a real chart to confirm, not provable from code alone): UpdateLevelLines()'s            |
+//|  entry/SL/S-R chart-label captions (DrawChartLabel(), "ENTRY LONG ..."/"SAFETY SL ..."/"...HIGH ..."/               |
+//|  "...LOW ...") are each anchored at the SAME x (TimeCurrent(), the chart's live edge) and at their OWN              |
+//|  line's exact y-price, with no offset logic between captions. If two of those lines land close enough in            |
+//|  PRICE - most plausibly a tight InpSafetyStopATR putting "sl" a handful of points from "entry", or price              |
+//|  trading right at a prior day's high/low so "srhi"/"srlo" sits near the open position - their 8px captions            |
+//|  can visually overlap depending on chart zoom, which this file's coordinate math alone can't determine.               |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1864,11 +1884,18 @@ string DisplayFirstBlock(const bool isBuy)
 //+------------------------------------------------------------------+
 void DrawPanel(const bool reclaim = true)
   {
-   if(!InpShowPanel) { ObjectsDeleteAll(0, g_pp); return; }
-   g_panelReclaim = reclaim;
-
+   //--- background/watermark are documented as independent of the panel
+   //--- (InpShowPanel/InpWatermark are separate inputs) - drawn BEFORE
+   //--- the panel's own early-return (2026-09-24 fix: this file had them
+   //--- nested AFTER the InpShowPanel check, silently killing the
+   //--- watermark too whenever the panel itself was switched off - the
+   //--- same bug found and fixed today in Aurelius_EA.mq5/Aurelius_M15_
+   //--- EA.mq5/Ratchet_EA.mq5, matching Vanguard_EA.mq5's already-correct
+   //--- order for this same panel code family).
    PBackground();
    PWatermark();
+   if(!InpShowPanel) { ObjectsDeleteAll(0, g_pp); return; }
+   g_panelReclaim = reclaim;
 
    int w = MathMax(InpPanelW, g_panelMinW);
    g_panelMinW = 0;   // re-measured fresh this cycle, used by the NEXT one
