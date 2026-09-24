@@ -161,6 +161,34 @@
 //|  InpUseMeridianFilter=false vs true, otherwise identical shipped     |
 //|  defaults, same account/window/deposit as this session's other       |
 //|  real confirmations - ready to queue.                                |
+//|                                                                        |
+//|  RESEARCH NOTE (2026-09-24) - real A/B replay, NOT a fresh MT5 run:     |
+//|  MT5's Strategy Tester runs one EA in isolation per pass, so             |
+//|  InpUseMeridianFilter=true cannot actually be exercised by a normal       |
+//|  Tester run (there is no live Meridian broadcasting into it) - same        |
+//|  real limitation InpUseAureliusFilter's own validation already worked      |
+//|  around. Instead, replayed the real, independently-run Meridian and         |
+//|  Vanguard M15 reports from this same session (both GOLD, account             |
+//|  382043238, 2023.01.01-2026.09.21, 20000 ZAR, InpUseAureliusFilter=false)      |
+//|  against each other in Python: for each of Vanguard M15's 644 real entries,    |
+//|  checked whether Meridian's real, contemporaneous position (from its OWN       |
+//|  real deals) was already open opposite at that exact moment - the literal       |
+//|  MeridianBlocksEntry() condition. Result: 34 of 644 real entries (5.3%)          |
+//|  would have been blocked. Those 34 trades' own real net was +6,390.95 ZAR        |
+//|  (10 winners, 24 losers) - turning the filter ON would have COST net profit       |
+//|  (46,356.25 -> 39,965.30 trip-sum, PF 1.3858 -> 1.3502), the OPPOSITE of what      |
+//|  the 60.6%-Meridian-right overlap finding suggested. HONEST CAVEAT, not            |
+//|  glossed over: this is fragile, not a robust result - ONE trade (2023-03-09,        |
+//|  a real +4,493.24 ZAR winner Vanguard took right as Meridian happened to be         |
+//|  positioned the other way) accounts for ~70% of the entire swing; the other          |
+//|  33 blocked trades net only +1,897.71 ZAR. 34 trades is too small a sample to         |
+//|  trust either direction confidently, and the "who wins disagreements" duration-        |
+//|  weighted metric measures something related but NOT identical to "should THIS          |
+//|  specific entry be blocked" - they can and do point different ways. VERDICT:            |
+//|  this does not confirm the filter helps, and if anything leans toward it costing         |
+//|  net - reinforces staying at the shipped default OFF, not a case for turning it on.        |
+//|  A real, literal dual-EA forward/demo run (not a Strategy Tester replay) would be           |
+//|  the only way to get a cleaner answer, if this is ever revisited.                            |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
 #property version   "1.05"
