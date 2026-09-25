@@ -779,6 +779,17 @@
 //|  InpWeekendGuardMinutes) so each one's first line is now a complete, self-contained sentence - critically         |
 //|  including the M1-vs-M5 "set this back to X if running on the other timeframe" switching instructions that        |
 //|  were previously invisible in the dialog. Comment-only: every default VALUE is unchanged (mechanically diffed).   |
+//|                                                                    |
+//|  v1.17 ALSO DEFAULTS InpMsg1Enable TO FALSE (real evidence, not a guess). The original source report had     |
+//|  BOTH MSG1 (22:00-00:00 GMT) and MSG3 (09:00-12:00 GMT) enabled (see the "reconstruction" notes above), and   |
+//|  that is why InpMsg1Enable shipped ON since v1.00. But every one of this file's OWN real re-tests from v1.04   |
+//|  onward (v1.04/v1.05/v1.07/v1.08/v1.09/v1.11/v1.12/v1.13/v1.15, the validate_all.py table above) deliberately   |
+//|  ran MSG3-ONLY, and the one real report that DID combine MSG1+MSG3 ("MSG1+MSG3 (GOLD#)" row, validate_all.py    |
+//|  table above) is the clear outlier: PF 1.17 on 217 trades, against every MSG3-only real report's PF 1.6-1.9 on   |
+//|  87-97 trades. More than double the trade count for a materially worse profit factor and a lower net (740.41     |
+//|  vs 900-1600+) - MSG1 trades are diluting quality, not adding independent edge. Nothing about MSG3 itself         |
+//|  changes; MSG1 is simply not carrying its own weight in the one real report that tested it. Set                   |
+//|  InpMsg1Enable=true to restore the original source report's config if you want to re-test it.                      |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
 #property version   "1.17"
@@ -820,7 +831,7 @@ input int    InpWeekendGuardMinutes = 30;     // v1.12: INFERRED not measured - 
                                                // InpMaxHoldHours deadline by dozens of hours.
 
 input group "==== Sessions (GMT) ==="
-input bool   InpMsg1Enable        = true;
+input bool   InpMsg1Enable        = false;    // v1.17: defaulted OFF - real MSG1+MSG3 report was PF 1.17 (217 trades) vs MSG3-only's real 1.6-1.9. See header.
 input int    InpMsg1StartHour     = 22;
 input int    InpMsg1EndHour       = 0;
 input bool   InpMsg2Enable        = false;
