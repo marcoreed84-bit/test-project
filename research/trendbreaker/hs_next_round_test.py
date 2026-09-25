@@ -76,6 +76,7 @@ def find_breakouts_full(df, shoulder_tol=DEFAULT_STOL, break_tol=DEFAULT_BTOL, b
             shoulder_ext = max(p["p_s1"], p["p_s2"]) if top else min(p["p_s1"], p["p_s2"])
             max_horizon = min(n - 1, brk_q + MAX_HORIZON_CAP)
             breakouts.append(dict(top=top, brk_q=brk_q, brk_price=brk_price, target=target,
+                                   i_s1=p["i_s1"], i_head=p["i_head"], i_s2=p["i_s2"],
                                    head_height=head_height, shoulder_ext=shoulder_ext,
                                    atr_at_brk=atr[brk_q], max_horizon=max_horizon,
                                    neckline_at=neckline_at))
