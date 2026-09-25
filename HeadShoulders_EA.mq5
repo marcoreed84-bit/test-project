@@ -125,9 +125,21 @@
 //|  implementation would close this gap but wasn't built here; expect real fills to run somewhat worse                              |
 //|  than the Python retest price on this leg specifically, on top of the ordinary spread/slippage gap                               |
 //|  every other entry in this file already has.                                                                                       |
+//|                                                                    |
+//|  v1.05 PERFORMANCE FIX: this file was missing the g_skipCosmeticDraws idiom every OTHER EA   |
+//|  in this portfolio already has (Fulcrum_EA.mq5, Aurelius_EA.mq5, etc. - see SESSION_NOTES.md    |
+//|  on the original repainting/performance pass those got). v1.01 only fixed the SWING/PATTERN         |
+//|  scan cost (InpLookbackBars, InpRecomputeEveryBars); it never touched drawing, which was the           |
+//|  actual dominant cost this whole time: RefreshDrawings() re-touched every confirmed pattern's            |
+//|  several chart objects (markers, labels, neckline, target/stop lines) on EVERY new bar, and                |
+//|  DrawPanel() ~20 more object updates every simulated second, for the ENTIRE backtest, even                   |
+//|  though a non-visual Strategy Tester run never shows any of it. g_skipCosmeticDraws is computed                |
+//|  once in OnInit() (MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) and now gates                |
+//|  RefreshDrawings(), DrawEntryArrow(), and both OnTick()/OnTimer()'s panel blocks - a non-visual                  |
+//|  run draws none of it. No signal, entry, exit, sizing, or risk-management logic touched.                          |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.04"
+#property version   "1.05"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -227,6 +239,7 @@ string   g_pz = "HSEA_";
 int      g_panX = -1, g_panY = -1;
 int      g_panelMinW = 0;
 bool     g_panelReclaim = true;
+bool     g_skipCosmeticDraws = false;   // PERFORMANCE FIX (see header, and this same idiom in every other EA in this portfolio - Fulcrum_EA.mq5 etc.) - computed once in OnInit, gates every pattern/panel/arrow draw call for the run's lifetime
 datetime g_lastPanelDraw = 0;
 int      g_statTrades = 0, g_statWins = 0;
 int      g_rsiHandle = INVALID_HANDLE;   // InpUseRSIFilter - native iRSI(), not a manual port (see input comment)
@@ -244,6 +257,15 @@ bool     g_runnerJustArmed = false;   // ManageRunner() skips exactly one call r
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   //--- PERFORMANCE FIX (see header v1.05, and Fulcrum_EA.mq5/Aurelius_EA.mq5/
+   //--- etc.'s own identical fix) - a non-visual Strategy Tester run draws
+   //--- NONE of the pattern markers/lines or the panel, since nobody can see
+   //--- them and they have zero effect on any trading decision. Without this,
+   //--- RefreshDrawings() was re-touching every confirmed pattern's several
+   //--- chart objects on EVERY new bar, and DrawPanel() ~20 more every
+   //--- simulated second, for the entire backtest - by far the dominant cost,
+   //--- not the swing/pattern scan (that was already fixed in v1.01).
+   g_skipCosmeticDraws = MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE);
    EventSetTimer(1);
    if(InpUseRSIFilter)
      {
@@ -646,7 +668,7 @@ void CheckForEntry()
       if(ok)
         {
          SyncPosition();
-         DrawEntryArrow(P, entry);
+         if(!g_skipCosmeticDraws) DrawEntryArrow(P, entry);
          if(InpUseRunner) ArmRunner(P, isBuy);
         }
       else
@@ -906,6 +928,7 @@ void DrawPattern(const HSPattern &P)
 color InpColNoStop() { return(C'255,120,120'); }
 void RefreshDrawings()
   {
+   if(g_skipCosmeticDraws) return;   // PERFORMANCE FIX - see its own comment in OnInit()
    if(!InpDrawPatterns) { ObjectsDeleteAll(0, g_pz + "p_"); return; }
    datetime cutoff = InpDrawHistory ? (datetime)(TimeCurrent() - (long)InpHistoryDays * 86400) : (datetime)(TimeCurrent() - 5 * (long)PeriodSeconds(PERIOD_CURRENT) * InpLookbackBars);
    for(int i = 0; i < ArraySize(g_patterns); i++)
@@ -1068,7 +1091,7 @@ void OnTick()
       RefreshDrawings();
      }
    SyncPosition();
-   if(InpShowPanel && TimeCurrent() != g_lastPanelDraw)
+   if(!g_skipCosmeticDraws && InpShowPanel && TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
       DrawPanel();
@@ -1078,7 +1101,7 @@ void OnTick()
 void OnTimer()
   {
    SyncPosition();
-   if(InpShowPanel && TimeCurrent() != g_lastPanelDraw)
+   if(!g_skipCosmeticDraws && InpShowPanel && TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
       DrawPanel();
