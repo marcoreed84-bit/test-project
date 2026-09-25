@@ -150,9 +150,22 @@
 //|  defaults). Spread is LIVE-ONLY vs InpMaxSpreadPoints, with the   |
 //|  same disclosed limitation as both existing indicators: MT5 bar   |
 //|  history has no reliable per-bar spread.                          |
+//|                                                                    |
+//|  v1.01 FIXES LABEL/LINE OVERLAP (2026-09-25, real screenshot: "the |
+//|  label is visible, its printed though the line of the box"). Both   |
+//|  DrawLineLabel() branches anchored their OBJ_TEXT EXACTLY on the      |
+//|  line's own rendered value - the box label sat precisely on boxHi's    |
+//|  price, the diagonal-line label precisely on the line's own value at    |
+//|  the current bar - so the border/line ran straight through the text's    |
+//|  vertical centre (ANCHOR_LEFT centres vertically). Fixed the same way     |
+//|  MSG_Trader_EA.mq5's own DrawSessionBox() label already does it (H +       |
+//|  range*0.04): the box label now sits range*0.04 above boxHi; a regular      |
+//|  line's label now sits 0.12x that timeframe's own ATR to the OUTSIDE of      |
+//|  the line (above for a down/resistance line, below for an up/support one)     |
+//|  so it never crosses back into the price action the line is bounding.          |
 //+------------------------------------------------------------------+
 #property copyright "TrendBreaker_MTF"
-#property version   "1.00"
+#property version   "1.01"
 #property description "MTF cascading auto-trendlines (3-touch/BOS/angle/fan/sweep/drift) + trend/volume/spread panel (no trade execution)"
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -1154,14 +1167,27 @@ void DrawLineLabel(const TLine &L)
    if(tb == 0) return;
    if(L.role == ROLE_BOX)
      {
-      DrawChartLabel(base, "_lb", L.boxT1, L.boxHi,
+      //--- offset ABOVE the box's own top edge (MSG_Trader_EA.mq5's own
+      //--- DrawSessionBox() label uses the same H + range*0.04 convention) -
+      //--- anchoring exactly AT boxHi put the label's vertical centre right
+      //--- on the box's top border line, so the line struck through the text.
+      double rng = MathMax(L.boxHi - L.boxLo, _Point);
+      DrawChartLabel(base, "_lb", L.boxT1, L.boxHi + rng * 0.04,
                      "  " + g_tfName[L.slot] + " RANGE (drift)  H " + DoubleToString(L.boxHi, _Digits)
                      + " / L " + DoubleToString(L.boxLo, _Digits), TFColor(L.slot), InpLabelSize);
       return;
      }
    double v = RenderedValue(L, tb);
    if(v <= 0.0) return;
-   DrawChartLabel(base, "_lb", tb, v, LineCaption(L), TFColor(L.slot), InpLabelSize);
+   //--- same fix as the box label above: v sits EXACTLY on the trendline's own
+   //--- rendered value, so an unoffset label would have the diagonal line
+   //--- struck through its vertical centre too. Offset above for a down line
+   //--- (dir<0, resistance, label sits over price) and below for an up line
+   //--- (dir>0, support, label sits under price) - keeps the label on the
+   //--- outside of the line rather than crossing into the price action.
+   double off = MathMax(g_sum[L.slot].atr, _Point) * 0.12;
+   double vLbl = v + (L.dir < 0 ? off : -off);
+   DrawChartLabel(base, "_lb", tb, vLbl, LineCaption(L), TFColor(L.slot), InpLabelSize);
   }
 
 //+------------------------------------------------------------------+
