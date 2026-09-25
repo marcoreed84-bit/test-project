@@ -51,6 +51,12 @@ TOUCHES_TO_VALIDATE = 3
 BREAK_CONFIRM_CLOSES = 3
 REACT_BARS       = 10
 REACT_ATR        = 0.75
+LOOKBACK_BARS    = 300   # matches the .mq5 file's own InpLookbackBars - the
+                          # real indicator only ever searches a rolling 300-
+                          # bar window, never the whole history at once; an
+                          # anchor pair further apart than this could never
+                          # actually co-occur on a live chart, so excluding
+                          # it isn't a simplification, it's fidelity
 
 
 def sma_atr(high, low, close, period):
@@ -179,7 +185,7 @@ if __name__ == "__main__":
         for ai in range(len(anchors)):
             for bi in range(ai + 1, len(anchors)):
                 a, b = anchors[ai], anchors[bi]
-                if b - a < PIVOT_STRENGTH:
+                if b - a < PIVOT_STRENGTH or b - a > LOOKBACK_BARS:
                     continue
                 L = build_line(o, h, l, c, atr, n, a, b, dir_, False)
                 if L is not None:
