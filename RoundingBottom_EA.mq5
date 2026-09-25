@@ -128,10 +128,31 @@
 //|  still being carved out candle-by-candle before the window closes - there is no way to show a fit                  |
 //|  the quadratic regression itself hasn't been run on yet. Purely visual/cosmetic - no signal, entry,                  |
 //|  exit, sizing, or risk-management logic touched.                                                                       |
+//|                                                                    |
+//|  v1.03: SL RE-ANCHORED FROM THE CUP'S OWN BOTTOM TO THE RIM, in response to a real,      |
+//|  bad first MT5 result (Backtest 1, 2020-2026 H4, real GOLD, real account): win% held up      |
+//|  reasonably close to Python (74.5% real vs 81.1% Python) but PF collapsed to 1.030 (from         |
+//|  Python's 2.726) because avg loss (-2289) ran ~2.8x avg win (807), and equity DD hit 45.07%         |
+//|  on net profit of only 898.90 ZAR over 6.73 years. Root cause: the old stop sat beyond the             |
+//|  CUP'S OWN BOTTOM, which can be very far below the entry price (entry happens at the rim, well           |
+//|  above the bottom) - risk was structurally close to the full reward even before slippage, and             |
+//|  positions could stay open up to 1590 hours (66 days) per Backtest 1's own holding-time stats,             |
+//|  which is a lot of real weekend-gap exposure a frictionless Python backtest can't see (a stop-             |
+//|  loss can slip past its trigger on a gap; a take-profit limit can't slip against you the same way).           |
+//|  Real Python re-test (same real GOLD H4 data, same single-position-sequenced construction, stop            |
+//|  now = rim - InpStopBufferATR x ATR): at the new default (1.0xATR) - n=134, win% 61.2, PF 2.553,           |
+//|  net +1909.35, IS/OOS 52.7%/80.5%. Win rate drops (a tighter stop catches trades earlier, before             |
+//|  some would have recovered to target) but PF holds up because losses are now small and fast              |
+//|  instead of deep and slow - the same real mechanism expected to reduce the weekend-gap exposure             |
+//|  that likely hurt Backtest 1. NOT the single best-looking Python number (0.5xATR gave PF 2.836)              |
+//|  - picked a middle value instead since the tightest option's IS/OOS split (50.5%/78.0%) was the               |
+//|  least stable of those tried. This is a real, disclosed FIX ATTEMPT, not yet its own real MT5                  |
+//|  confirmation - Backtest 1's failure was real, this response needs its own fresh real MT5 run                   |
+//|  before being trusted, same discipline as every other change in this portfolio.                                   |
 //+------------------------------------------------------------------+
 #property copyright "RoundingBottom_EA"
-#property version   "1.02"
-#property description "Trades the real-validated Rounding Bottom measured-move target (81.1% win, PF 2.726, H4) - first real MT5 run"
+#property version   "1.03"
+#property description "Trades the real-validated Rounding Bottom measured-move target (rim-anchored stop since v1.03) - needs its own first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
 CTrade trade;
@@ -151,7 +172,7 @@ input int    InpBreakConfirmCloses = 3;    // Closes to confirm breakout
 input int    InpMaxHorizonBars  = 300;     // How long a pattern stays "live" for entry, bars
 
 input group "=== Stop-loss (disclosed, NOT independently validated - see header) ==="
-input double InpStopBufferATR   = 1.0;     // SL buffer beyond cup bottom, x ATR
+input double InpStopBufferATR   = 1.0;     // SL buffer beyond the rim, x ATR
 
 input group "=== Cup and handle filter (optional candidate, off by default) ==="
 input bool   InpRequireHandle    = false;  // Require a shallow pullback before entry
@@ -579,7 +600,9 @@ void AdvancePending()
             //--- by some brokers/builds as "invalid stops", silently failing
             //--- every single entry with nothing but a log line to show for it.
             P.target = NormalizeDouble(P.brk_price + P.height, _Digits);
-            P.stop = NormalizeDouble(P.bottomPx - InpStopBufferATR * atrNow, _Digits);
+            //--- stop anchored to the RIM, not the cup's own bottom (v1.03 - see
+            //--- header for the real evidence behind this change).
+            P.stop = NormalizeDouble(P.rim - InpStopBufferATR * atrNow, _Digits);
             P.brk_i = 0;
             int k = ArraySize(g_patterns);
             ArrayResize(g_patterns, k + 1, 32);
