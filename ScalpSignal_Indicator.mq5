@@ -88,9 +88,30 @@
 //|                                                                  |
 //|  One bull market, one instrument, one discretionary trader at the   |
 //|  keyboard. This draws pictures and a light; it never sends an order. |
+//|                                                                  |
+//|  RESEARCH NOTE (2026-09-25): before this file was reworked for M1  |
+//|  scalping, three real-data M1 constructions were tested on the      |
+//|  real GOLD# M1 export (300k bars, 2025-11-12 -> 2026-09-18):         |
+//|   1) Price/VWAP-band re-entry + Stochastic(5,3,3) reversal (the       |
+//|      user's own described chart pattern) - wide AND M1-tight-tuned     |
+//|      parameters, 48 total configurations, ALL net negative, PF          |
+//|      0.70-0.88. A clean rejection, not a tuning problem.                 |
+//|   2) Aurelius's own real trend+bounce trigger, unfiltered, on M1:         |
+//|      5.19 real triggers/day (in the user's 5-15/day target) but PF        |
+//|      only 1.118 with OOS nearly flat (4.70 of 99.28 net) - decaying,       |
+//|      not a real edge.                                                       |
+//|   3) Same trigger + Ratchet_EA.mq5's real wick-reject filter                 |
+//|      (InpWickRejectRatio=1.5): positive in 4/4 walk-forward blocks but        |
+//|      frequency collapses to 0.65/day (net $10 over 310 days) - too thin        |
+//|      and far too rare to be the scalp signal asked for.                         |
+//|  VERDICT: no construction tested this session clears a real, robust              |
+//|  edge at scalp frequency. The VWAP outer bands below are therefore drawn          |
+//|  as a DISCRETIONARY VISUAL REFERENCE ONLY (matching the user's own chart           |
+//|  example), same non-gating treatment as the Stochastic/MACD readouts above -        |
+//|  never folded into the ready light or an arrow's trigger condition.                  |
 //+------------------------------------------------------------------+
 #property copyright "ScalpSignal"
-#property version   "1.00"
+#property version   "1.01"
 #property description "Visual scalping aid (no trade execution) porting Aurelius's real M5/M15 entry-exit logic"
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -205,6 +226,9 @@ input color             InpCol600   = C'255,20,147';
 input color             InpCol2400  = C'57,255,20';
 input bool              InpShowVWAP = true;
 input color             InpColVWAP  = C'0,255,255';
+input bool              InpShowVWAPBands = true;    // Draw VWAP's outer deviation bands (informational only - see SessionVWAPBand()'s own comment; not a validated entry signal)
+input double            InpVWAPBandK     = 2.0;     // Band width, x volume-weighted stdev from VWAP (standard convention, matches research/vwap_band_stoch_test.py's default)
+input color             InpColVWAPBand   = C'0,150,150';
 input color             InpColBuyArrow  = C'0,230,118';
 input color             InpColSellArrow = C'255,61,90';
 input color             InpColExitWin   = C'0,230,118';
@@ -517,6 +541,57 @@ double SessionVWAP(const int shift)
    if(cumV <= 0.0) return(0.0);
    return(cumPV / cumV);
   }
+//+------------------------------------------------------------------+
+//| Session VWAP outer bands - VWAP +/- k * session-cumulative        |
+//| volume-weighted stdev of typical price from VWAP. Same session    |
+//| reset/window as SessionVWAP() above (duplicated rather than       |
+//| refactored to share it, to keep both functions independently      |
+//| shift-safe). Matches research/vwap_band_stoch_test.py's real      |
+//| vwap_bands() construction, tested on real GOLD M15/M1 data         |
+//| 2026-09-25 - informational display only, NOT a validated entry    |
+//| signal (all 48 tested configurations came back net negative,      |
+//| PF 0.70-0.88 - see that script's own header for the real numbers).|
+//| Drawn here purely because the user asked to see the same visual   |
+//| their own chart example showed, not because it is a proven edge.  |
+//+------------------------------------------------------------------+
+bool SessionVWAPBand(const int shift, const double k, double &upper, double &lower)
+  {
+   upper = 0.0; lower = 0.0;
+   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, shift);
+   if(barTime == 0) return(false);
+   MqlDateTime dt; TimeToStruct(barTime, dt);
+   dt.hour = 0; dt.min = 0; dt.sec = 0;
+   datetime dayStart = StructToTime(dt);
+
+   datetime tArr[]; double hArr[], lArr[], cArr[]; long vArr[];
+   ArraySetAsSeries(tArr, true); ArraySetAsSeries(hArr, true);
+   ArraySetAsSeries(lArr, true); ArraySetAsSeries(cArr, true);
+   ArraySetAsSeries(vArr, true);
+   int got = CopyTime(_Symbol, PERIOD_CURRENT, shift, 400, tArr);
+   if(got <= 0) return(false);
+   if(CopyHigh(_Symbol, PERIOD_CURRENT, shift, got, hArr) <= 0) return(false);
+   if(CopyLow(_Symbol, PERIOD_CURRENT, shift, got, lArr) <= 0) return(false);
+   if(CopyClose(_Symbol, PERIOD_CURRENT, shift, got, cArr) <= 0) return(false);
+   if(CopyTickVolume(_Symbol, PERIOD_CURRENT, shift, got, vArr) <= 0) return(false);
+
+   double sumWX = 0.0, sumWX2 = 0.0, sumW = 0.0;
+   for(int s = 0; s < got; s++)
+     {
+      if(tArr[s] < dayStart) break;
+      double typical = (hArr[s] + lArr[s] + cArr[s]) / 3.0;
+      double w = (double)vArr[s];
+      sumWX  += typical * w;
+      sumWX2 += typical * typical * w;
+      sumW   += w;
+     }
+   if(sumW <= 0.0) return(false);
+   double vwap = sumWX / sumW;
+   double var  = sumWX2 / sumW - vwap * vwap;
+   double sd   = MathSqrt(MathMax(var, 0.0));
+   upper = vwap + k * sd;
+   lower = vwap - k * sd;
+   return(true);
+  }
 bool DifferentSession(const int shiftA, const int shiftB)
   {
    datetime tA = iTime(_Symbol, PERIOD_CURRENT, shiftA);
@@ -793,6 +868,17 @@ void WalkOneBar(const int s)
      {
       double vA = SessionVWAP(s+1), vB = SessionVWAP(s);
       if(vA > 0.0 && vB > 0.0) DrawMASegment("vwap", btPrev, vA, bt, vB, InpColVWAP);
+     }
+   if(InpShowVWAPBands && btPrev != 0 && !DifferentSession(s+1, s))
+     {
+      double uA, lA, uB, lB;
+      bool okA = SessionVWAPBand(s+1, InpVWAPBandK, uA, lA);
+      bool okB = SessionVWAPBand(s,   InpVWAPBandK, uB, lB);
+      if(okA && okB)
+        {
+         DrawMASegment("vwapU", btPrev, uA, bt, uB, InpColVWAPBand);
+         DrawMASegment("vwapL", btPrev, lA, bt, lB, InpColVWAPBand);
+        }
      }
 
    double atr; if(!ATRAt(s, atr)) atr = 0.0;
@@ -1127,7 +1213,7 @@ void DrawPanel()
    int rh = InpPanelSize + 11;
    int hdr = rh + 14;
 
-   const int ROWS = 33, GAPS = 12;
+   const int ROWS = 34, GAPS = 12;   // s2 (CONTEXT) grew 3->4 rows for the new "price vs VWAP band" row (m4), 2026-09-25
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
    int guard  = 0;
@@ -1182,7 +1268,7 @@ void DrawPanel()
         dir == 1 ? "BUY" : dir == -1 ? "SELL" : "no", coreOK ? 1 : 0); ty += rh;
    PRow("r3", x, ty, w, "OVERALL", ready ? "READY" : "WAIT", ready ? 1 : 0); ty += rh + 6;   // GAP 3
 
-   // --- CONTEXT, informational only (section + 3 rows) ----------------
+   // --- CONTEXT, informational only (section + 4 rows) ----------------
    bool momUp = InpShowMomentum && MomentumTurning(true);
    bool momDn = InpShowMomentum && MomentumTurning(false);
    double kVal = InpShowStoch ? StochK() : -1.0;
@@ -1198,7 +1284,10 @@ void DrawPanel()
         !InpShowStoch || kVal < 0.0 ? "off" : DoubleToString(kVal, 1) + (kExtreme ? " extreme" : ""),
         !InpShowStoch || kVal < 0.0 ? -1 : (kExtreme ? 0 : 1)); ty += rh;
    PRow("m3", x, ty, w, "price vs VWAP",
-        vw1 <= 0.0 ? "n/a" : (c1 > vw1 ? "above" : "below"), -1); ty += rh + 6;               // GAP 5
+        vw1 <= 0.0 ? "n/a" : (c1 > vw1 ? "above" : "below"), -1); ty += rh;
+   double bU = 0.0, bL = 0.0; bool haveBand = InpShowVWAPBands && SessionVWAPBand(1, InpVWAPBandK, bU, bL);
+   PRow("m4", x, ty, w, "price vs VWAP band",
+        !haveBand ? "off" : (c1 > bU ? "above upper" : c1 < bL ? "below lower" : "inside"), -1); ty += rh + 6; // GAP 5
 
    // --- ENTRY CRITERIA (section + 7 rows) ------------------------------
    int cc = g_eff.useCrossFilter ? CrissCrossAt(1) : -1;
