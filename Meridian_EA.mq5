@@ -704,8 +704,41 @@
 //|  trading right at a prior day's high/low so "srhi"/"srlo" sits near the open position - their 8px captions            |
 //|  can visually overlap depending on chart zoom, which this file's coordinate math alone can't determine.               |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.06: InpUseGivebackExit added (default OFF, Python-only so far -  |
+//|  needs a real MT5 Strategy Tester run before being trusted the way   |
+//|  the shipped defaults are, same discipline as every other optional    |
+//|  exit in this portfolio). Cuts a trade at market once it built a       |
+//|  peak floating profit >= InpGivebackMinPeak and has since given it      |
+//|  back to <= InpGivebackThreshold, UNLESS that peak was >= InpGiveback-   |
+//|  PeakCutoff, in which case it is deliberately left alone.                |
+//|                                                                            |
+//|  Origin: user reported 5 real live stop-outs in a row, each one having      |
+//|  been in real floating profit first (research/aurelius/                     |
+//|  meridian_giveback_exit_test.py, meridian_giveback_discriminator_test.py,     |
+//|  real GOLD M5, msim.py's EA-faithful simulator). A BLANKET "cut anything      |
+//|  that gives back to near-breakeven" rule was tested first and LOST money       |
+//|  (-$2037 net, -61%, on the real 887-trade group) because 41.1% of giveback      |
+//|  trades still recover to a real win (avg $23.21) while the 58.9% that don't      |
+//|  average only -$7.02 - cutting everyone removes more from the winners than       |
+//|  it saves from the losers. The real discriminator turned out to be PEAK SIZE:     |
+//|  small-peak givebacks ($5-15) are heavily net-negative (win% 13.7-31.2%, net       |
+//|  -$2056 combined); big-peak givebacks (>= $15) are heavily net-POSITIVE (win%       |
+//|  66.0%, net +$5280) - the ones that already built a real cushion before pulling      |
+//|  back are the ones most likely to be the real trend, not the ones to cut. Swept       |
+//|  the cutoff $8-$40: every value improves real net, positive both in-sample and         |
+//|  out-of-sample throughout, best around $20-25 (net $6750-7200 vs real $3335,            |
+//|  walk-forward OOS diff +$2390 to +$2953). Shipped default InpGivebackPeakCutoff=20        |
+//|  sits inside that robust range. First candidate this whole session to beat holding         |
+//|  rather than lose to it - every earlier attempt at protecting profit early (Price21Exit-     |
+//|  style, Aurelius's own real-tested InpUseBreakeven/trail, today's flat-$ and trailing-$        |
+//|  brackets) lost to just holding; this one is structurally different because it only            |
+//|  cuts the SPECIFIC shape (small peak then full giveback) that the data shows is actually        |
+//|  bad, and explicitly protects the shape that looks similar but isn't (large peak then            |
+//|  giveback, which usually keeps going).                                                            |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.05"
+#property version   "1.06"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -723,6 +756,12 @@ input double InpMinSRDistATR    = 0.50;     // reject entries this close (xATR) 
 input group "=== Exit ==="
 input double InpSafetyStopATR   = 2.5;      // v1.01: tightened from 3.0 - see header (net AND drawdown both improved)
 input int    InpATRPeriod       = 14;
+
+input group "=== Giveback-to-breakeven exit (v1.06 candidate, Python-only so far) ==="
+input bool   InpUseGivebackExit    = false;   // Cuts a trade at market once it built a SMALL peak profit then gave it back near breakeven - see header for the real research and why it's off by default until a real MT5 test confirms it.
+input double InpGivebackMinPeak    = 5.0;     // Floating profit (price units, i.e. $ per 0.01 lot) the trade must reach before a giveback can even be checked - below this it's ordinary noise, never cut.
+input double InpGivebackPeakCutoff = 20.0;    // If the peak reached was AT OR ABOVE this, do NOT cut on giveback - real data shows these trades recover into a real winner far more often (66% win%) than average, not less.
+input double InpGivebackThreshold  = 1.0;     // Floating profit (price units) at/below which counts as "given back to near-breakeven".
 
 input group "=== Risk ==="
 input double InpLots            = 0.01;
@@ -815,6 +854,12 @@ int h21 = INVALID_HANDLE, h50 = INVALID_HANDLE, h150 = INVALID_HANDLE;
 //--- fixed across every other EA in this project)
 ulong    g_ticket  = 0;
 int      g_posDir  = 0;      // +1 long, -1 short, 0 flat
+
+//--- InpUseGivebackExit tracking - which ticket g_gbPeakFav belongs to,
+//--- reset whenever g_ticket changes (tickets are unique/monotonic in
+//--- MT5, never reused, so a simple != is a safe "new position" test)
+ulong    g_gbTicket  = 0;
+double   g_gbPeakFav = 0.0;   // best floating profit (price units) seen so far this trade
 
 //--- cross-EA signal (see InpPublishPosition) - no M5/M15 variant suffix
 //--- needed, unlike Aurelius's writer-side name: Meridian has no timeframe
@@ -2225,6 +2270,24 @@ void OnTick()
      {
       SyncPositionState();
       if(g_ticket != 0) CloseCurrentPosition("FRIDAY");
+     }
+
+   //--- tick-level giveback-to-breakeven exit (InpUseGivebackExit, v1.06
+   //--- candidate - see header). Checked every tick, not gated on a new
+   //--- bar, so the live peak-favorable-excursion tracking matches the
+   //--- Python research's intrabar high/low peak at least as closely as
+   //--- possible (real ticks are a finer read than Python's per-bar H/L,
+   //--- never coarser - conservative direction, catches a giveback at
+   //--- least as early as the model that was validated, never later).
+   if(InpUseGivebackExit && g_ticket != 0 && PositionSelectByTicket(g_ticket))
+     {
+      if(g_gbTicket != g_ticket) { g_gbTicket = g_ticket; g_gbPeakFav = 0.0; }
+      double entryPx = PositionGetDouble(POSITION_PRICE_OPEN);
+      double cur     = (g_posDir > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double fav     = (g_posDir > 0) ? (cur - entryPx) : (entryPx - cur);
+      if(fav > g_gbPeakFav) g_gbPeakFav = fav;
+      if(g_gbPeakFav >= InpGivebackMinPeak && g_gbPeakFav < InpGivebackPeakCutoff && fav <= InpGivebackThreshold)
+         CloseCurrentPosition("GIVEBACK");
      }
 
    if(!IsNewBar()) return;
