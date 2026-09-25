@@ -74,7 +74,9 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
-CSV = "/tmp/m1data/GOLD#_PERIOD_M1.csv"
+# 2026-09-25: switched GOLD# -> real GOLD (see research/ratchet/bars.py's
+# header for why - GOLD# had quietly diverged from GOLD's real price level).
+CSV = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data/GOLD_M1.csv"
 PT = 0.01
 CONTRACT = 100.0
 LOT_STEP = 0.01

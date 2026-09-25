@@ -1,51 +1,50 @@
 """
-Real GOLD# bar data for the Ratchet/Meridian 2026-09-23 validation work.
+Real GOLD bar data for the Ratchet/Meridian validation work.
 
-Both files are real XM Global GOLD# exports (ExportBarData.mq5), read straight
-from the uploaded zips so nothing depends on a /tmp copy surviving:
+2026-09-25: switched from GOLD# to the real, live-account GOLD symbol -
+GOLD# had quietly diverged from GOLD's actual price level over the
+2023-2026 window (confirmed via a real H&S report: GOLD was trading
+$4600-5100 in Jan 2026 while GOLD# only reached ~$4374 by Aug 2026), which
+had been silently corrupting every absolute-dollar comparison between this
+project's Python research and real MT5 reports. Relative/percentage
+comparisons (win rate, PF, % net change) were largely unaffected since
+both sides of those tests used a consistent instrument, but this is now
+fixed at the source rather than papered over per-script.
 
-  M5: 12668308-GOLD_PERIOD_M5.zip  2022-06-27 04:30 .. 2026-09-18 23:55
-      (covers the whole 2026.01.01-2026.09.21 Strategy Tester window - the
-      tester's last trading day with bars is Fri 2026-09-18 - plus 3.5 years
-      of warm-up, so a 2400-EMA / 600-SMA / 250-SMA is fully converged by Jan)
-  M1: cb108a55-GOLD_PERIOD_M1.zip  2025-11-12 10:50 .. 2026-09-18 23:57
-      (used only for intrabar mark-to-market in the equity-drawdown
-      reconstruction - every trading DECISION in both EAs is made on M5)
+Reads from engine.py's own DATA_DIR (GOLD_M1.csv/GOLD_M5.csv) instead of a
+hardcoded uploaded-zip path, so this file doesn't depend on a specific
+upload surviving - same convention as engine.py's load_m5()/load_h4().
+  M5: real GOLD, 2022-07-04 .. 2026-09-25
+  M1: real GOLD, 2025-11-19 .. 2026-09-25 (broker's real M1 retention -
+      shorter than M5/H4, a real limitation, not a bug)
 
 Time is broker server time throughout (same clock the reports use).
 """
-import zipfile
-
 import numpy as np
 import pandas as pd
 
-UP = "/root/.claude/uploads/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/"
-M5_ZIP = UP + "12668308-GOLD_PERIOD_M5.zip"
-M1_ZIP = UP + "cb108a55-GOLD_PERIOD_M1.zip"
+DATA_DIR = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data"
 POINT = 0.01
 CONTRACT = 100.0
 
 _cache = {}
 
 
-def _read(zpath):
-    with zipfile.ZipFile(zpath) as z:
-        name = z.namelist()[0]
-        with z.open(name) as f:
-            df = pd.read_csv(f, skiprows=1, usecols=range(8))
+def _read(path):
+    df = pd.read_csv(path, skiprows=1, usecols=range(8))
     df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
     return df.sort_values("time").reset_index(drop=True)
 
 
 def load_m5():
     if "m5" not in _cache:
-        _cache["m5"] = _read(M5_ZIP)
+        _cache["m5"] = _read(f"{DATA_DIR}/GOLD_M5.csv")
     return _cache["m5"].copy()
 
 
 def load_m1():
     if "m1" not in _cache:
-        _cache["m1"] = _read(M1_ZIP)
+        _cache["m1"] = _read(f"{DATA_DIR}/GOLD_M1.csv")
     return _cache["m1"].copy()
 
 
