@@ -93,9 +93,41 @@
 //|  sibling finding on why that comparison needs care), PF 2.377, win 52.0%, max closed-DD                     |
 //|  only 5.4% of net, worst losing streak 7. None of this is real-MT5-confirmed yet - that's               |
 //|  the whole point of shipping it as off-by-default toggles rather than changing defaults.               |
+//|                                                                    |
+//|  v1.04: real bugs in v1.03's own MQL5 port, caught by an Opus review requested BEFORE this   |
+//|  file's first real MT5 run (not by a live account result this time - the user asked for the    |
+//|  review specifically so these wouldn't have to be found that way). All bugs were in the NEW       |
+//|  v1.03 code paths only, not in the Python research those paths port - fixing them makes real        |
+//|  MT5 behaviour track the Python-tested strategy MORE faithfully, it does not change what was          |
+//|  actually validated. Fixed: (1) InpPullbackWindowBars was counting elapsed wall-clock seconds           |
+//|  / period length instead of real bars, silently shrinking the retest window across a weekend             |
+//|  gap - now uses iBarShift(); (2) a pattern blocked by an already-open position could still fire            |
+//|  on a LATER bar once flat again under InpUsePullbackEntry (its multi-bar trigger window) - a real           |
+//|  divergence from this project's own single-position-sequenced methodology (the giveback-exit               |
+//|  lesson) - now marked traded=true (permanently skipped) the moment it's blocked, matching                    |
+//|  Python's last_exit_bar gating; (3) RSIFilterOk() always read shift=1, which is wrong once                    |
+//|  InpUsePullbackEntry can trigger entry several bars after the actual confirmation bar the RSI                  |
+//|  filter was validated against - now reads the confirmation bar's own shift via iBarShift();                     |
+//|  (4) CheckForEntry() could see a stale g_ticket left over from before this bar's SyncPosition()                   |
+//|  call, silently losing an immediate-entry-mode trigger - SyncPosition() now runs first thing in                    |
+//|  OnTick(); (5) InpUseRunner's trailing stop could be rejected forever once the trail distance                        |
+//|  became tighter than the broker's own SYMBOL_TRADE_STOPS_LEVEL/FREEZE_LEVEL (the gap stays                             |
+//|  roughly constant as price and the trail both advance), silently leaving a runner trade                                 |
+//|  protected by nothing but its ORIGINAL stop for the rest of the trade - now clamped to the                                |
+//|  broker's minimum distance instead; (6) InpUseRunner state (target/ATR/peak/stop) lived only in                            |
+//|  RAM, so a terminal restart/recompile mid-trade would silently disarm it on a position with NO                               |
+//|  broker-side TP (tp=0.0 by design) - now persisted to terminal GlobalVariables and restored in                                |
+//|  OnInit(); (7) ManageRunner() could evaluate the ENTRY bar's own high/low on the same tick as                                  |
+//|  arming, before the trade had experienced any bar of its own - now skips exactly one call right                                |
+//|  after ArmRunner(). One disclosed, NOT fixed, real precision gap: InpUsePullbackEntry fills at                                  |
+//|  market once a retest is detected on a CLOSED bar, not at the exact neckline price the instant it's                             |
+//|  touched (which is what the Python research assumed, frictionlessly) - a real pending-order-based                                |
+//|  implementation would close this gap but wasn't built here; expect real fills to run somewhat worse                              |
+//|  than the Python retest price on this leg specifically, on top of the ordinary spread/slippage gap                               |
+//|  every other entry in this file already has.                                                                                       |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.03"
+#property version   "1.04"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -207,6 +239,7 @@ double   g_runnerTarget = 0.0;
 double   g_runnerAtr = 0.0;
 bool     g_runnerIsBuy = false;
 double   g_runnerStop = 0.0;
+bool     g_runnerJustArmed = false;   // ManageRunner() skips exactly one call right after ArmRunner() - see that flag's own comment
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -219,6 +252,22 @@ int OnInit()
         {
          Print("HeadShoulders_EA: iRSI handle creation failed, error ", GetLastError());
          return(INIT_FAILED);
+        }
+     }
+   //--- InpUseRunner restart recovery (Opus review High finding, fixed
+   //--- pre-first-MT5-run): a terminal restart/recompile/profile reload
+   //--- while a runner trade is open would otherwise reset g_runnerArmed to
+   //--- false, leaving a real position with NO broker-side TP (InpUseRunner
+   //--- sets tp=0.0) running on nothing but its original SL - the target and
+   //--- trailing logic silently gone for the rest of that trade.
+   if(InpUseRunner)
+     {
+      ulong tk;
+      if(FindOwnPosition(tk))
+        {
+         g_ticket = tk;
+         if(!RunnerLoadStateIfMatchingTicket(tk))
+            PrintFormat("HeadShoulders_EA: found an open position (#%I64u) on init but no saved runner state for it - InpUseRunner will NOT manage this trade, it runs on its original SL only.", tk);
         }
      }
    return(INIT_SUCCEEDED);
@@ -237,13 +286,20 @@ void OnDeinit(const int reason)
 //| (the confirmation bar itself), matching research/trendbreaker/         |
 //| hs_confluence_test.py's rsi[b["brk_q"]] convention exactly - CheckFor-  |
 //| Entry() only ever acts one bar after P.brk_t, so shift=1 IS the          |
-//| confirmation bar at the moment this is called.                            |
+//| confirmation bar at the moment this is called. Takes an explicit shift   |
+//| (the confirmation bar's OWN shift, not always 1) because InpUsePullback-  |
+//| Entry means CheckForEntry() can now act several bars after P.brk_t, and    |
+//| research/trendbreaker/hs_confluence_test.py's RSI filter was validated on   |
+//| top of the pullback+runner base reading RSI at rsi[b["brk_q"]] specifically  |
+//| - i.e. the ORIGINAL confirmation bar, never the later retest/entry bar        |
+//| (caught in Opus review before this file's first real MT5 run).                  |
 //+------------------------------------------------------------------+
-bool RSIFilterOk(const bool isBuy)
+bool RSIFilterOk(const bool isBuy, const int confirmShift)
   {
    if(!InpUseRSIFilter) return(true);
+   if(confirmShift < 0) return(false);
    double buf[];
-   if(CopyBuffer(g_rsiHandle, 0, 1, 1, buf) < 1) return(false);   // fail closed on a bad read, not open
+   if(CopyBuffer(g_rsiHandle, 0, confirmShift, 1, buf) < 1) return(false);   // fail closed on a bad read, not open
    double r = buf[0];
    return(isBuy ? (r <= InpRSIThreshold) : (r >= 100.0 - InpRSIThreshold));
   }
@@ -520,14 +576,23 @@ void AdvancePending()
 //+------------------------------------------------------------------+
 void CheckForEntry()
   {
-   if(g_ticket != 0) return;
    long spr = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(InpMaxSpreadPoints > 0 && spr > InpMaxSpreadPoints) return;
+   bool spreadOk = (InpMaxSpreadPoints <= 0 || spr <= InpMaxSpreadPoints);
+   //--- NOTE: g_ticket!=0 no longer short-circuits the whole function (Opus
+   //--- review finding, fixed pre-first-MT5-run) - a pattern whose trigger
+   //--- condition fires a valid bar while a position is already open must be
+   //--- marked traded=true (skipped for good) right then, exactly like
+   //--- Python's last_exit_bar gating in research/trendbreaker/
+   //--- hs_next_round_test.py. Previously it was silently left untraded and
+   //--- could still fire on a LATER bar once flat again (InpUsePullbackEntry
+   //--- mode only, since its trigger window spans many bars) - a real
+   //--- divergence from the single-position-sequenced methodology this whole
+   //--- project adopted after the giveback-exit mistake.
+   bool canOpen = (g_ticket == 0) && spreadOk;
 
    datetime t1 = iTime(_Symbol, PERIOD_CURRENT, 1);
    double h1 = iHigh(_Symbol, PERIOD_CURRENT, 1);
    double l1 = iLow(_Symbol, PERIOD_CURRENT, 1);
-   int periodSec = MathMax(PeriodSeconds(PERIOD_CURRENT), 1);
 
    for(int i = ArraySize(g_patterns) - 1; i >= 0; i--)
      {
@@ -535,6 +600,7 @@ void CheckForEntry()
       if(P.traded) continue;
 
       bool trigger;
+      int  confirmShift = 1;   // immediate-entry mode: the confirm bar IS shift=1 whenever this can fire
       if(!InpUsePullbackEntry)
         {
          trigger = (P.brk_t == t1);   // only act the bar immediately after confirmation
@@ -542,13 +608,23 @@ void CheckForEntry()
       else
         {
          if(t1 <= P.brk_t) continue;   // retest can't happen at/before the confirm bar itself
-         long ageBars = ((long)t1 - (long)P.brk_t) / periodSec;
+         //--- bar-COUNT age, not wall-clock seconds / periodSec (Opus review
+         //--- finding, fixed pre-first-MT5-run): dividing elapsed real time
+         //--- by the period length overcounts "bars" across a weekend/session
+         //--- gap (no bars actually form then but real time still passes),
+         //--- silently shrinking the real retest window versus what
+         //--- InpPullbackWindowBars says and versus what Python tested.
+         int brkShift = iBarShift(_Symbol, PERIOD_CURRENT, P.brk_t, false);
+         if(brkShift < 0) continue;
+         confirmShift = brkShift;
+         long ageBars = (long)brkShift - 1;
          if(ageBars > InpPullbackWindowBars) { g_patterns[i].traded = true; continue; }   // missed - matches the Python research's own "missed" bucket, skip entirely
          double nl = NecklineAtTime(P, t1);
          double tol = InpPullbackTolATR * P.atrAtBrk;
          trigger = P.top ? (h1 >= nl - tol) : (l1 <= nl + tol);
         }
       if(!trigger) continue;
+      if(!canOpen) { g_patterns[i].traded = true; continue; }   // see the note above CheckForEntry()
 
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       bool isBuy = !P.top;
@@ -557,7 +633,7 @@ void CheckForEntry()
       if(!isBuy && P.target >= entry) { g_patterns[i].traded = true; continue; }
       if(isBuy && P.stop >= entry) { g_patterns[i].traded = true; continue; }
       if(!isBuy && P.stop <= entry) { g_patterns[i].traded = true; continue; }
-      if(!RSIFilterOk(isBuy)) { g_patterns[i].traded = true; continue; }   // InpUseRSIFilter - see its own input comment
+      if(!RSIFilterOk(isBuy, confirmShift)) { g_patterns[i].traded = true; continue; }   // InpUseRSIFilter - see its own input comment; confirmShift tracks P.brk_t's own bar, not always shift=1 under InpUsePullbackEntry
 
       trade.SetExpertMagicNumber(InpMagic);
       trade.SetDeviationInPoints(InpSlippage);
@@ -579,6 +655,52 @@ void CheckForEntry()
      }
   }
 //+------------------------------------------------------------------+
+//| InpUseRunner state persistence (Opus review finding, fixed pre-first-  |
+//| MT5-run) - terminal GlobalVariables, keyed by symbol+magic, survive a    |
+//| terminal restart/recompile/profile reload live. Without this, restarting  |
+//| mid-trade would silently leave the runner permanently disarmed (the         |
+//| globals reset to their false/0 defaults) while a real position with NO       |
+//| broker-side TP (InpUseRunner sets tp=0.0) keeps running on nothing but the    |
+//| original SL - the target/trailing logic would just be gone. OnInit()           |
+//| restores it if a matching open position is found; SyncPosition() clears         |
+//| it once the position is confirmed closed.                                        |
+//+------------------------------------------------------------------+
+string RunnerGVPrefix() { return("HSEA_RN_" + _Symbol + "_" + (string)InpMagic + "_"); }
+void RunnerSaveState()
+  {
+   string p = RunnerGVPrefix();
+   GlobalVariableSet(p + "ticket", (double)g_ticket);
+   GlobalVariableSet(p + "armed", g_runnerArmed ? 1.0 : 0.0);
+   GlobalVariableSet(p + "reached", g_runnerReachedTarget ? 1.0 : 0.0);
+   GlobalVariableSet(p + "peak", g_runnerPeak);
+   GlobalVariableSet(p + "target", g_runnerTarget);
+   GlobalVariableSet(p + "atr", g_runnerAtr);
+   GlobalVariableSet(p + "isbuy", g_runnerIsBuy ? 1.0 : 0.0);
+   GlobalVariableSet(p + "stop", g_runnerStop);
+  }
+void RunnerClearState()
+  {
+   string p = RunnerGVPrefix();
+   GlobalVariableDel(p + "ticket"); GlobalVariableDel(p + "armed"); GlobalVariableDel(p + "reached");
+   GlobalVariableDel(p + "peak"); GlobalVariableDel(p + "target"); GlobalVariableDel(p + "atr");
+   GlobalVariableDel(p + "isbuy"); GlobalVariableDel(p + "stop");
+  }
+bool RunnerLoadStateIfMatchingTicket(const ulong ticket)
+  {
+   string p = RunnerGVPrefix();
+   if(!GlobalVariableCheck(p + "ticket")) return(false);
+   if((ulong)GlobalVariableGet(p + "ticket") != ticket) return(false);
+   if(GlobalVariableGet(p + "armed") < 0.5) return(false);
+   g_runnerArmed = true;
+   g_runnerReachedTarget = (GlobalVariableGet(p + "reached") >= 0.5);
+   g_runnerPeak = GlobalVariableGet(p + "peak");
+   g_runnerTarget = GlobalVariableGet(p + "target");
+   g_runnerAtr = GlobalVariableGet(p + "atr");
+   g_runnerIsBuy = (GlobalVariableGet(p + "isbuy") >= 0.5);
+   g_runnerStop = GlobalVariableGet(p + "stop");
+   return(true);
+  }
+//+------------------------------------------------------------------+
 //| InpUseRunner - arm/manage the trailing runner. Single-position EA,   |
 //| so global state is enough (ArmRunner() called once right after a       |
 //| successful entry when InpUseRunner is on; ManageRunner() called once     |
@@ -598,10 +720,24 @@ void ArmRunner(const HSPattern &P, const bool isBuy)
    g_runnerAtr = P.atrAtBrk;
    g_runnerIsBuy = isBuy;
    g_runnerStop = P.stop;
+   g_runnerJustArmed = true;   // ManageRunner() skips its very next call - see the note on that flag
+   RunnerSaveState();
   }
 void ManageRunner()
   {
    if(!InpUseRunner || !g_runnerArmed || g_ticket == 0) return;
+   if(g_runnerJustArmed)
+     {
+      //--- skip the call that lands on the SAME bar as entry (Opus review
+      //--- finding, fixed pre-first-MT5-run): OnTick's new-bar block calls
+      //--- CheckForEntry() then ManageRunner() in the same pass, so without
+      //--- this guard the very first check would read the ENTRY bar's own
+      //--- high/low - a bar that, in InpUsePullbackEntry mode, by definition
+      //--- already touched near the neckline, far from target. Python's own
+      //--- loop only ever starts checking from entry_bar+1 onward.
+      g_runnerJustArmed = false;
+      return;
+     }
    double h1 = iHigh(_Symbol, PERIOD_CURRENT, 1);
    double l1 = iLow(_Symbol, PERIOD_CURRENT, 1);
 
@@ -616,11 +752,35 @@ void ManageRunner()
    g_runnerPeak = g_runnerIsBuy ? MathMax(g_runnerPeak, h1) : MathMin(g_runnerPeak, l1);
    double newStop = g_runnerIsBuy ? (g_runnerPeak - InpRunnerTrailATR * g_runnerAtr)
                                    : (g_runnerPeak + InpRunnerTrailATR * g_runnerAtr);
+   //--- clamp to the broker's own minimum stop distance (Opus review Critical
+   //--- finding, fixed pre-first-MT5-run): without this, once price moves far
+   //--- enough that the trail distance (InpRunnerTrailATR x ATR) is TIGHTER
+   //--- than the broker's SYMBOL_TRADE_STOPS_LEVEL/FREEZE_LEVEL, every single
+   //--- PositionModify call below would be rejected as "invalid stops" - not
+   //--- just once, but on EVERY future bar too (the gap stays roughly
+   //--- constant as price and the trail both advance together), silently
+   //--- leaving the position protected by nothing but the ORIGINAL stop for
+   //--- the rest of the trade. A real winner could give back everything down
+   //--- to that original stop with the runner never actually trailing.
+   //--- Clamping to the broker's minimum keeps the trade genuinely protected
+   //--- (tightest ALLOWED stop) instead of silently reverting to "no runner".
+   long minDistPts = MathMax(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL),
+                              SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL));
+   double minDist = (double)minDistPts * _Point;
+   if(minDist > 0.0)
+     {
+      double refPx = g_runnerIsBuy ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      newStop = g_runnerIsBuy ? MathMin(newStop, refPx - minDist) : MathMax(newStop, refPx + minDist);
+     }
+   newStop = NormalizeDouble(newStop, _Digits);
    bool improves = g_runnerIsBuy ? (newStop > g_runnerStop) : (newStop < g_runnerStop);
    if(!improves) return;
-   if(!PositionSelectByTicket(g_ticket)) return;
-   if(trade.PositionModify(g_ticket, newStop, 0.0))
+   if(!PositionSelectByTicket(g_ticket)) return;   // position closed between OnTick's SyncPosition() and here - nothing to modify
+   if(trade.PositionModify(g_ticket, newStop, 0.0) && trade.ResultRetcode() == TRADE_RETCODE_DONE)
+     {
       g_runnerStop = newStop;
+      RunnerSaveState();
+     }
    else
       PrintFormat("HeadShoulders_EA: runner PositionModify FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
   }
@@ -665,6 +825,7 @@ void SyncPosition()
            }
         }
       g_runnerArmed = false;   // InpUseRunner - position closed, disarm so a later position starts clean via ArmRunner()
+      RunnerClearState();
      }
    g_ticket = 0;
   }
@@ -881,6 +1042,14 @@ void DrawPanel()
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   //--- sync FIRST (Opus review finding, fixed pre-first-MT5-run): without
+   //--- this, g_ticket could still show the PREVIOUS bar's now-closed
+   //--- position (e.g. it hit its SL/TP on this new bar's first tick) while
+   //--- CheckForEntry() below reads it - in immediate-entry mode that
+   //--- pattern's one and only trigger bar (P.brk_t == t1) has already
+   //--- passed, so a real entry would be silently lost for good, not just
+   //--- delayed. The call further down still runs every tick as before.
+   SyncPosition();
    if(IsNewBar())
      {
       //--- the full swing rescan (Recompute) is the expensive part - O(lookback)
