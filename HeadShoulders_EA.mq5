@@ -147,9 +147,26 @@
 //|  (Aurelius_EA.mq5 etc.) - the full real-evidence detail these comments used to carry is not lost,             |
 //|  it already lives in this header (v1.01-v1.05 above) and nowhere else needed it. No signal, entry,             |
 //|  exit, sizing, or risk-management logic touched - purely a readability fix.                                     |
+//|                                                                    |
+//|  v1.07: brought up to the family visual standard the rest of this portfolio already has (see     |
+//|  SESSION_NOTES.md on the original standardization pass - Aurelius_EA.mq5/Fulcrum_EA.mq5/etc.).       |
+//|  Ported verbatim: chart theme (InpApplyTheme - neon-blue/white candles, black background,               |
+//|  InpHideTradeMarks turns off MT5's own SL/TP lines so this file's own drawings are the only thing         |
+//|  on the chart), a background wallpaper image (InpBackgroundBMP, same goldbg_blend.bmp default), and        |
+//|  a corner watermark (InpWatermark). Also new: InpDrawPending (on by default) draws un-confirmed             |
+//|  shapes - shoulders/head/neckline already found by Recompute() but not yet breakout-confirmed - in            |
+//|  a dimmer InpColPending colour with a "(n/InpBreakConfirmCloses closes)" progress label, so a               |
+//|  pattern is visible on the chart as it forms rather than only appearing at the moment it's already            |
+//|  tradeable. Real limitation, disclosed rather than overclaimed: the underlying swing/pivot detection            |
+//|  (FindSwings(), N=InpPivotStrength bars each side) cannot recognise a swing point until N bars AFTER             |
+//|  it happened - so what appears is a fully-formed 5-point shape awaiting its neckline break, not a                 |
+//|  shoulder still being built candle-by-candle before that point; there is no way to show a pivot the                 |
+//|  detection itself hasn't confirmed yet without abandoning the N-bar fractal definition the whole                     |
+//|  real-validated construction is built on. Purely visual/cosmetic - no signal, entry, exit, sizing, or                 |
+//|  risk-management logic touched.                                                                                         |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.06"
+#property version   "1.07"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -194,13 +211,32 @@ input int    InpSlippage         = 30;
 
 input group "=== Chart visuals ==="
 input bool   InpDrawPatterns     = true;
+input bool   InpDrawPending      = true;   // Draw un-confirmed shapes as they form
 input bool   InpDrawHistory      = true;
 input int    InpHistoryDays      = 60;
 input color  InpColTop            = C'255,61,90';    // H&S top - bearish, warm red
 input color  InpColInverse         = C'0,230,118';   // Inverse H&S - bullish, green
+input color  InpColPending          = C'150,166,192'; // Un-confirmed shape colour, dimmer
 input color  InpColTarget          = C'255,196,84';  // measured-move target line
 input color  InpColEntryArrow      = C'255,255,255';
 input int    InpLabelSize          = 8;
+
+input group "=== Dashboard ==="
+input string InpBackgroundBMP = "goldbg_blend.bmp";   // Background image (.bmp in MQL5\Images)
+input int    InpBgWidth       = 1290;      // Image width, px (centring only)
+input int    InpBgHeight      = 720;       // Image height, px (centring only)
+
+input group "=== Chart theme ==="
+input bool   InpApplyTheme      = true;    // Recolour the chart
+input bool   InpHideTradeMarks  = true;    // Hide MT5's own buy/sell/SL/TP arrows
+input color  InpChartBg     = clrBlack;           // Chart background
+input color  InpBullCol     = C'0,150,255';       // Bullish candle - neon blue, family standard
+input color  InpBearCol     = clrWhite;           // Bearish candle - neon white, family standard
+input string InpWatermark   = "HEADSHOULDERS";    // Watermark text (empty = none)
+input color  InpWaterCol    = C'46,38,24';        // Watermark colour
+input bool   InpWaterBottom = true;               // Watermark bottom-right instead of centred
+input int    InpWaterSize   = 42;                 // Watermark font size
+input string InpWaterFont   = "Arial Black";      // Watermark font
 
 input group "=== Panel ==="
 input bool   InpShowPanel   = true;
@@ -264,6 +300,15 @@ bool     g_runnerIsBuy = false;
 double   g_runnerStop = 0.0;
 bool     g_runnerJustArmed = false;   // ManageRunner() skips exactly one call right after ArmRunner() - see that flag's own comment
 
+//--- wallpaper/watermark/theme - same family idiom as Aurelius_EA.mq5 etc. (see PBackground()/PTheme()/PWatermark())
+string   g_pw = "HSW_";   // kept out of the panel wipe (g_pz), matching Aurelius's own g_pw convention
+bool     g_bgOK = false;
+int      g_bgTries = 0;
+
+void PBackground();
+void PTheme();
+void PWatermark();
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
@@ -276,7 +321,13 @@ int OnInit()
    //--- simulated second, for the entire backtest - by far the dominant cost,
    //--- not the swing/pattern scan (that was already fixed in v1.01).
    g_skipCosmeticDraws = MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE);
-   EventSetTimer(1);
+   //--- v1.07: timer now gated the same way Aurelius_EA.mq5 learned to gate it
+   //--- (its own v1.33 fix) - its only real job here is keeping the panel/
+   //--- wallpaper alive between ticks, which is meaningless in a non-visual
+   //--- Tester run; OnTick()'s own SyncPosition() calls already cover position
+   //--- sync regardless of the timer.
+   if(!g_skipCosmeticDraws) EventSetTimer(1);
+   PTheme();   // theme applies even with the panel off - cheap, one-time, not gated
    if(InpUseRSIFilter)
      {
       g_rsiHandle = iRSI(_Symbol, PERIOD_CURRENT, InpRSIPeriod, PRICE_CLOSE);
@@ -936,16 +987,144 @@ void DrawPattern(const HSPattern &P)
      }
   }
 color InpColNoStop() { return(C'255,120,120'); }
+//+------------------------------------------------------------------+
+//| Un-confirmed shape - InpDrawPending. Same shoulders/head markers    |
+//| and neckline as a confirmed pattern, but no target/stop (there is     |
+//| none yet) and in InpColPending, so a shape mid-formation reads          |
+//| visibly differently from a real, tradeable, confirmed one. Object        |
+//| namespace ("pend_") is fully wiped and redrawn from g_pending every       |
+//| call (simpler and provably correct than tracking which entries were        |
+//| swap-removed from the array since the last call - RefreshDrawings()         |
+//| already only runs once per new bar, gated by g_skipCosmeticDraws, so         |
+//| the extra churn is immaterial).                                               |
+//+------------------------------------------------------------------+
+void DrawPendingPattern(const HSPattern &P)
+  {
+   string base = g_pz + "pend_" + TimeToString(P.t_head, TIME_DATE|TIME_MINUTES) + (P.top ? "T" : "I") + "_";
+   DrawMarker(base + "s1", P.t_s1, P.p_s1, InpColPending, !P.top);
+   DrawMarker(base + "head", P.t_head, P.p_head, InpColPending, !P.top);
+   DrawMarker(base + "s2", P.t_s2, P.p_s2, InpColPending, !P.top);
+   DrawLabel(base + "hl", P.t_head, P.p_head, "  forming...", InpColPending);
+   DrawLine(base + "neck", P.t_t1, P.p_t1, P.t_t2, P.p_t2, InpColPending, 1, STYLE_DASH, true);
+   string runTxt = StringFormat("  awaiting break (%d/%d closes)", P.run, InpBreakConfirmCloses);
+   DrawLabel(base + "necklbl", P.t_t2, P.p_t2, runTxt, InpColPending);
+  }
 void RefreshDrawings()
   {
    if(g_skipCosmeticDraws) return;   // PERFORMANCE FIX - see its own comment in OnInit()
-   if(!InpDrawPatterns) { ObjectsDeleteAll(0, g_pz + "p_"); return; }
+   if(!InpDrawPatterns) { ObjectsDeleteAll(0, g_pz + "p_"); ObjectsDeleteAll(0, g_pz + "pend_"); return; }
    datetime cutoff = InpDrawHistory ? (datetime)(TimeCurrent() - (long)InpHistoryDays * 86400) : (datetime)(TimeCurrent() - 5 * (long)PeriodSeconds(PERIOD_CURRENT) * InpLookbackBars);
    for(int i = 0; i < ArraySize(g_patterns); i++)
      {
       if(g_patterns[i].t_s2 < cutoff) continue;
       DrawPattern(g_patterns[i]);
      }
+
+   ObjectsDeleteAll(0, g_pz + "pend_");
+   if(InpDrawPending)
+      for(int i = 0; i < ArraySize(g_pending); i++)
+         DrawPendingPattern(g_pending[i]);
+  }
+//+------------------------------------------------------------------+
+//| Wallpaper/theme/watermark - ported verbatim from Aurelius_EA.mq5's    |
+//| own shared-family idiom (see SESSION_NOTES.md on the visual-           |
+//| standardization pass every other EA in this portfolio already got).     |
+//+------------------------------------------------------------------+
+void PBackground()
+  {
+   string nm = g_pw + "bmp";
+   if(InpBackgroundBMP == "")
+     { if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm); g_bgOK = true; return; }
+   if(g_bgOK) return;
+   if(g_bgTries > 40) return;
+
+   g_bgTries++;
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   if(!ObjectCreate(0, nm, OBJ_BITMAP_LABEL, 0, 0, 0))
+     { Print("RoundingBottom_EA BG: ObjectCreate failed, error ", GetLastError()); return; }
+
+   string path = "\\Images\\" + InpBackgroundBMP;
+   ResetLastError();
+   bool okSet = ObjectSetString(0, nm, OBJPROP_BMPFILE, 0, path);
+   int err = GetLastError();
+
+   if(!okSet || err != 0)
+     {
+      if(g_bgTries <= 3)
+         PrintFormat("HeadShoulders_EA BG try %d: failed to load \"%s\"  set=%s  error=%d"
+                     "  -> file must be at <data folder>\\MQL5\\Images\\%s",
+                     g_bgTries, path, (okSet ? "true" : "false"), err, InpBackgroundBMP);
+      ObjectDelete(0, nm);
+      return;
+     }
+
+   int cw  = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chh = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, MathMax(0, (cw  - InpBgWidth)  / 2));
+   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, MathMax(0, (chh - InpBgHeight) / 2));
+   ObjectSetInteger(0, nm, OBJPROP_BACK, true);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   g_bgOK = true;
+   if(ObjectFind(0, g_pw + "wm") >= 0) ObjectDelete(0, g_pw + "wm");
+   PWatermark();
+   ChartRedraw(0);
+  }
+void PTheme()
+  {
+   if(!InpApplyTheme) return;
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND,  InpChartBg);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND,  C'138,152,178');
+   ChartSetInteger(0, CHART_COLOR_GRID,        C'20,26,40');
+   ChartSetInteger(0, CHART_COLOR_CHART_UP,    InpBullCol);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  InpBearCol);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpBullCol);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpBearCol);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE,  C'138,152,178');
+   ChartSetInteger(0, CHART_COLOR_BID,         C'0,229,255');
+   ChartSetInteger(0, CHART_COLOR_ASK,         C'255,193,7');
+   ChartSetInteger(0, CHART_SHOW_GRID,   false);
+   ChartSetInteger(0, CHART_MODE,        CHART_CANDLES);
+   ChartSetInteger(0, CHART_SHOW_PERIOD_SEP, false);
+   ChartSetInteger(0, CHART_COLOR_VOLUME,      C'40,52,76');
+   ChartSetInteger(0, CHART_SHOW_OBJECT_DESCR, false);
+   if(InpHideTradeMarks)
+     {
+      ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, false);
+      ChartSetInteger(0, CHART_SHOW_TRADE_HISTORY, false);
+     }
+   ChartRedraw(0);
+  }
+void PWatermark()
+  {
+   string nm = g_pw + "wm";
+   if(InpWatermark == "")
+     { if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm); return; }
+   if(ObjectFind(0, nm) < 0) ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
+   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   if(InpWaterBottom)
+     {
+      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);
+      ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, 18);
+      ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, 18);
+     }
+   else
+     {
+      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+      ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, cw / 2);
+      ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, ch / 2);
+     }
+   ObjectSetString (0, nm, OBJPROP_TEXT, InpWatermark);
+   ObjectSetString (0, nm, OBJPROP_FONT, InpWaterFont);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, InpWaterSize);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, InpWaterCol);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, true);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
   }
 //+------------------------------------------------------------------+
 //| Panel primitives - same idiom as this project's other panels.       |
@@ -1016,6 +1195,13 @@ void PSection(const string id, const int x, const int y, const int w, const int 
 //+------------------------------------------------------------------+
 void DrawPanel()
   {
+   //--- background/watermark are independent of the panel (InpShowPanel/
+   //--- InpWatermark are separate inputs) - drawn BEFORE the panel's own
+   //--- early-return, matching the fix Aurelius_EA.mq5/Vanguard_EA.mq5
+   //--- already needed (nesting them after InpShowPanel's check silently
+   //--- killed the watermark too whenever the panel was switched off).
+   PBackground();
+   PWatermark();
    if(!InpShowPanel) { ObjectsDeleteAll(0, g_pz + "pp_"); return; }
    g_panelReclaim = true;
    int w = MathMax(InpPanelW, g_panelMinW);
@@ -1101,7 +1287,11 @@ void OnTick()
       RefreshDrawings();
      }
    SyncPosition();
-   if(!g_skipCosmeticDraws && InpShowPanel && TimeCurrent() != g_lastPanelDraw)
+   //--- InpShowPanel dropped from this gate (v1.07) - DrawPanel() itself now
+   //--- draws the wallpaper/watermark BEFORE its own internal InpShowPanel
+   //--- check, so they must still be called even with the panel off, same
+   //--- fix Aurelius_EA.mq5/Vanguard_EA.mq5 already needed for the same bug.
+   if(!g_skipCosmeticDraws && TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
       DrawPanel();
@@ -1111,11 +1301,31 @@ void OnTick()
 void OnTimer()
   {
    SyncPosition();
-   if(!g_skipCosmeticDraws && InpShowPanel && TimeCurrent() != g_lastPanelDraw)
+   if(!g_skipCosmeticDraws && TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
       DrawPanel();
       ChartRedraw(0);
+     }
+  }
+//+------------------------------------------------------------------+
+//| Resize -> the wallpaper needs re-centring (same idiom as             |
+//| Aurelius_EA.mq5's own resize handler). Guarded so it only fires on     |
+//| an actual width/height change, not every scroll/pan tick (MT5 raises    |
+//| CHARTEVENT_CHART_CHANGE for those too).                                  |
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+  {
+   if(g_skipCosmeticDraws) return;
+   if(id == CHARTEVENT_CHART_CHANGE)
+     {
+      static int lastW = -1, lastH = -1;
+      int nw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      int nh = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+      if(nw != lastW || nh != lastH)
+        {
+         lastW = nw; lastH = nh; g_bgOK = false; g_bgTries = 0; PBackground();
+        }
      }
   }
 //+------------------------------------------------------------------+
