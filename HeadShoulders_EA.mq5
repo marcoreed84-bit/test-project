@@ -137,9 +137,19 @@
 //|  once in OnInit() (MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) and now gates                |
 //|  RefreshDrawings(), DrawEntryArrow(), and both OnTick()/OnTimer()'s panel blocks - a non-visual                  |
 //|  run draws none of it. No signal, entry, exit, sizing, or risk-management logic touched.                          |
+//|                                                                    |
+//|  v1.06: shortened every input's inline comment (this file was the only one in the portfolio          |
+//|  with paragraph-length research citations inline). MT5's Tester Inputs tab shows an input's           |
+//|  COMMENT as the row label, not its variable name - v1.02-v1.05's comments were full sentences           |
+//|  citing real Python evidence, so that label column showed unreadable truncated prose instead of          |
+//|  a short, recognizable field name (confirmed against a real screenshot of the Inputs tab). Every            |
+//|  input now has a short, single-clause label matching the rest of this portfolio's own style               |
+//|  (Aurelius_EA.mq5 etc.) - the full real-evidence detail these comments used to carry is not lost,             |
+//|  it already lives in this header (v1.01-v1.05 above) and nowhere else needed it. No signal, entry,             |
+//|  exit, sizing, or risk-management logic touched - purely a readability fix.                                     |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.05"
+#property version   "1.06"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -147,39 +157,39 @@ CTrade trade;
 
 //--- Swing / pivot detection (identical construction to the Python research) ---
 input group "=== Swing / pivot detection (same construction as research/trendbreaker/) ==="
-input int    InpPivotStrength   = 5;       // N bars each side - N-bar fractal pivot
-input double InpSwingMinATR     = 1.0;     // ZigZag "deviation": min swing leg, x ATR
-input int    InpATRPeriod       = 14;      // SMA-of-true-range (MT5's iATR definition)
-input int    InpLookbackBars    = 800;     // Bars of history scanned each recompute (real patterns resolve in ~80 bars on average - this is generous headroom, not a requirement)
-input int    InpRecomputeEveryBars = 5;    // Re-scan for NEW pattern shapes every N bars (not every single bar) - AdvancePending()'s breakout confirmation still checks every bar regardless, this only throttles the expensive full swing rescan
+input int    InpPivotStrength   = 5;       // Fractal pivot strength, N bars each side
+input double InpSwingMinATR     = 1.0;     // Min swing leg (ZigZag deviation), x ATR
+input int    InpATRPeriod       = 14;      // ATR period (MT5 iATR)
+input int    InpLookbackBars    = 800;     // Bars of history scanned each recompute
+input int    InpRecomputeEveryBars = 5;    // Full swing rescan throttle, every N bars
 
 input group "=== Head & Shoulders construction (real-validated target, see header) ==="
-input double InpShoulderTolATR  = 1.5;     // Shoulders "roughly the same level" - max ATR apart
-input double InpBreakTolATR     = 0.10;    // Close beyond the neckline by more than this = a close beyond
-input int    InpBreakConfirmCloses = 3;    // Consecutive closes beyond the neckline to confirm the breakout
-input double InpMaxHorizonMult  = 4.0;     // Give the target this many x the pattern's own formation length to hit (else the position runs on stop/target as normal - this only bounds how long a NEW pattern is still considered "live" for a fresh entry)
+input double InpShoulderTolATR  = 1.5;     // Shoulder level tolerance, x ATR
+input double InpBreakTolATR     = 0.10;    // Neckline break tolerance, x ATR
+input int    InpBreakConfirmCloses = 3;    // Closes to confirm breakout
+input double InpMaxHorizonMult  = 4.0;     // Pattern "live" horizon, x formation length
 
 input group "=== Stop-loss (disclosed, NOT real-validated - see header) ==="
-input double InpStopBufferATR   = 0.3;     // SL = right shoulder extreme +/- this x ATR - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_stop_loss_test.py) found 1.0 meaningfully better (net +51%, PF 1.252->1.393 on M15) but this default is left at the original disclosed-not-validated 0.3 pending a real MT5 test - change this value yourself in the Tester's Inputs tab to try 1.0.
+input double InpStopBufferATR   = 0.3;     // SL buffer beyond right shoulder, x ATR
 
 input group "=== RSI confluence filter (v1.02 candidate, off by default) ==="
-input bool   InpUseRSIFilter    = false;   // Only take a trade when RSI is also at an extreme in the pattern's favour (oversold for a bullish Inverse H&S, overbought for a bearish H&S top) - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_confluence_test.py, on top of the already-best pullback+runner construction): win% 52.0->63.4, PF 2.377->2.509, stable IS 65.9%/OOS 57.5% - but trades ~71% less often (n=456->131 over the same real 4.2-year window). Off by default: real, but Python-only, and this file's base construction (market entry, no pullback/runner) hasn't been re-checked with this filter specifically - see header for what HAS and hasn't shipped.
-input int    InpRSIPeriod       = 14;      // RSI period - matches the real, native MT5 iRSI() indicator, not a manual port (RSI is standardized enough across platforms that this project's own ATR-mismatch lesson is not expected to apply the same way)
-input double InpRSIThreshold    = 30.0;    // Oversold/overbought threshold (30 = the real-tested value; RSI <= this for a buy, >= 100-this for a sell)
+input bool   InpUseRSIFilter    = false;   // Require RSI extreme to enter
+input int    InpRSIPeriod       = 14;      // RSI period
+input double InpRSIThreshold    = 30.0;    // RSI oversold/overbought threshold
 
 input group "=== Pullback / retest entry (v1.03 candidate, off by default) ==="
-input bool   InpUsePullbackEntry = false;  // Wait for a throwback/retest of the neckline within InpPullbackWindowBars bars after confirmation, instead of entering at market on the confirming close - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_next_round_test.py): net +28-97% depending on what else is stacked with it. Off by default: real, but Python-only, first real MT5 run. A pattern whose retest never comes within the window is skipped entirely (matches the Python research's own "missed" bucket) - it does NOT fall back to a market entry.
-input double InpPullbackTolATR   = 0.75;   // How close price must come back to the neckline to count as a genuine retest, x ATR captured at the breakout confirmation bar (InpUseRunner shares this same captured ATR - see its own comment)
-input int    InpPullbackWindowBars = 30;   // Give the retest at most this many bars to happen after confirmation
+input bool   InpUsePullbackEntry = false;  // Wait for neckline retest, not market entry
+input double InpPullbackTolATR   = 0.75;   // Retest tolerance, x ATR
+input int    InpPullbackWindowBars = 30;   // Retest window, bars
 
 input group "=== Trailing runner past target (v1.03 candidate, off by default) ==="
-input bool   InpUseRunner        = false;  // Once price reaches the measured-move target, don't close 100% there - cancel the fixed broker-side TP and trail a stop InpRunnerTrailATR x ATR behind the best price seen since (ratchets one-way only, same as the Python research), letting the trade run further. Real Python evidence: net +48-51% on top of the base construction. Off by default: real, but Python-only, first real MT5 run. Before the target is first reached the position is unaffected - it can still only close on the original SL, same as with this off.
-input double InpRunnerTrailATR   = 0.5;    // Trailing distance once the runner is armed, x ATR - captured ONCE at the breakout confirmation bar, not recomputed per bar (matches the Python research's own convention, same captured value as InpPullbackTolATR)
+input bool   InpUseRunner        = false;  // Trail stop past target, not fixed TP
+input double InpRunnerTrailATR   = 0.5;    // Runner trail distance, x ATR
 
 input group "=== Trade management ==="
 input double InpLots             = 0.01;
 input int    InpMagic            = 20260925;
-input int    InpMaxSpreadPoints  = 60;     // Live-only spread gate (matches this portfolio's own real default)
+input int    InpMaxSpreadPoints  = 60;     // Max spread to allow entry, points
 input int    InpSlippage         = 30;
 
 input group "=== Chart visuals ==="
