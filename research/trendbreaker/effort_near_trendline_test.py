@@ -124,3 +124,11 @@ def run(df, label):
 if __name__ == "__main__":
     h4 = E.load_h4()
     run(h4, "H4 (real GOLD# export)")
+
+    d1 = E.derive_d1_from_h4(h4)
+    d1["time"] = pd.to_datetime(d1["date"])
+    dvol = h4.copy()
+    dvol["date"] = dvol["time"].dt.date
+    dvol_daily = dvol.groupby("date")["tick_volume"].sum().reset_index()
+    d1 = d1.merge(dvol_daily, on="date", how="left")
+    run(d1, "D1 (reconstructed from real GOLD# H4, real daily-summed volume)")
