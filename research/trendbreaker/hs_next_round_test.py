@@ -257,3 +257,81 @@ if __name__ == "__main__":
     for trail_mult in (0.5, 1.0, 1.5, 2.0, 3.0):
         res = eval_runner(breakouts, h, l, c, STOP_BUFFER, trail_mult)
         report(res, f"trail={trail_mult:.1f}xATR after target")
+
+
+def eval_pullback_and_runner(breakouts, h, l, c, stop_buffer, retest_tol_atr, retest_window, trail_atr_mult):
+    """Combines TEST 1 (pullback/retest entry) with TEST 3 (runner past
+    target) - single-position sequenced, using find_breakouts_full's own
+    break_tol setting (TEST 2's finding) already baked into `breakouts`."""
+    results, last_exit, missed = [], -1, 0
+    for b in breakouts:
+        top, brk_q, target = b["top"], b["brk_q"], b["target"]
+        if brk_q < last_exit:
+            continue
+        tol = retest_tol_atr * b["atr_at_brk"]
+        entry_bar, entry = None, None
+        for q in range(brk_q + 1, min(brk_q + 1 + retest_window, b["max_horizon"])):
+            nl = b["neckline_at"](q)
+            touched = (h[q] >= nl - tol) if top else (l[q] <= nl + tol)
+            if touched:
+                entry_bar, entry = q, nl
+                break
+        if entry_bar is None:
+            missed += 1
+            continue
+        stop = (b["shoulder_ext"] + stop_buffer * b["atr_at_brk"]) if top else \
+               (b["shoulder_ext"] - stop_buffer * b["atr_at_brk"])
+        if (top and stop <= entry) or ((not top) and stop >= entry):
+            continue
+        atrv = b["atr_at_brk"]
+        cur_stop = stop
+        outcome, exit_bar, exit_px = None, None, None
+        reached_target = False
+        peak = entry
+        for k in range(entry_bar + 1, b["max_horizon"] + 1):
+            hit_stop = (h[k] >= cur_stop) if top else (l[k] <= cur_stop)
+            if hit_stop:
+                outcome, exit_bar, exit_px = ("TARGET_TRAIL" if reached_target else "STOP"), k, cur_stop
+                break
+            hit_target = (l[k] <= target) if top else (h[k] >= target)
+            if hit_target and not reached_target:
+                reached_target = True
+                peak = target
+            if reached_target:
+                if top:
+                    peak = min(peak, l[k])
+                    cur_stop = min(cur_stop, peak + trail_atr_mult * atrv)
+                else:
+                    peak = max(peak, h[k])
+                    cur_stop = max(cur_stop, peak - trail_atr_mult * atrv)
+        if outcome is None:
+            outcome, exit_bar, exit_px = "HORIZON", b["max_horizon"], c[min(b["max_horizon"], len(c) - 1)]
+        pnl = (entry - exit_px) if top else (exit_px - entry)
+        results.append(dict(brk_q=entry_bar, outcome=outcome, pnl=pnl))
+        last_exit = exit_bar
+    return results, missed
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "stacked":
+    df5 = E.load_m5()
+    df15 = E.resample_m15_from_m5(df5)
+
+    print("=" * 95)
+    print("STACKED: pullback entry (0.50xATR/30bar) + BREAK_TOL_ATR=0.35 + runner (0.5xATR trail)")
+    print("=" * 95)
+    breakouts035, h, l, c, atr = find_breakouts_full(df15, break_tol=0.35)
+    res, missed = eval_pullback_and_runner(breakouts035, h, l, c, STOP_BUFFER, 0.50, 30, 0.5)
+    report(res, "STACKED (all three)", missed=missed)
+
+    print("\nfor comparison, individual results (break_tol=0.35 breakout set used throughout):")
+    baseline035 = eval_market_entry(breakouts035, h, l, c, STOP_BUFFER)
+    report(baseline035, "market entry, break_tol=0.35 alone")
+    pullback_only, missed_p = eval_pullback_entry(breakouts035, h, l, c, STOP_BUFFER, 0.50, 30)
+    report(pullback_only, "+ pullback entry (break_tol=0.35, no runner)", missed=missed_p)
+    runner_only = eval_runner(breakouts035, h, l, c, STOP_BUFFER, 0.5)
+    report(runner_only, "+ runner only (break_tol=0.35, market entry)")
+
+    print("\nrobustness check - nearby settings on the stacked combo:")
+    for tol, window, trail in ((0.35, 20, 0.5), (0.50, 30, 1.0), (0.50, 20, 0.5), (0.75, 30, 0.5)):
+        res2, missed2 = eval_pullback_and_runner(breakouts035, h, l, c, STOP_BUFFER, tol, window, trail)
+        report(res2, f"retest={tol:.2f}xATR/{window}bar trail={trail:.1f}xATR", missed=missed2)
