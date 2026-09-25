@@ -360,7 +360,10 @@ void OnDeinit(const int reason)
    EventKillTimer();
    if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
    if(reason != REASON_CHARTCHANGE && reason != REASON_PARAMETERS)
+     {
       ObjectsDeleteAll(0, g_pz);
+      ObjectsDeleteAll(0, g_pw);   // wallpaper/watermark - v1.07 gap fix, was never cleaned up
+     }
    Comment("");
   }
 //+------------------------------------------------------------------+
