@@ -78,21 +78,24 @@
 //|  research/ratchet/bars.py's header) with properly single-position-sequenced testing            |
 //|  (the same discipline this project adopted after a real MT5 test caught a flawed                |
 //|  post-hoc-swap methodology elsewhere in the portfolio - see Aurelius_EA.mq5 v1.52).               |
-//|  NOT YET SHIPPED as toggles, still Python-only research only, cited here so nothing gets           |
-//|  lost: (1) pullback/retest entry (wait for a throwback to the neckline instead of                  |
-//|  market-on-confirm) at 0.75xATR/30bar - real net +28-97% depending on what else is stacked           |
-//|  with it; (2) widening InpStopBufferATR to 1.0 (see its own input comment); (3) widening              |
-//|  InpBreakTolATR to 0.35 (net +12-25%); (4) a trailing runner past the measured target                  |
-//|  (0.5xATR trail) instead of closing 100% there (net +48-51%). All four combined (real GOLD,              |
-//|  research/trendbreaker/hs_next_round_test.py "stacked" mode): n=456 net +$4255 (vs this                  |
-//|  file's real, unimproved 0.3xATR-stop MT5 report: 599 trades, net 13999.4 ZAR, PF 1.161,                   |
-//|  NOTE the Python figure is USD price-difference, NOT directly comparable to that ZAR                        |
-//|  number without converting - see research/aurelius/giveback_real_mt5_rejection.py's                         |
-//|  sibling finding on why that comparison needs care), PF 2.377, win 52.0%, max closed-DD                       |
-//|  only 5.4% of net, worst losing streak 7. None of this is real-MT5-confirmed yet.                              |
+//|                                                                    |
+//|  v1.03: InpUsePullbackEntry and InpUseRunner added (both default OFF - see their own      |
+//|  input comments). These were the other two "not yet shipped" candidates from v1.02's        |
+//|  header; shipping them now so they can actually be run in the Tester, same as v1.02's         |
+//|  RSI filter. The remaining two candidates from that list - InpStopBufferATR 0.3->1.0 and        |
+//|  InpBreakTolATR 0.10->0.35 - are already plain numeric inputs (not booleans), so there is         |
+//|  nothing to toggle; change them directly in the Tester's Inputs tab if you want to try them.        |
+//|  Stacked together (pullback 0.75xATR/30bar + break_tol=0.35 + runner 0.5xATR, real GOLD,             |
+//|  research/trendbreaker/hs_next_round_test.py "stacked" mode): n=456 net +$4255 (vs this                |
+//|  file's real, unimproved 0.3xATR-stop MT5 report: 599 trades, net 13999.4 ZAR, PF 1.161,                 |
+//|  NOTE the Python figure is USD price-difference, NOT directly comparable to that ZAR                      |
+//|  number without converting - see research/aurelius/giveback_real_mt5_rejection.py's                        |
+//|  sibling finding on why that comparison needs care), PF 2.377, win 52.0%, max closed-DD                     |
+//|  only 5.4% of net, worst losing streak 7. None of this is real-MT5-confirmed yet - that's               |
+//|  the whole point of shipping it as off-by-default toggles rather than changing defaults.               |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.02"
+#property version   "1.03"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -119,6 +122,15 @@ input group "=== RSI confluence filter (v1.02 candidate, off by default) ==="
 input bool   InpUseRSIFilter    = false;   // Only take a trade when RSI is also at an extreme in the pattern's favour (oversold for a bullish Inverse H&S, overbought for a bearish H&S top) - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_confluence_test.py, on top of the already-best pullback+runner construction): win% 52.0->63.4, PF 2.377->2.509, stable IS 65.9%/OOS 57.5% - but trades ~71% less often (n=456->131 over the same real 4.2-year window). Off by default: real, but Python-only, and this file's base construction (market entry, no pullback/runner) hasn't been re-checked with this filter specifically - see header for what HAS and hasn't shipped.
 input int    InpRSIPeriod       = 14;      // RSI period - matches the real, native MT5 iRSI() indicator, not a manual port (RSI is standardized enough across platforms that this project's own ATR-mismatch lesson is not expected to apply the same way)
 input double InpRSIThreshold    = 30.0;    // Oversold/overbought threshold (30 = the real-tested value; RSI <= this for a buy, >= 100-this for a sell)
+
+input group "=== Pullback / retest entry (v1.03 candidate, off by default) ==="
+input bool   InpUsePullbackEntry = false;  // Wait for a throwback/retest of the neckline within InpPullbackWindowBars bars after confirmation, instead of entering at market on the confirming close - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_next_round_test.py): net +28-97% depending on what else is stacked with it. Off by default: real, but Python-only, first real MT5 run. A pattern whose retest never comes within the window is skipped entirely (matches the Python research's own "missed" bucket) - it does NOT fall back to a market entry.
+input double InpPullbackTolATR   = 0.75;   // How close price must come back to the neckline to count as a genuine retest, x ATR captured at the breakout confirmation bar (InpUseRunner shares this same captured ATR - see its own comment)
+input int    InpPullbackWindowBars = 30;   // Give the retest at most this many bars to happen after confirmation
+
+input group "=== Trailing runner past target (v1.03 candidate, off by default) ==="
+input bool   InpUseRunner        = false;  // Once price reaches the measured-move target, don't close 100% there - cancel the fixed broker-side TP and trail a stop InpRunnerTrailATR x ATR behind the best price seen since (ratchets one-way only, same as the Python research), letting the trade run further. Real Python evidence: net +48-51% on top of the base construction. Off by default: real, but Python-only, first real MT5 run. Before the target is first reached the position is unaffected - it can still only close on the original SL, same as with this off.
+input double InpRunnerTrailATR   = 0.5;    // Trailing distance once the runner is armed, x ATR - captured ONCE at the breakout confirmation bar, not recomputed per bar (matches the Python research's own convention, same captured value as InpPullbackTolATR)
 
 input group "=== Trade management ==="
 input double InpLots             = 0.01;
@@ -168,6 +180,7 @@ struct HSPattern
    double   brk_price;
    double   target;
    double   stop;
+   double   atrAtBrk;             // ATR captured at the breakout confirmation bar - shared by InpPullbackTolATR and InpRunnerTrailATR, matching the Python research's own "captured once, not recomputed per bar" convention
    bool     traded;
    int      run;                  // pending-only: consecutive closes beyond the neckline seen so far
   };
@@ -185,6 +198,15 @@ bool     g_panelReclaim = true;
 datetime g_lastPanelDraw = 0;
 int      g_statTrades = 0, g_statWins = 0;
 int      g_rsiHandle = INVALID_HANDLE;   // InpUseRSIFilter - native iRSI(), not a manual port (see input comment)
+
+//--- InpUseRunner state - single-position EA, so one set of globals is enough (see ArmRunner()/ManageRunner())
+bool     g_runnerArmed = false;
+bool     g_runnerReachedTarget = false;
+double   g_runnerPeak = 0.0;
+double   g_runnerTarget = 0.0;
+double   g_runnerAtr = 0.0;
+bool     g_runnerIsBuy = false;
+double   g_runnerStop = 0.0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -450,6 +472,7 @@ void AdvancePending()
               {
                P = g_pending[i];
                P.brk_t = t1; P.brk_price = c1;
+               P.atrAtBrk = atrNow;
                P.target = P.top ? (P.brk_price - headHeight) : (P.brk_price + headHeight);
                double shoulderExt = P.top ? MathMax(P.p_s1, P.p_s2) : MathMin(P.p_s1, P.p_s2);
                // disclosed NOT-validated stop choice - see header
@@ -479,12 +502,21 @@ void AdvancePending()
      }
   }
 //+------------------------------------------------------------------+
-//| Entry - only acts on a pattern the EXACT bar its breakout is        |
-//| confirmed (P.brk_t == the just-closed bar); a pattern that was        |
-//| already confirmed on an earlier bar is drawn/kept for history but      |
-//| never traded late. InpMaxHorizonMult bounds how long an UNCONFIRMED     |
-//| candidate is still considered live (AdvancePending()'s own expiry) -     |
-//| it does not apply here, since this only ever sees fresh confirmations.    |
+//| Entry. Two trigger modes:                                           |
+//|  - InpUsePullbackEntry OFF (default): only acts on a pattern the       |
+//|    EXACT bar its breakout is confirmed (P.brk_t == the just-closed      |
+//|    bar) - unchanged from v1.02.                                          |
+//|  - InpUsePullbackEntry ON: does NOT act on the confirmation bar itself;   |
+//|    instead waits for the FIRST later bar (within InpPullbackWindowBars)    |
+//|    whose high/low comes back to within InpPullbackTolATR x ATR of the       |
+//|    neckline (a real throwback) - matches eval_pullback_entry() in            |
+//|    research/trendbreaker/hs_next_round_test.py exactly, including that        |
+//|    a retest that never comes within the window is skipped entirely, not        |
+//|    a fallback market entry.                                                      |
+//| A pattern that was already confirmed/decided is drawn/kept for history but        |
+//| never traded late either way. InpMaxHorizonMult bounds how long an                 |
+//| UNCONFIRMED candidate is still considered live (AdvancePending()'s own               |
+//| expiry) - it does not apply here, since this only ever sees confirmed ones.           |
 //+------------------------------------------------------------------+
 void CheckForEntry()
   {
@@ -492,11 +524,32 @@ void CheckForEntry()
    long spr = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(InpMaxSpreadPoints > 0 && spr > InpMaxSpreadPoints) return;
 
-   datetime bt1 = iTime(_Symbol, PERIOD_CURRENT, 1);
+   datetime t1 = iTime(_Symbol, PERIOD_CURRENT, 1);
+   double h1 = iHigh(_Symbol, PERIOD_CURRENT, 1);
+   double l1 = iLow(_Symbol, PERIOD_CURRENT, 1);
+   int periodSec = MathMax(PeriodSeconds(PERIOD_CURRENT), 1);
+
    for(int i = ArraySize(g_patterns) - 1; i >= 0; i--)
      {
       HSPattern P = g_patterns[i];
-      if(P.traded || P.brk_t != bt1) continue;   // only act the bar immediately after confirmation
+      if(P.traded) continue;
+
+      bool trigger;
+      if(!InpUsePullbackEntry)
+        {
+         trigger = (P.brk_t == t1);   // only act the bar immediately after confirmation
+        }
+      else
+        {
+         if(t1 <= P.brk_t) continue;   // retest can't happen at/before the confirm bar itself
+         long ageBars = ((long)t1 - (long)P.brk_t) / periodSec;
+         if(ageBars > InpPullbackWindowBars) { g_patterns[i].traded = true; continue; }   // missed - matches the Python research's own "missed" bucket, skip entirely
+         double nl = NecklineAtTime(P, t1);
+         double tol = InpPullbackTolATR * P.atrAtBrk;
+         trigger = P.top ? (h1 >= nl - tol) : (l1 <= nl + tol);
+        }
+      if(!trigger) continue;
+
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       bool isBuy = !P.top;
       double entry = isBuy ? ask : bid;
@@ -510,18 +563,66 @@ void CheckForEntry()
       trade.SetDeviationInPoints(InpSlippage);
       trade.SetTypeFillingBySymbol(_Symbol);
       string cmt = P.top ? "H&S top" : "Inverse H&S";
-      bool ok = isBuy ? trade.Buy(InpLots, _Symbol, entry, P.stop, P.target, cmt)
-                       : trade.Sell(InpLots, _Symbol, entry, P.stop, P.target, cmt);
+      double tp = InpUseRunner ? 0.0 : P.target;   // InpUseRunner replaces the fixed broker-side TP with ManageRunner()'s trailing stop - see its own input comment
+      bool ok = isBuy ? trade.Buy(InpLots, _Symbol, entry, P.stop, tp, cmt)
+                       : trade.Sell(InpLots, _Symbol, entry, P.stop, tp, cmt);
       g_patterns[i].traded = true;   // one shot per pattern either way - don't retry a rejected order every tick
       if(ok)
         {
          SyncPosition();
          DrawEntryArrow(P, entry);
+         if(InpUseRunner) ArmRunner(P, isBuy);
         }
       else
          PrintFormat("HeadShoulders_EA: entry FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
       return;
      }
+  }
+//+------------------------------------------------------------------+
+//| InpUseRunner - arm/manage the trailing runner. Single-position EA,   |
+//| so global state is enough (ArmRunner() called once right after a       |
+//| successful entry when InpUseRunner is on; ManageRunner() called once     |
+//| per new bar; SyncPosition() disarms it when the position closes).         |
+//| Mirrors eval_pullback_and_runner()'s runner leg in research/trendbreaker/  |
+//| hs_next_round_test.py exactly: before the target is first reached, the      |
+//| position is untouched (can only close on the original SL); once reached,     |
+//| the stop ratchets to InpRunnerTrailATR x ATR behind the best price seen        |
+//| since, one-way only, using the SAME ATR captured at the breakout bar.           |
+//+------------------------------------------------------------------+
+void ArmRunner(const HSPattern &P, const bool isBuy)
+  {
+   g_runnerArmed = true;
+   g_runnerReachedTarget = false;
+   g_runnerPeak = 0.0;
+   g_runnerTarget = P.target;
+   g_runnerAtr = P.atrAtBrk;
+   g_runnerIsBuy = isBuy;
+   g_runnerStop = P.stop;
+  }
+void ManageRunner()
+  {
+   if(!InpUseRunner || !g_runnerArmed || g_ticket == 0) return;
+   double h1 = iHigh(_Symbol, PERIOD_CURRENT, 1);
+   double l1 = iLow(_Symbol, PERIOD_CURRENT, 1);
+
+   if(!g_runnerReachedTarget)
+     {
+      bool hit = g_runnerIsBuy ? (h1 >= g_runnerTarget) : (l1 <= g_runnerTarget);
+      if(!hit) return;
+      g_runnerReachedTarget = true;
+      g_runnerPeak = g_runnerTarget;
+     }
+
+   g_runnerPeak = g_runnerIsBuy ? MathMax(g_runnerPeak, h1) : MathMin(g_runnerPeak, l1);
+   double newStop = g_runnerIsBuy ? (g_runnerPeak - InpRunnerTrailATR * g_runnerAtr)
+                                   : (g_runnerPeak + InpRunnerTrailATR * g_runnerAtr);
+   bool improves = g_runnerIsBuy ? (newStop > g_runnerStop) : (newStop < g_runnerStop);
+   if(!improves) return;
+   if(!PositionSelectByTicket(g_ticket)) return;
+   if(trade.PositionModify(g_ticket, newStop, 0.0))
+      g_runnerStop = newStop;
+   else
+      PrintFormat("HeadShoulders_EA: runner PositionModify FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
   }
 //+------------------------------------------------------------------+
 //| Own position only - matches THIS symbol AND magic number, so a      |
@@ -563,6 +664,7 @@ void SyncPosition()
             break;
            }
         }
+      g_runnerArmed = false;   // InpUseRunner - position closed, disarm so a later position starts clean via ArmRunner()
      }
    g_ticket = 0;
   }
@@ -793,6 +895,7 @@ void OnTick()
          Recompute();
       AdvancePending();
       CheckForEntry();
+      ManageRunner();
       RefreshDrawings();
      }
    SyncPosition();
