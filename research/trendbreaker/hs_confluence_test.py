@@ -346,3 +346,124 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "savin":
         return True
     res, missed, fo = eval_filtered(breakouts, h, l, c, allow_all_savin)
     report(res, "all three combined", filtered_out=fo)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "trendline":
+    # Trendline confluence, built PROPERLY this time - reuses the real,
+    # already-validated trendline construction from h4_touch_reaction_
+    # test.py (find_swings/bos_ok/build_line, full anchor-pair search,
+    # LOOKBACK_BARS=300) rather than a quick bolt-on. Run on H4, not M15:
+    # earlier research (m15_touch_reaction_walkforward.py) already found
+    # M15 barely produces any VALID (3+ touch) lines at all - not enough
+    # "memory" in a 300-bar window for M15's noise level - so testing
+    # confluence there would just re-confirm a known dead end, not answer
+    # anything new. H4 is where the underlying trendline construction is
+    # itself real-validated (55.6% bounce vs 22.2% shadow control,
+    # p=0.012-0.014, stable IS/OOS).
+    #
+    # Question: does an H&S breakout that ALSO coincides with a validated
+    # trendline break (same direction, within a real time window) perform
+    # better than one that doesn't?
+    import h4_touch_reaction_test as LT
+
+    h4 = E.load_h4()
+    o4 = h4["open"].values; h4h = h4["high"].values; l4 = h4["low"].values; c4 = h4["close"].values
+    atr4 = LT.sma_atr(h4h, l4, o4, LT.ATR_PERIOD)
+    n4 = len(h4)
+    print(f"H4 data: {h4['time'].min()} -> {h4['time'].max()}, n={n4} bars")
+
+    zIdx, zType, zPx = LT.find_swings(o4, h4h, l4, c4, atr4, body=False)
+    lines = []
+    for dir_, want in ((1, 1), (-1, -1)):
+        anchors = [zIdx[m] for m in range(len(zIdx))
+                   if zType[m] == want and LT.bos_ok(m, zIdx, zType, zPx, o4, h4h, l4, c4, n4, False)]
+        for ai in range(len(anchors)):
+            for bi in range(ai + 1, len(anchors)):
+                a, b = anchors[ai], anchors[bi]
+                if b - a < LT.PIVOT_STRENGTH or b - a > LT.LOOKBACK_BARS:
+                    continue
+                L = LT.build_line(o4, h4h, l4, c4, atr4, n4, a, b, dir_, False)
+                if L is not None:
+                    lines.append(L)
+    valid_lines = [L for L in lines if L["touches"] >= LT.TOUCHES_TO_VALIDATE]
+    print(f"candidate lines: {len(lines)}, VALID (3+ touches): {len(valid_lines)}")
+
+    breakouts, hh, ll, cc, atr = find_breakouts_full(h4, break_tol=0.10)   # H4's own base default, not the M15-tuned 0.35
+    print(f"H&S confirmed breakouts (H4, base construction): {len(breakouts)}\n")
+
+    CONFLUENCE_WINDOW = 15   # bars either side of the H&S breakout - a real, disclosed choice, not swept
+
+    def line_broke_near(brk_q, want_dir):
+        """True if a VALID line of `want_dir` (matches H&S breakout direction:
+        top/bearish needs a broken DOWN line, inverse/bullish needs a broken
+        UP line) has a confirmed break (BREAK_CONFIRM_CLOSES closes beyond,
+        same definition as h4_touch_reaction_test.py's own line-death check)
+        landing within CONFLUENCE_WINDOW bars of brk_q."""
+        for L in valid_lines:
+            if L["dir"] != want_dir:
+                continue
+            if L["ib"] >= brk_q + CONFLUENCE_WINDOW:
+                continue   # line didn't even exist yet
+            run_ = 0
+            for q in range(max(L["ib"] + 1, brk_q - CONFLUENCE_WINDOW), min(brk_q + CONFLUENCE_WINDOW, n4 - 1) + 1):
+                lv = L["p1"] + L["slope"] * (q - L["ia"])
+                penC = (cc[q] - lv) if L["dir"] < 0 else (lv - cc[q])
+                if penC > LT.BREAK_TOL_ATR * atr4[q]:
+                    run_ += 1
+                    if run_ >= LT.BREAK_CONFIRM_CLOSES and abs(q - brk_q) <= CONFLUENCE_WINDOW:
+                        return True
+                else:
+                    run_ = 0
+        return False
+
+    def allow_confluent(b):
+        # H&S top (bearish, needs price breaking DOWN through the neckline) confluent
+        # with a validated line breaking DOWN too (dir_=-1, an "up" trendline broken downward)
+        want_dir = -1 if b["top"] else 1
+        return line_broke_near(b["brk_q"], want_dir)
+
+    confluent = [b for b in breakouts if allow_confluent(b)]
+    non_confluent = [b for b in breakouts if not allow_confluent(b)]
+    print(f"confluent with a validated trendline break: {len(confluent)}  |  not: {len(non_confluent)}\n")
+
+    def report_h4(bset, label):
+        if len(bset) < 8:
+            print(f"  {label}: only {len(bset)} - too few"); return
+        res = eval_market_entry_h4(bset, hh, ll, cc)
+        report(res, label)
+
+    def eval_market_entry_h4(bset, h, l, c, stop_buffer=1.0):
+        results, last_exit = [], -1
+        for b in sorted(bset, key=lambda x: x["brk_q"]):
+            top, brk_q, entry, target = b["top"], b["brk_q"], b["brk_price"], b["target"]
+            if brk_q < last_exit:
+                continue
+            stop = (b["shoulder_ext"] + stop_buffer * b["atr_at_brk"]) if top else \
+                   (b["shoulder_ext"] - stop_buffer * b["atr_at_brk"])
+            if (top and stop <= entry) or ((not top) and stop >= entry):
+                continue
+            outcome, exit_bar = None, None
+            for k in range(brk_q + 1, b["max_horizon"] + 1):
+                hit_stop = (h[k] >= stop) if top else (l[k] <= stop)
+                hit_target = (l[k] <= target) if top else (h[k] >= target)
+                if hit_stop:
+                    outcome, exit_bar = "STOP", k; break
+                if hit_target:
+                    outcome, exit_bar = "TARGET", k; break
+            if outcome is None:
+                outcome, exit_bar = "HORIZON", b["max_horizon"]
+            if outcome == "TARGET":
+                pnl = abs(target - entry)
+            elif outcome == "STOP":
+                pnl = -abs(entry - stop)
+            else:
+                final_px = c[min(exit_bar, len(c) - 1)]
+                pnl = (entry - final_px) if top else (final_px - entry)
+            results.append(dict(brk_q=brk_q, pnl=pnl))
+            last_exit = exit_bar
+        return results
+
+    print("=" * 95)
+    report_h4(breakouts, "ALL H&S breakouts (H4, no trendline filter)")
+    report_h4(confluent, "CONFLUENT with a validated trendline break")
+    report_h4(non_confluent, "NOT confluent")
