@@ -203,8 +203,31 @@
 //|  Aurelius_M15_EA.mq5/Meridian_EA.mq5/Ratchet_EA.mq5 were all found missing today and fixed to            |
 //|  match. No indicator label in this file hardcodes a period/method.                                        |
 //+------------------------------------------------------------------+
+//|  v1.06: InpUseGivebackExit added (default OFF, Python-only so far -      |
+//|  needs a real MT5 Strategy Tester run before being trusted the way the    |
+//|  shipped defaults are). Cuts a trade at market once it built a peak        |
+//|  floating profit >= InpGivebackMinPeak and has since given it back to      |
+//|  <= InpGivebackThreshold, UNLESS that peak was >= InpGivebackPeakCutoff,    |
+//|  in which case it is deliberately left alone. Origin: a blanket "cut         |
+//|  anything that gives back to near-breakeven" rule was tested first on the     |
+//|  sibling Meridian_EA.mq5 and LOST real money (-$2037, -61%) because most       |
+//|  of the edge comes from the minority of giveback trades that recover into      |
+//|  a large winner, and a blanket rule can't tell those apart from the ones        |
+//|  that go on to actually lose. PEAK SIZE turned out to be the real                |
+//|  discriminator: small-peak givebacks are heavily net-negative, big-peak           |
+//|  givebacks are heavily net-positive (see Meridian_EA.mq5 v1.06 header for          |
+//|  the original finding). Re-tested on THIS file's own real M15 construction          |
+//|  (research/aurelius/giveback_generalization_m15_test.py - FractalK=33,               |
+//|  SafetyStopATR=3.0, this file's real shipped defaults, real GOLD M15                  |
+//|  resampled from M5, does not include InpUseAureliusFilter which earlier                |
+//|  research already found has zero real drawdown effect): real net $2731 ->               |
+//|  $5574 at peak cutoff $30 (+$2843, +104%), positive at every cutoff tested,               |
+//|  positive both in-sample and out-of-sample throughout - the largest                        |
+//|  relative improvement of the five constructions checked. Shipped default                     |
+//|  InpGivebackPeakCutoff=30 matches the strongest point found in that sweep.                     |
+//+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
-#property version   "1.05"
+#property version   "1.06"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -223,6 +246,12 @@ input int    InpStaleBars         = 75;      // ~18.75h on M15 - real, INDEPENDE
                                               // (Matches the M5 file's own separately-swept 225 bars in
                                               // real-world time - not a shared/copied value.)
 input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below this once InpStaleBars have elapsed.
+
+input group "=== Giveback-to-breakeven exit (v1.06 candidate, Python-only so far) ==="
+input bool   InpUseGivebackExit    = false;   // Cuts a trade at market once it built a SMALL peak profit then gave it back near breakeven - see header for the real research and why it's off by default until a real MT5 test confirms it. Different from InpUseStaleExit above (which reacts to a trade NEVER making progress): this reacts to a trade that DID make progress, then lost it.
+input double InpGivebackMinPeak    = 5.0;     // Floating profit (price units, i.e. $ per 0.01 lot) the trade must reach before a giveback can even be checked - below this it's ordinary noise, never cut.
+input double InpGivebackPeakCutoff = 30.0;    // If the peak reached was AT OR ABOVE this, do NOT cut on giveback - real data shows these trades recover into a real winner far more often than average, not less. 30 was the strongest point in this file's own real M15 sweep (research/aurelius/giveback_generalization_m15_test.py).
+input double InpGivebackThreshold  = 1.0;     // Floating profit (price units) at/below which counts as "given back to near-breakeven".
 
 input group "=== Risk (ATR-inverse sizing - see header) ==="
 input double InpBaseLots           = 0.01;    // lot size AT the reference ATR below
@@ -320,6 +349,12 @@ input string  InpWaterFont  = "Arial Black";      // Watermark font
 //--- across every EA in this project earlier this session)
 ulong    g_ticket  = 0;
 int      g_posDir  = 0;      // +1 long, -1 short, 0 flat
+
+//--- InpUseGivebackExit tracking - which ticket g_gbPeakFav belongs to,
+//--- reset whenever g_ticket changes (tickets are unique/monotonic in
+//--- MT5, never reused, so a simple != is a safe "new position" test)
+ulong    g_gbTicket  = 0;
+double   g_gbPeakFav = 0.0;   // best floating profit (price units) seen so far this trade
 
 //--- single-latch new-bar gate (called exactly once per tick)
 datetime g_lastBarTime = 0;
@@ -1577,6 +1612,24 @@ void OnTick()
      {
       SyncPositionState();
       if(g_ticket != 0) CloseCurrentPosition("FRIDAY");
+     }
+
+   //--- tick-level giveback-to-breakeven exit (InpUseGivebackExit, v1.06
+   //--- candidate - see header). Checked every tick, not gated on a new
+   //--- bar, so the live peak-favorable-excursion tracking matches the
+   //--- Python research's intrabar high/low peak at least as closely as
+   //--- possible (real ticks are a finer read than Python's per-bar H/L,
+   //--- never coarser - conservative direction, catches a giveback at
+   //--- least as early as the model that was validated, never later).
+   if(InpUseGivebackExit && g_ticket != 0 && PositionSelectByTicket(g_ticket))
+     {
+      if(g_gbTicket != g_ticket) { g_gbTicket = g_ticket; g_gbPeakFav = 0.0; }
+      double entryPx = PositionGetDouble(POSITION_PRICE_OPEN);
+      double cur     = (g_posDir > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double fav     = (g_posDir > 0) ? (cur - entryPx) : (entryPx - cur);
+      if(fav > g_gbPeakFav) g_gbPeakFav = fav;
+      if(g_gbPeakFav >= InpGivebackMinPeak && g_gbPeakFav < InpGivebackPeakCutoff && fav <= InpGivebackThreshold)
+         CloseCurrentPosition("GIVEBACK");
      }
 
    if(!IsNewBar()) return;
