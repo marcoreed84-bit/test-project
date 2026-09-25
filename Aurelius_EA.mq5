@@ -824,15 +824,41 @@
 //|  actually lose. PEAK SIZE turned out to be the real discriminator: small-       |
 //|  peak givebacks are heavily net-negative, big-peak givebacks are heavily         |
 //|  net-positive (see Meridian_EA.mq5 v1.06 header for the original finding).        |
-//|  Re-tested on THIS file's own real entries (research/aurelius/giveback_            |
-//|  generalization_test.py, sim.py's EA-faithful simulator, real GOLD M5,               |
-//|  same 885-entry set used throughout this session): real net $2587 -> $3598            |
-//|  at peak cutoff $25 (+$1011, +39%), positive at every cutoff $10-30 tested,             |
-//|  positive both in-sample and out-of-sample throughout. Shipped default                  |
-//|  InpGivebackPeakCutoff=25 matches the strongest point found in that sweep.                |
+//|  Python-only estimate at the time (research/aurelius/giveback_                     |
+//|  generalization_test.py, sim.py's simulator, same 885-entry real set): real          |
+//|  net $2587 -> $3598 at peak cutoff $25 (+$1011, +39%), positive at every               |
+//|  cutoff $10-30 tested, positive both in-sample and out-of-sample - THIS                 |
+//|  ESTIMATE WAS WRONG, see the real result immediately below.                               |
+//|                                                                                              |
+//|  REAL MT5 RESULT (2026-09-25, live GOLD 382043238, M5, 2023.01.01-2026.09.25,                |
+//|  same window/inputs otherwise, only InpUseGivebackExit toggled): default (false)              |
+//|  924 trades, net 35,844.76, PF 1.563607, win 28.90%, avg win 372.45, avg loss                  |
+//|  -96.80, largest win 3505.86. InpUseGivebackExit=true: 1043 trades (+12.9%),                     |
+//|  net 12,811.42 (-64.3%), PF 1.274797, win 48.13% (roughly doubled, as the                          |
+//|  Python model predicted), avg win 118.39 (-68.2%), avg loss -86.18, largest win                      |
+//|  2143.58 (-38.8%). REJECTED. Stays false.                                                               |
+//|                                                                                                            |
+//|  WHY THE PYTHON ESTIMATE WAS WRONG: that test swapped only the exit onto the                               |
+//|  SAME fixed list of already-real entries - it could not see that closing a trade                            |
+//|  earlier frees the single-position slot sooner, letting MORE (and apparently                                 |
+//|  weaker-average) later entries fire that the baseline's slower exit would have                                |
+//|  blocked - the exact single-position-cascade blind spot this project has hit                                   |
+//|  before elsewhere (e.g. Meridian's stale-ticket-bar note). Real trade count rose                                 |
+//|  924->1043 and average win size collapsed 372->118, both consistent with that                                     |
+//|  mechanism, not with the feature simply "correctly cutting small losers" as                                        |
+//|  designed. UNRESOLVED: whether tick-level (real) vs bar-level (Python) peak                                          |
+//|  tracking also contributes is not yet isolated from the cascade effect.                                               |
+//|                                                                                                                         |
+//|  PORTFOLIO IMPACT: the identical feature was ALSO shipped (same Python-only                                             |
+//|  methodology, same blind spot) on Meridian_EA.mq5, Aurelius_M15_EA.mq5,                                                  |
+//|  Vanguard_EA.mq5 and Vanguard_M15_EA.mq5. None of those have a real MT5 result                                            |
+//|  yet. Given this real rejection on the one file that HAS been tested, do NOT                                               |
+//|  turn InpUseGivebackExit on for any of the other four until each gets its own                                               |
+//|  real Strategy Tester A/B run - the Python "generalizes to 5 systems" finding                                                |
+//|  from earlier today should now be treated as unconfirmed, not validated.                                                      |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.50"
+#property version   "1.51"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1062,7 +1088,7 @@ input bool    InpUseTrailAfterBE  = false;     // Keep trailing further once bre
 input double  InpTrailGiveBackATR = 3.0;       // Trail distance behind the trade's best price since entry (x entry ATR) once past breakeven - wide on purpose, see InpUseBreakeven.
 
 input group "=== Giveback-to-breakeven exit (v1.50 candidate, Python-only so far) ==="
-input bool   InpUseGivebackExit    = false;   // Cuts a trade at market once it built a SMALL peak profit then gave it back near breakeven - see header for the real research and why it's off by default until a real MT5 test confirms it. Genuinely different from InpUseBreakeven above (which was real-tested and rejected): this only cuts a SPECIFIC shape (small peak then full giveback), and explicitly protects the shape that looks similar but isn't (large peak then giveback, which the data shows usually keeps going). UNTESTED alongside InpUseScale (also off by default): with both on, HasOwnPosition() finds whichever leg PositionsTotal() scans last, so an add-on leg's entry price could be used for the peak/giveback check instead of the original leg's, and a GIVEBACK close closes the whole net position, not just the add-on. Leave InpUseScale off if using this, until that combination gets its own real check.
+input bool   InpUseGivebackExit    = false;   // REJECTED (2026-09-25, real MT5, live GOLD 382043238, same window): net 35,844.76->12,811.42 (-64.3%), PF 1.564->1.275. The Python estimate that motivated this (+39%) was wrong - see header for why (a single-position-cascade blind spot in that test, not a fluke). Stays false.
 input double InpGivebackMinPeak    = 5.0;     // Floating profit (price units, i.e. $ per 0.01 lot) the trade must reach before a giveback can even be checked - below this it's ordinary noise, never cut.
 input double InpGivebackPeakCutoff = 25.0;    // If the peak reached was AT OR ABOVE this, do NOT cut on giveback - real data shows these trades recover into a real winner far more often than average, not less. 25 was the strongest point in the real sweep on this file's own real entries (research/aurelius/giveback_generalization_test.py).
 input double InpGivebackThreshold  = 1.0;     // Floating profit (price units) at/below which counts as "given back to near-breakeven".
