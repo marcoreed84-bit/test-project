@@ -91,9 +91,32 @@
 //|  INPUT COMMENTS: kept short from the start (see HeadShoulders_EA.mq5 v1.06's header for why -    |
 //|  MT5's Tester Inputs tab shows an input's COMMENT as the row label, not its variable name, so       |
 //|  a long comment makes that label unreadable). Full detail lives here in the header instead.           |
+//|                                                                    |
+//|  v1.01: real bugs in v1.00's own code, caught by an Opus review requested BEFORE this file's    |
+//|  first real MT5 run (same discipline as HeadShoulders_EA.mq5 v1.04). Fixed: (1) the real-time      |
+//|  NMS overlap check compared the wrong endpoint (a candidate's END against the watermark, not its     |
+//|  START) - overlapping/duplicate windows over the same cup could each be accepted and independently     |
+//|  confirm and trade; (2) the very first Recompute() (on attach or after any restart) would scan the       |
+//|  full InpLookbackBars of PAST history and could queue a candidate whose breakout already happened         |
+//|  long ago, confirming "fresh" at whatever price the market has since run to - the first pass now           |
+//|  only primes the real-time watermark and queues nothing, exactly matching what a live EA can honestly        |
+//|  know (only what happens after it starts watching); (3) the strided candidate scan could lag the            |
+//|  newest closed bar by a few bars every call (and in one specific stride/lookback combination could            |
+//|  reach the still-forming bar) - the newest closed bar is now always explicitly checked; (4) bar-age             |
+//|  for both the handle window and the overall expiry horizon was counting elapsed wall-clock seconds /             |
+//|  period length instead of real bars (the same bug class as HeadShoulders_EA.mq5 v1.04) - now uses the             |
+//|  real MQL5 Bars() count, immune to weekend/session gaps; (5) InpRequireHandle's shallow-pullback check              |
+//|  read each bar's own LOW independently instead of a running minimum of CLOSES since the cup's own end -              |
+//|  now matches the Python research's seg.min()-over-closes exactly; (6) the breakout-confirmation horizon               |
+//|  was measured from the cup's own end even with a handle required, eating into the breakout's own budget               |
+//|  instead of getting a fresh one from the handle's end, like the Python research does; (7) SL/TP are now                |
+//|  normalized to the symbol's real tick precision - an un-rounded price could be rejected outright by some                |
+//|  brokers as "invalid stops", silently failing every entry. Also removed a dead ATR computation in                       |
+//|  Recompute() that was never actually read (candidate detection needs no ATR at all - only the later                     |
+//|  breakout-tolerance/stop-buffer steps do, and those already read a fresh CurrentATR() of their own).                     |
 //+------------------------------------------------------------------+
 #property copyright "RoundingBottom_EA"
-#property version   "1.00"
+#property version   "1.01"
 #property description "Trades the real-validated Rounding Bottom measured-move target (81.1% win, PF 2.726, H4) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -169,6 +192,7 @@ struct RBPattern
    bool     handleArmed;         // InpRequireHandle only
    datetime handleEndTime;       // InpRequireHandle only - breakout scanning starts from here once armed
    bool     handleDecided;       // InpRequireHandle only - true once the handle window has elapsed either way
+   double   handleMinClose;      // InpRequireHandle only - running min of CLOSES since t_end, matches Python's seg.min() over closes (Opus review Medium finding, fixed pre-first-MT5-run)
    int      run;                 // consecutive closes beyond the rim seen so far
    int      brk_i;               // -1 until confirmed
    datetime brk_t;
@@ -184,6 +208,7 @@ ulong    g_ticket = 0;
 RBPattern g_patterns[];     // confirmed-breakout patterns (kept for drawing/history/entry)
 RBPattern g_pending[];      // candidates found, not yet confirmed or expired
 datetime g_greedyLastEndTime = 0;   // real-time NMS watermark - see header's disclosed construction note
+bool     g_firstRecomputeDone = false;   // first Recompute() only primes the watermark - see its own comment (Opus review High finding, fixed pre-first-MT5-run)
 string   g_pz = "RBEA_";
 
 int      g_panX = -1, g_panY = -1;
@@ -282,27 +307,6 @@ bool IsNewBar()
    return(true);
   }
 //+------------------------------------------------------------------+
-void BuildATR(const MqlRates &r[], const int n, double &atr[])
-  {
-   ArrayResize(atr, n);
-   double tr[]; ArrayResize(tr, n);
-   double sum = 0.0;
-   for(int i = 0; i < n; i++)
-     {
-      double hl = r[i].high - r[i].low;
-      if(i == 0) tr[i] = hl;
-      else
-        {
-         double pc = r[i - 1].close;
-         tr[i] = MathMax(hl, MathMax(MathAbs(r[i].high - pc), MathAbs(r[i].low - pc)));
-        }
-      sum += tr[i];
-      if(i >= InpATRPeriod) sum -= tr[i - InpATRPeriod];
-      int cnt = MathMin(i + 1, InpATRPeriod);
-      atr[i] = MathMax(sum / cnt, _Point);
-     }
-  }
-//+------------------------------------------------------------------+
 //| Same pattern (by its start/end bar times) already known, either     |
 //| confirmed or still pending?                                          |
 //+------------------------------------------------------------------+
@@ -315,9 +319,85 @@ bool AlreadyKnown(const datetime tStart, const datetime tEnd)
    return(false);
   }
 //+------------------------------------------------------------------+
+//| Tries ONE candidate window ending at `end`. Factored out of         |
+//| Recompute() so the strided scan and the explicit trailing check       |
+//| (see Recompute()'s own comment on why that trailing check exists)      |
+//| share one implementation.                                               |
+//+------------------------------------------------------------------+
+void TryCandidate(const MqlRates &r[], const double &c[], const int end, const bool primingOnly)
+  {
+   int start = end - g_npts + 1;
+   if(start < 0) return;
+   //--- overlap check on the candidate's own START, not its end (Opus review
+   //--- Critical finding, fixed pre-first-MT5-run): checking `end` against the
+   //--- watermark only blocks candidates that finish before the watermark - it
+   //--- does NOT stop a later-ending candidate whose START still falls inside
+   //--- the previously accepted window, so overlapping/duplicate windows over
+   //--- the same cup were being accepted and could each independently confirm
+   //--- and trade. A real overlap check compares the new candidate's START to
+   //--- where the last accepted one ENDED.
+   if(r[start].time <= g_greedyLastEndTime) return;
+
+   double a, b, cc, r2;
+   if(!QuadFit(c, start, a, b, cc, r2)) return;
+   if(a <= 0.0 || r2 < InpR2Min) return;
+
+   int bottomI = start;
+   double bottomPx = c[start];
+   for(int i = start + 1; i <= end; i++)
+      if(c[i] < bottomPx) { bottomPx = c[i]; bottomI = i; }
+   double frac = (double)(bottomI - start) / (double)g_npts;
+   if(frac < InpCenterTol || frac > 1.0 - InpCenterTol) return;
+
+   double rim = c[start];
+   double height = rim - bottomPx;
+   if(height <= 0.0) return;
+
+   //--- this candidate now "owns" this stretch of time - see header note.
+   //--- Advanced even during priming (see Recompute()) so the FOLLOWING real
+   //--- call doesn't re-find and re-queue the exact same historical ground.
+   g_greedyLastEndTime = r[end].time;
+
+   //--- Opus review High finding, fixed pre-first-MT5-run: the very first
+   //--- Recompute() this EA ever runs (on attach, or after any restart) would
+   //--- otherwise scan up to InpLookbackBars of PAST history and queue
+   //--- candidates whose breakout may have already happened, sometimes deep
+   //--- in an existing move - AdvancePending() has no way to know that and
+   //--- would confirm it "fresh" a few bars later, entering at whatever price
+   //--- the market has already run to rather than a real breakout price. A
+   //--- live EA can only honestly act on what happens AFTER it starts
+   //--- watching, so the first pass only primes the watermark and queues
+   //--- nothing; every later pass behaves normally.
+   if(primingOnly) return;
+
+   if(AlreadyKnown(r[start].time, r[end].time)) return;
+
+   RBPattern P; ZeroMemory(P);
+   P.i_start = start; P.i_end = end;
+   P.t_start = r[start].time; P.t_end = r[end].time;
+   P.rim = rim; P.bottomPx = bottomPx; P.t_bottom = r[bottomI].time;
+   P.height = height;
+   P.handleMinClose = rim;   // safe starting upper bound - see AdvancePending()'s running-min update
+   P.brk_i = -1;
+   P.traded = false;
+   P.run = 0;
+   P.handleArmed = false;
+   P.handleDecided = !InpRequireHandle;   // if the filter is off, treat it as already-decided/pass
+   int k = ArraySize(g_pending);
+   ArrayResize(g_pending, k + 1, 32);
+   g_pending[k] = P;
+  }
+//+------------------------------------------------------------------+
 //| Full rescan: find NEW rounding-bottom candidates over the real-time  |
 //| greedy NMS watermark (g_greedyLastEndTime - see header's disclosed    |
 //| construction note). Called once per InpRecomputeEveryBars new bars.    |
+//| Always explicitly checks the newest CLOSED bar (n-2) even if the        |
+//| strided scan wouldn't naturally land on it (Opus review Medium/Low       |
+//| findings, fixed pre-first-MT5-run: with the stride arithmetic alone,      |
+//| detection could lag the true newest bar by up to InpStride-1 bars every    |
+//| single call, and in one specific stride/lookback combination the strided    |
+//| loop could reach the still-FORMING bar (n-1) instead of stopping at the      |
+//| last real CLOSED one).                                                        |
 //+------------------------------------------------------------------+
 void Recompute()
   {
@@ -325,49 +405,29 @@ void Recompute()
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 0, InpLookbackBars, r);
    if(n <= g_npts + InpATRPeriod + 20) return;
 
-   double atr[]; BuildATR(r, n, atr);
+   //--- no ATR needed here - candidate detection is pure quad-fit/R^2/centering
+   //--- on price alone; ATR only matters later, for breakout tolerance and the
+   //--- stop buffer, both read fresh from CurrentATR() in AdvancePending().
    double c[]; ArrayResize(c, n);
    for(int i = 0; i < n; i++) c[i] = r[i].close;
 
-   for(int end = g_npts - 1; end < n; end += InpStride)
+   int lastEnd = n - 2;   // shift=1, the newest CLOSED bar - the forming bar (n-1) is never a valid window end
+   if(lastEnd < g_npts - 1) return;
+
+   bool primingOnly = !g_firstRecomputeDone;
+
+   int end = g_npts - 1;
+   bool didLast = false;
+   while(end <= lastEnd)
      {
-      if(r[end].time <= g_greedyLastEndTime) continue;   // already covered by a previously accepted candidate
-      int start = end - g_npts + 1;
-      if(start < 0) continue;
-
-      double a, b, cc, r2;
-      if(!QuadFit(c, start, a, b, cc, r2)) continue;
-      if(a <= 0.0 || r2 < InpR2Min) continue;
-
-      int bottomI = start;
-      double bottomPx = c[start];
-      for(int i = start + 1; i <= end; i++)
-         if(c[i] < bottomPx) { bottomPx = c[i]; bottomI = i; }
-      double frac = (double)(bottomI - start) / (double)g_npts;
-      if(frac < InpCenterTol || frac > 1.0 - InpCenterTol) continue;
-
-      double rim = c[start];
-      double height = rim - bottomPx;
-      if(height <= 0.0) continue;
-
-      if(AlreadyKnown(r[start].time, r[end].time)) continue;
-
-      RBPattern P; ZeroMemory(P);
-      P.i_start = start; P.i_end = end;
-      P.t_start = r[start].time; P.t_end = r[end].time;
-      P.rim = rim; P.bottomPx = bottomPx; P.t_bottom = r[bottomI].time;
-      P.height = height;
-      P.brk_i = -1;
-      P.traded = false;
-      P.run = 0;
-      P.handleArmed = false;
-      P.handleDecided = !InpRequireHandle;   // if the filter is off, treat it as already-decided/pass
-      int k = ArraySize(g_pending);
-      ArrayResize(g_pending, k + 1, 32);
-      g_pending[k] = P;
-
-      g_greedyLastEndTime = r[end].time;   // this candidate now "owns" this stretch of time - see header note
+      TryCandidate(r, c, end, primingOnly);
+      if(end == lastEnd) didLast = true;
+      end += InpStride;
      }
+   if(!didLast)
+      TryCandidate(r, c, lastEnd, primingOnly);
+
+   g_firstRecomputeDone = true;
   }
 //+------------------------------------------------------------------+
 double CurrentATR()
@@ -390,30 +450,40 @@ double CurrentATR()
 //| bar: first resolves InpRequireHandle (if on), then watches for a      |
 //| confirmed breakout above the rim, or expiry (InpMaxHorizonBars with     |
 //| no breakout). Called once per new bar, after Recompute().                |
+//| Bar-age uses the real MQL5 Bars() count between two times, not wall-      |
+//| clock seconds / period length (Opus review Medium finding, fixed pre-      |
+//| first-MT5-run, same bug class as HeadShoulders_EA.mq5 v1.04: dividing       |
+//| elapsed real time overcounts "bars" across a weekend/session gap,            |
+//| silently shrinking every window below).                                       |
 //+------------------------------------------------------------------+
 void AdvancePending()
   {
    if(ArraySize(g_pending) == 0) return;
    datetime t1 = iTime(_Symbol, PERIOD_CURRENT, 1);
    double c1 = iClose(_Symbol, PERIOD_CURRENT, 1);
-   double l1 = iLow(_Symbol, PERIOD_CURRENT, 1);
    if(t1 == 0) return;
    double atrNow = CurrentATR();
-   int periodSec = MathMax(PeriodSeconds(PERIOD_CURRENT), 1);
 
    for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
      {
       RBPattern P = g_pending[i];
       if(t1 <= P.t_end) continue;
 
-      long ageBars = ((long)t1 - (long)P.t_end) / periodSec;
+      long ageBars = Bars(_Symbol, PERIOD_CURRENT, P.t_end, t1) - 1;
 
       // --- InpRequireHandle: watch for a shallow pullback before allowing breakout scanning
       if(!P.handleDecided)
         {
+         //--- running min of CLOSES since t_end, matching Python's seg.min()
+         //--- over c[end:h_end+1] exactly (Opus review Medium finding, fixed
+         //--- pre-first-MT5-run: checking each bar's own LOW independently, as
+         //--- this did before, could arm the handle on a dip deeper than
+         //--- InpHandleMaxRetrace followed by a shallower bar - Python's
+         //--- cumulative-minimum-of-closes would correctly reject that).
+         g_pending[i].handleMinClose = MathMin(g_pending[i].handleMinClose, c1);
          if(ageBars >= InpHandleMinBars && ageBars <= InpHandleMaxBars)
            {
-            double retrace = P.rim - l1;
+            double retrace = P.rim - g_pending[i].handleMinClose;
             if(retrace > 0.0 && retrace <= InpHandleMaxRetrace * P.height)
               {
                g_pending[i].handleArmed = true;
@@ -438,6 +508,12 @@ void AdvancePending()
 
       datetime scanFrom = InpRequireHandle ? g_pending[i].handleEndTime : P.t_end;
       if(t1 <= scanFrom) continue;
+      //--- horizon measured from scanFrom (post-handle), not t_end - matches
+      //--- Python's own search_start-anchored horizon (Opus review Medium
+      //--- finding, fixed pre-first-MT5-run): otherwise a slow-forming handle
+      //--- eats into the breakout's own confirmation budget instead of getting
+      //--- a fresh one, same as Python gives it.
+      long ageBarsFromScan = Bars(_Symbol, PERIOD_CURRENT, scanFrom, t1) - 1;
 
       bool confirmed = false;
       double beyond = c1 - P.rim;
@@ -448,8 +524,13 @@ void AdvancePending()
            {
             P = g_pending[i];
             P.brk_t = t1; P.brk_price = c1;
-            P.target = P.brk_price + P.height;
-            P.stop = P.bottomPx - InpStopBufferATR * atrNow;
+            //--- normalized to the symbol's real tick precision (Opus review
+            //--- Medium finding, fixed pre-first-MT5-run) - an un-rounded SL/TP
+            //--- (an ATR fraction added to a raw price) can be rejected outright
+            //--- by some brokers/builds as "invalid stops", silently failing
+            //--- every single entry with nothing but a log line to show for it.
+            P.target = NormalizeDouble(P.brk_price + P.height, _Digits);
+            P.stop = NormalizeDouble(P.bottomPx - InpStopBufferATR * atrNow, _Digits);
             P.brk_i = 0;
             int k = ArraySize(g_patterns);
             ArrayResize(g_patterns, k + 1, 32);
@@ -460,7 +541,7 @@ void AdvancePending()
       else
          g_pending[i].run = 0;
 
-      bool expired = (!confirmed) && (ageBars > InpMaxHorizonBars);
+      bool expired = (!confirmed) && (ageBarsFromScan > InpMaxHorizonBars);
 
       if(confirmed || expired)
         {
