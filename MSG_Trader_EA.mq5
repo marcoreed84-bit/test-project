@@ -770,9 +770,18 @@
 //|  which a slower M5 stack confirms late or not at all - not measured.                                               |
 //|  NOT VALIDATED BY A REAL MT5 BACKTEST, and none is requested: nothing shipped. If anyone revisits this, the     |
 //|  simulator hook is Params(trend_gate="with"|"not_against", trend_arr=aurelius_alignment(bars)).                   |
+//|                                                                    |
+//|  v1.17 FIXES INPUTS-TAB TRUNCATION (2026-09-25, real screenshot of the "Reconstruction-specific" group -        |
+//|  same recurring bug class as the Aurelius/Vanguard/Meridian/Ratchet files: MT5's Inputs dialog only shows        |
+//|  the FIRST `//` comment line, and several here split their explanation across 2-3 lines). Fixed 9 inputs         |
+//|  (InpZoneTopPct, InpZoneBotPct, InpRangeRiskPct, InpMinExtensionPct, InpSkipDeadZone, InpDeadZoneMinPct/MaxPct,   |
+//|  InpSmallRiskSizing, InpSmallRiskPct, InpOneTradeAfterLoss, InpMaxSetupWatchHours, InpTrailRR, InpMaxHoldHours,   |
+//|  InpWeekendGuardMinutes) so each one's first line is now a complete, self-contained sentence - critically         |
+//|  including the M1-vs-M5 "set this back to X if running on the other timeframe" switching instructions that        |
+//|  were previously invisible in the dialog. Comment-only: every default VALUE is unchanged (mechanically diffed).   |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.16"
+#property version   "1.17"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -796,23 +805,19 @@ input bool   InpScaleOut          = true;
 input double InpTP1_RR            = 1.0;
 input double InpTP2_RR            = 1.5;
 input double InpTP3_RR            = 2.0;      // CONFIRMED: real broker TP order is always entry +/- 2.0x risk
-input double InpTrailRR           = 1.0;      // VALUE unchanged and now independently CONFIRMED by measurement:
-                                               // all 20 real M1 three-leg trades that closed on a stop after TP2
-                                               // closed at EXACTLY entry +/- 1.000R (stdev 0.000000). v1.11 keeps
-                                               // the 1.0 but changes what it MEANS: "Trail lock-in (R) after 2nd
-                                               // target" is a STATIC lock-in LEVEL measured from entry, not
-                                               // v1.09's trailing DISTANCE behind the running price. See header.
+input double InpTrailRR           = 1.0;      // Value unchanged, CONFIRMED: all 20 real M1 trades closed at EXACTLY entry +/-1.000R. v1.11 changed MEANING not value - see header.
+                                               // "Trail lock-in (R) after 2nd target" is a STATIC lock-in LEVEL
+                                               // measured from entry, not v1.09's trailing DISTANCE behind the
+                                               // running price.
 
 input group "==== Exit ==="
 input int    InpTPMode            = 0;        // 0 = 3-stage scale-out (InpScaleOut/TP1-3), else = single TP at InpTP_RR
 input double InpTP_RR             = 1.5;
-input int    InpMaxHoldHours      = 48;       // v1.10: REVERTED from v1.08's 6 - see header. Real A/B test on
-                                               // identical M1 configs proved 48 beats 6 (net +20,731 vs +14,805,
-                                               // PF 1.80 vs 1.56). Matches the real EA's own actual shipped value.
-input int    InpWeekendGuardMinutes = 30;     // v1.12: INFERRED, not measured - see header. Flattens any still-
-                                               // open position this many minutes before the symbol's Friday
-                                               // close, so a slow grind can't sit through the weekend gap and
-                                               // miss its InpMaxHoldHours deadline by dozens of hours. 0 disables.
+input int    InpMaxHoldHours      = 48;       // v1.10: REVERTED from v1.08's 6 - real A/B test proved 48 beats 6 (net +20,731 vs +14,805, PF 1.80 vs 1.56).
+                                               // Matches the real EA's own actual shipped value.
+input int    InpWeekendGuardMinutes = 30;     // v1.12: INFERRED not measured - flattens open positions this many minutes before Friday close (0=disabled). See header.
+                                               // A slow grind can't sit through the weekend gap and miss its
+                                               // InpMaxHoldHours deadline by dozens of hours.
 
 input group "==== Sessions (GMT) ==="
 input bool   InpMsg1Enable        = true;
@@ -841,31 +846,25 @@ input int    InpZoneLineWidth     = 2;
 input int    InpHistoryDays       = 30;
 
 input group "==== Reconstruction-specific (not in the original report) ==="
-input double InpZoneTopPct        = 50.0;     // v1.07 M1 real-data fix - see header. M5 value was 61.8 (standard
-                                               // OTE) - set THIS BACK TO 61.8 IF RUNNING ON M5.
-input double InpZoneBotPct        = 78.6;     // unchanged between M1/M5 - both real-calibrated to the same value
-input double InpRangeRiskPct       = 30.8;    // real-confirmed IDENTICAL on M1 and M5 (30.63% vs 30.8% median) -
-                                               // see v1.07 header note. No period-specific override needed.
-input double InpMinExtensionPct    = 10.0;    // v1.07 M1 real-data fix - see header. M5 value was 15.0 - SET THIS
-                                               // BACK TO 15.0 IF RUNNING ON M5.
-input bool   InpSkipDeadZone      = false;    // v1.14: DEFAULTED OFF - v1.13's real M1 re-test came back worse.
+input double InpZoneTopPct        = 50.0;     // M1 real-data value (v1.07). RUNNING ON M5? SET THIS TO 61.8 (standard OTE) - see header.
+input double InpZoneBotPct        = 78.6;     // unchanged M1/M5 - same real-calibrated value both timeframes.
+input double InpRangeRiskPct       = 30.8;    // IDENTICAL on M1 and M5 (real-confirmed, 30.63% vs 30.8% median) - no override needed.
+input double InpMinExtensionPct    = 10.0;    // M1 real-data value (v1.07). RUNNING ON M5? SET THIS BACK TO 15.0 - see header.
+input bool   InpSkipDeadZone      = false;    // OFF by default (v1.14) - v1.13's real M1 re-test came back worse; v1.15 explains why. Opt-in, see header.
                                                // v1.15 corrects WHY (see header): it re-times same-day entries and
                                                // skips 6 winning setups - not a cross-day cascade - and the band
                                                // itself flips sign under the EA's own risk definition. Opt-in only.
-input double InpDeadZoneMinPct    = 0.18;     // % of entry price. Boundary fit from real data - approximate, see header.
-input double InpDeadZoneMaxPct    = 0.26;     // % of entry price. Boundary fit from real data - approximate, see header.
-input bool   InpSmallRiskSizing   = true;     // v1.15: SHRINK (never skip) setups whose risk < InpSmallRiskPct of price -
+input double InpDeadZoneMinPct    = 0.18;     // % of entry price - approximate boundary, see header.
+input double InpDeadZoneMaxPct    = 0.26;     // % of entry price - approximate boundary, see header.
+input bool   InpSmallRiskSizing   = true;     // v1.15: SHRINK (never skip) small-risk setups - unlike v1.13's skip, cannot change any later trade. See header.
                                                // the setup is still taken and the single position slot is held exactly as
                                                // long, so unlike v1.13's skip it cannot change any later trade. See header.
-input double InpSmallRiskPct      = 0.26;     // % of entry price, measured on the order's own px/SL (not re-fit here -
-                                               // v1.13's pre-existing edge; real-list gains hold across 0.20-0.30).
+input double InpSmallRiskPct      = 0.26;     // % of entry price (order's own px/SL). Real gains hold across 0.20-0.30 - see header.
 input double InpSmallRiskLotFactor = 0.3333;  // small-risk lots = LotStep(InpLots * this): 0.03 -> 0.01. 1.0 = off.
 input int    InpATRPeriod         = 14;
 input double InpMaxSpreadPoints   = 60;
-input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - see header, opt-in (p=0.11-0.12)
-input double InpMaxSetupWatchHours = 4.25;    // real-confirmed compatible with BOTH M1 and M5 - real M1 entries
-                                               // topped out at 3.95h, real M5 entries at 4.08h, same window covers
-                                               // both. No period-specific override needed.
+input bool   InpOneTradeAfterLoss = false;    // v1.01 real-data circuit breaker - opt-in, see header (p=0.11-0.12).
+input double InpMaxSetupWatchHours = 4.25;    // Compatible with BOTH M1 and M5 (real M1 tops at 3.95h, M5 at 4.08h) - no override needed.
 
 input group "==== Notifications ==="
 input bool   InpPushNotifications = true;
