@@ -565,9 +565,8 @@ void DrawPattern(const HSPattern &P)
 
    if(P.brk_i >= 0)
      {
-      double rightEdge = 0.0;
       datetime tb0 = iTime(_Symbol, PERIOD_CURRENT, 0);
-      rightEdge = (tb0 > P.brk_t) ? tb0 : P.brk_t + (datetime)(20 * PeriodSeconds(PERIOD_CURRENT));
+      datetime rightEdge = (tb0 > P.brk_t) ? tb0 : (datetime)((long)P.brk_t + 20 * PeriodSeconds(PERIOD_CURRENT));
       DrawLine(base + "tgt", P.brk_t, P.target, rightEdge, P.target, InpColTarget, 2, STYLE_DASH, true);
       DrawLabel(base + "tgtlbl", P.brk_t, P.target,
                 "  target " + DoubleToString(P.target, _Digits), InpColTarget);
