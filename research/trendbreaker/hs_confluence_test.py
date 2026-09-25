@@ -196,3 +196,65 @@ if __name__ == "__main__":
           "search over the SAME rolling-lookback logic already used for the trendline validation work, which "
           "is a real, separate construction from H&S's swing detection - not a quick bolt-on. Flagging as a "
           "genuine remaining candidate rather than rushing a fake version of it.")
+
+
+def classify_effort(o, h, l, c, vol, atr, vavg,
+                     range_atr=1.3, vol_ratio=1.5, close_pct=0.25):
+    """Port of effort_vs_result_test.py's classify_effort - VSA "Effort vs
+    Result" (Tom Williams, Master the Markets), real-validated on H4 this
+    session (42.1% reversal vs 37.4% baseline, p=0.0053, stable IS/OOS) -
+    never tested against H&S specifically until now."""
+    rng = h - l
+    close_pos = np.where(rng > 0, (c - l) / np.maximum(rng, 1e-9), 0.5)
+    wide = rng >= range_atr * atr
+    hi_vol = vol >= vol_ratio * np.maximum(vavg, 1e-9)
+    up = wide & hi_vol & (close_pos >= 1 - close_pct)
+    dn = wide & hi_vol & (close_pos <= close_pct)
+    return up, dn
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "effort":
+    df5 = E.load_m5()
+    df15 = E.resample_m15_from_m5(df5)
+    o15 = df15["open"].values
+    vol15 = df15["tick_volume"].values.astype(float)
+    breakouts, h, l, c, atr = find_breakouts_full(df15, break_tol=BREAK_TOL)
+    n15 = len(df15)
+
+    vavg = np.convolve(vol15, np.ones(50) / 50, mode="same")
+    up_eff, dn_eff = classify_effort(o15, h, l, c, vol15, atr, vavg)
+    RESULT_BARS, RESULT_MIN_ATR = 3, 0.30
+
+    def failed_effort_at(i, want_up):
+        """True if bar i is an EFFORT bar in `want_up` direction that then
+        failed to follow through within RESULT_BARS - the VSA "effort with
+        no result" signature, checked at bar i."""
+        if i + RESULT_BARS >= n15:
+            return False
+        is_eff = up_eff[i] if want_up else dn_eff[i]
+        if not is_eff:
+            return False
+        move = (c[i + RESULT_BARS] - c[i]) * (1 if want_up else -1)
+        success = move >= RESULT_MIN_ATR * atr[i]
+        return not success
+
+    print("=" * 95)
+    print("BASELINE (current best construction, no effort-vs-result filter)")
+    print("=" * 95)
+    base_res, _, _ = eval_filtered(breakouts, h, l, c, lambda b: True)
+    report(base_res, "no confluence filter")
+
+    print("\n" + "=" * 95)
+    print("TEST 5: VSA EFFORT-VS-RESULT FAILURE AT THE RIGHT SHOULDER")
+    print("(shoulder shows wide-range/high-volume/closes-on-the-extreme in the PRIOR trend's")
+    print(" direction, but price does NOT follow through - a real exhaustion signature)")
+    print("=" * 95)
+    def allow_effort(b):
+        # top pattern: right shoulder is a high in an uptrend - want a failed EFFORT_UP there.
+        # inverse: right shoulder is a low in a downtrend - want a failed EFFORT_DOWN there.
+        i_s2 = b["i_s2"]
+        want_up = b["top"]
+        # check the shoulder bar itself and the couple of bars right around its formation
+        return any(failed_effort_at(k, want_up) for k in range(max(0, i_s2 - 2), i_s2 + 1))
+    res, missed, fo = eval_filtered(breakouts, h, l, c, allow_effort)
+    report(res, "failed-effort at right shoulder", filtered_out=fo)
