@@ -58,9 +58,22 @@
 //|  InpHistoryDays, same idiom as MSG_Trader_EA.mq5's own session-box trail),      |
 //|  plus entry/exit arrows on real fills (same OBJ_ARROW/caption idiom as           |
 //|  every other EA in this portfolio).                                               |
+//|                                                                    |
+//|  v1.01 PERFORMANCE FIX (2026-09-25, real backtest report - a multi-year M15  |
+//|  Tester run was still taking ~1h even on OHLC modeling). Root cause: Recompute() |
+//|  re-scanned the ENTIRE InpLookbackBars swing history from scratch on EVERY new    |
+//|  bar (full pivot scan + an ArrayResize per swing found), almost all of it          |
+//|  identical to the previous bar's result. Two real fixes, not just "wait longer":     |
+//|  InpLookbackBars default cut 3000 -> 800 (real patterns resolve in ~80 bars on         |
+//|  average - 800 is generous headroom, not a requirement), and the full rescan is         |
+//|  now throttled to every InpRecomputeEveryBars(5) bars rather than every single one -      |
+//|  AdvancePending()'s own breakout confirmation (the part that actually has to be exact)      |
+//|  still runs every bar regardless, so this only delays noticing a BRAND NEW pattern           |
+//|  shape by up to a few bars, immaterial given a pattern takes many dozens of bars to            |
+//|  even form.                                                                                      |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.00"
+#property version   "1.01"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -71,7 +84,8 @@ input group "=== Swing / pivot detection (same construction as research/trendbre
 input int    InpPivotStrength   = 5;       // N bars each side - N-bar fractal pivot
 input double InpSwingMinATR     = 1.0;     // ZigZag "deviation": min swing leg, x ATR
 input int    InpATRPeriod       = 14;      // SMA-of-true-range (MT5's iATR definition)
-input int    InpLookbackBars    = 3000;    // Bars of history scanned each recompute
+input int    InpLookbackBars    = 800;     // Bars of history scanned each recompute (real patterns resolve in ~80 bars on average - this is generous headroom, not a requirement)
+input int    InpRecomputeEveryBars = 5;    // Re-scan for NEW pattern shapes every N bars (not every single bar) - AdvancePending()'s breakout confirmation still checks every bar regardless, this only throttles the expensive full swing rescan
 
 input group "=== Head & Shoulders construction (real-validated target, see header) ==="
 input double InpShoulderTolATR  = 1.5;     // Shoulders "roughly the same level" - max ATR apart
@@ -135,6 +149,7 @@ struct HSPattern
   };
 
 datetime g_lastBarTime = 0;
+int      g_barCounter = 0;   // counts new bars since attach, for InpRecomputeEveryBars throttling
 ulong    g_ticket = 0;
 HSPattern g_patterns[];           // confirmed-breakout patterns (kept for drawing/history/entry)
 HSPattern g_pending[];             // shapes found, not yet confirmed or expired - advanced one bar at a time
@@ -714,7 +729,16 @@ void OnTick()
   {
    if(IsNewBar())
      {
-      Recompute();
+      //--- the full swing rescan (Recompute) is the expensive part - O(lookback)
+      //--- pivot scan plus an ArrayResize per swing found, redone almost
+      //--- identically every bar if run unthrottled. AdvancePending() (breakout
+      //--- confirmation, O(1) per pending candidate) still runs every bar - only
+      //--- the search for BRAND NEW pattern shapes is throttled, and a pattern
+      //--- takes many dozens of bars to even form, so a few bars' detection lag
+      //--- here is immaterial.
+      g_barCounter++;
+      if(InpRecomputeEveryBars <= 1 || g_barCounter % InpRecomputeEveryBars == 0)
+         Recompute();
       AdvancePending();
       CheckForEntry();
       RefreshDrawings();
