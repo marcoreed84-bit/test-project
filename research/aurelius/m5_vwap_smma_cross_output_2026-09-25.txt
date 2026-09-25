@@ -1,0 +1,37 @@
+M5 data: n=256318 bars (~1319 days)
+
+raw 21/50 SMMA crosses: 1209 up, 1208 down (1.83/day)
+
+Trimmed grid (configs that looked least-bad on M1)
+    k=1.5 flare_lb=20 flare_r=1.1 tgt=next_level stop=1.0: n= 179 (0.14/day) net=     1.24 pf= 1.008 win%= 63.7 IS=  -32.76 OOS=   34.01
+    k=1.5 flare_lb=20 flare_r=1.1 tgt=next_level stop=1.5: n= 178 (0.13/day) net=    48.93 pf= 1.333 win%= 75.8 IS=  -11.45 OOS=   60.39
+    k=1.5 flare_lb=20 flare_r=1.1 tgt=opposite_band stop=1.0: n= 180 (0.14/day) net=     0.58 pf= 1.004 win%= 63.3 IS=  -33.42 OOS=   34.01
+    k=1.5 flare_lb=20 flare_r=1.1 tgt=opposite_band stop=1.5: n= 178 (0.13/day) net=    48.44 pf= 1.328 win%= 75.3 IS=  -11.95 OOS=   60.39
+    k=1.5 flare_lb=20 flare_r=1.3 tgt=next_level stop=1.0: n= 127 (0.10/day) net=    -6.03 pf= 0.949 win%= 63.0 IS=  -11.32 OOS=    5.29
+    k=1.5 flare_lb=20 flare_r=1.3 tgt=next_level stop=1.5: n= 126 (0.10/day) net=    31.54 pf= 1.302 win%= 75.4 IS=    5.28 OOS=   26.27
+    k=1.5 flare_lb=20 flare_r=1.3 tgt=opposite_band stop=1.0: n= 127 (0.10/day) net=    -6.03 pf= 0.949 win%= 63.0 IS=  -11.32 OOS=    5.29
+    k=1.5 flare_lb=20 flare_r=1.3 tgt=opposite_band stop=1.5: n= 125 (0.09/day) net=    31.95 pf= 1.306 win%= 75.2 IS=    5.68 OOS=   26.27
+    k=1.5 flare_lb=40 flare_r=1.1 tgt=next_level stop=1.0: n= 294 (0.22/day) net=   -35.97 pf= 0.890 win%= 55.1 IS=  -85.45 OOS=   49.48
+    k=1.5 flare_lb=40 flare_r=1.1 tgt=next_level stop=1.5: n= 287 (0.22/day) net=     4.01 pf= 1.012 win%= 66.6 IS=  -64.71 OOS=   68.72
+    k=1.5 flare_lb=40 flare_r=1.1 tgt=opposite_band stop=1.0: n= 296 (0.22/day) net=   -36.38 pf= 0.891 win%= 53.7 IS=  -85.86 OOS=   49.48
+    k=1.5 flare_lb=40 flare_r=1.1 tgt=opposite_band stop=1.5: n= 288 (0.22/day) net=    -4.67 pf= 0.986 win%= 65.3 IS=  -61.76 OOS=   57.09
+    k=1.5 flare_lb=40 flare_r=1.3 tgt=next_level stop=1.0: n= 189 (0.14/day) net=   -16.22 pf= 0.916 win%= 59.3 IS=  -44.70 OOS=   28.48
+    k=1.5 flare_lb=40 flare_r=1.3 tgt=next_level stop=1.5: n= 183 (0.14/day) net=     1.30 pf= 1.007 win%= 68.9 IS=  -32.89 OOS=   34.18
+    k=1.5 flare_lb=40 flare_r=1.3 tgt=opposite_band stop=1.0: n= 190 (0.14/day) net=   -14.17 pf= 0.928 win%= 57.9 IS=  -42.65 OOS=   28.48
+    k=1.5 flare_lb=40 flare_r=1.3 tgt=opposite_band stop=1.5: n= 183 (0.14/day) net=     3.65 pf= 1.018 win%= 67.8 IS=  -30.53 OOS=   34.18
+    k=2.0 flare_lb=20 flare_r=1.1 tgt=next_level stop=1.0: n= 342 (0.26/day) net=   -50.79 pf= 0.880 win%= 53.5 IS=  -36.84 OOS=  -13.95
+    k=2.0 flare_lb=20 flare_r=1.1 tgt=next_level stop=1.5: n= 340 (0.26/day) net=   -15.09 pf= 0.968 win%= 64.4 IS=  -11.29 OOS=   -3.80
+    k=2.0 flare_lb=20 flare_r=1.1 tgt=opposite_band stop=1.0: n= 343 (0.26/day) net=   -51.45 pf= 0.878 win%= 53.4 IS=  -37.49 OOS=  -13.95
+    k=2.0 flare_lb=20 flare_r=1.1 tgt=opposite_band stop=1.5: n= 340 (0.26/day) net=   -15.54 pf= 0.967 win%= 64.1 IS=  -11.74 OOS=   -3.80
+    k=2.0 flare_lb=20 flare_r=1.3 tgt=next_level stop=1.0: n= 239 (0.18/day) net=   -12.16 pf= 0.958 win%= 53.6 IS=  -11.82 OOS=   -0.34
+    k=2.0 flare_lb=20 flare_r=1.3 tgt=next_level stop=1.5: n= 238 (0.18/day) net=    -4.12 pf= 0.988 win%= 63.9 IS=    3.20 OOS=   -7.33
+    k=2.0 flare_lb=20 flare_r=1.3 tgt=opposite_band stop=1.0: n= 239 (0.18/day) net=   -12.16 pf= 0.958 win%= 53.6 IS=  -11.82 OOS=   -0.34
+    k=2.0 flare_lb=20 flare_r=1.3 tgt=opposite_band stop=1.5: n= 237 (0.18/day) net=    -3.67 pf= 0.989 win%= 63.7 IS=    3.65 OOS=   -7.33
+    k=2.0 flare_lb=40 flare_r=1.1 tgt=next_level stop=1.0: n= 478 (0.36/day) net=  -185.16 pf= 0.713 win%= 48.3 IS= -112.23 OOS=  -72.93
+    k=2.0 flare_lb=40 flare_r=1.1 tgt=next_level stop=1.5: n= 471 (0.36/day) net=   -99.06 pf= 0.856 win%= 60.1 IS=  -70.67 OOS=  -28.39
+    k=2.0 flare_lb=40 flare_r=1.1 tgt=opposite_band stop=1.0: n= 480 (0.36/day) net=  -190.16 pf= 0.708 win%= 47.3 IS= -117.23 OOS=  -72.93
+    k=2.0 flare_lb=40 flare_r=1.1 tgt=opposite_band stop=1.5: n= 472 (0.36/day) net=  -115.46 pf= 0.837 win%= 58.9 IS=  -75.44 OOS=  -40.02
+    k=2.0 flare_lb=40 flare_r=1.3 tgt=next_level stop=1.0: n= 319 (0.24/day) net=   -77.99 pf= 0.811 win%= 50.8 IS=  -35.65 OOS=  -42.34
+    k=2.0 flare_lb=40 flare_r=1.3 tgt=next_level stop=1.5: n= 313 (0.24/day) net=   -41.78 pf= 0.908 win%= 62.0 IS=  -20.85 OOS=  -20.93
+    k=2.0 flare_lb=40 flare_r=1.3 tgt=opposite_band stop=1.0: n= 320 (0.24/day) net=   -80.52 pf= 0.807 win%= 49.7 IS=  -38.18 OOS=  -42.34
+    k=2.0 flare_lb=40 flare_r=1.3 tgt=opposite_band stop=1.5: n= 313 (0.24/day) net=   -44.97 pf= 0.902 win%= 61.0 IS=  -24.04 OOS=  -20.93
