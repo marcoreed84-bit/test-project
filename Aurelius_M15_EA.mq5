@@ -835,11 +835,22 @@
 //|  EA-faithful simulator with this file's real P15 params, real GOLD M15              |
 //|  resampled from M5): real net $2722 -> $3958 at peak cutoff $30 (+$1236,             |
 //|  +45%), positive at every cutoff $10-30 tested, positive both in-sample               |
-//|  and out-of-sample throughout. Shipped default InpGivebackPeakCutoff=30                |
-//|  matches the strongest point found in that sweep.                                       |
+//|  and out-of-sample throughout - THIS ESTIMATE WAS WRONG, see below.                     |
+//|                                                                                            |
+//|  CORRECTED (same day): that test swapped only the exit onto a FIXED entry                |
+//|  list - it could not see that closing sooner frees the single-position slot               |
+//|  for more, later entries. Fixed by wiring the giveback check into sim.py's                 |
+//|  real entry-gating loop (extra_exit hook, checked every bar like Price21/                   |
+//|  VWAP/ALIGN_BREAK) and re-running: net 2722.37->486.65 (-82.1%), trades                       |
+//|  401->522 (+30.2%), win% 38.2->60.2. The identical corrected method was real-                  |
+//|  MT5-validated on Aurelius_EA.mq5 (-64.3% real vs -63.9% corrected-Python,                       |
+//|  near-exact match), so this file's own corrected -82.1% is trusted at that                        |
+//|  same level even without its own separate real test. REJECTED. Stays false.                        |
+//|  See Aurelius_EA.mq5 v1.52's header, research/aurelius/giveback_event_driven_                       |
+//|  test.py.                                                                                              |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.55"
+#property version   "1.56"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1184,7 +1195,7 @@ input bool    InpUseTrailAfterBE  = false;     // Keep trailing further once bre
 input double  InpTrailGiveBackATR = 3.0;       // Trail distance behind the trade's best price since entry (x entry ATR) once past breakeven - wide on purpose, see InpUseBreakeven.
 
 input group "=== Giveback-to-breakeven exit (v1.55 candidate, Python-only so far) ==="
-input bool   InpUseGivebackExit    = false;   // Cuts a trade at market once it built a SMALL peak profit then gave it back near breakeven - see header for the real research and why it's off by default until a real MT5 test confirms it. Genuinely different from InpUseBreakeven above (which was real-tested and rejected): this only cuts a SPECIFIC shape (small peak then full giveback), and explicitly protects the shape that looks similar but isn't (large peak then giveback, which the data shows usually keeps going). UNTESTED alongside InpUseScale (also off by default): with both on, HasOwnPosition() finds whichever leg PositionsTotal() scans last, so an add-on leg's entry price could be used for the peak/giveback check instead of the original leg's, and a GIVEBACK close closes the whole net position, not just the add-on. Leave InpUseScale off if using this, until that combination gets its own real check. CAUTION (2026-09-25): the identical feature on Aurelius_EA.mq5 was real-MT5-tested and REJECTED (net -64.3%, PF 1.564->1.275) - the Python-only estimate that motivated all five copies of this feature (+39-116%) was wrong there, likely from a single-position-cascade blind spot in that test method (an earlier exit frees the slot for more, weaker later entries, which the Python test couldn't see). This file's own copy has NOT been real-tested yet - treat the Python number below as unconfirmed, not validated, until it gets its own real A/B Strategy Tester run. See Aurelius_EA.mq5 v1.51's header for the full real numbers and the cascade explanation.
+input bool   InpUseGivebackExit    = false;   // REJECTED (2026-09-25): the Python method was fixed (giveback check wired into sim.py's real entry-gating loop with this file's own P15 params, instead of a post-hoc swap on a fixed entry list) and re-run - net 2722.37->486.65 (-82.1%), trades 401->522 (+30.2%), win% 38.2->60.2. Same cascade mechanism confirmed on Aurelius_EA.mq5 against a REAL MT5 A/B test (-64.3% real vs -63.9% corrected-Python, near-exact match) - this file's own corrected result is now trusted at that same level. Stays false. UNTESTED alongside InpUseScale (also off by default, separate issue - see v1.55 note below). See Aurelius_EA.mq5 v1.52's header and research/aurelius/giveback_event_driven_test.py.
 input double InpGivebackMinPeak    = 5.0;     // Floating profit (price units, i.e. $ per 0.01 lot) the trade must reach before a giveback can even be checked - below this it's ordinary noise, never cut.
 input double InpGivebackPeakCutoff = 30.0;    // If the peak reached was AT OR ABOVE this, do NOT cut on giveback - real data shows these trades recover into a real winner far more often than average, not less. 30 was the strongest point in this file's own real M15 sweep (research/aurelius/giveback_generalization_m15_test.py).
 input double InpGivebackThreshold  = 1.0;     // Floating profit (price units) at/below which counts as "given back to near-breakeven".

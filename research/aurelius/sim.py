@@ -20,20 +20,32 @@ import numpy as np
 from engine import P, POINT
 
 
-def simulate(ctx, extra_filter=None, params=None, extra_exit=None):
+def simulate(ctx, extra_filter=None, params=None, extra_exit=None, extra_exit_reason="DIVERGENCE"):
     """extra_filter(ctx, i, is_buy) -> bool, optional additional entry gate
     (e.g. the S&R touch-and-reject condition), applied on top of the real
     shipped gates below - used to test a candidate filter against the
     already-validated base gate, not in place of it.
 
-    extra_exit(ctx, i, is_buy) -> bool, optional additional exit trigger
-    (RESEARCH HOOK ONLY, never part of the real EA - e.g. a divergence-exit
-    candidate, research/divergence.py + divergence_exit_test.py). Checked
-    FIRST in the exit-priority chain below, right after the hard daily/Friday
-    session-close flatten and before Price21/VWAP/ALIGN_BREAK - by design,
-    since the whole point of an early-warning exit candidate is to fire
-    before those slower, already-shipped exits would. None (the default)
-    leaves every existing baseline byte-identical."""
+    extra_exit(ctx, i, is_buy, entry_i, entry_px) -> bool, optional additional
+    exit trigger (RESEARCH HOOK ONLY, never part of the real EA - e.g. a
+    divergence-exit candidate, research/divergence.py + divergence_exit_test.py,
+    or a peak-tracking candidate like giveback_generalization_test.py's
+    GivebackExit that needs entry_i/entry_px to track floating profit since
+    entry - added 2026-09-25 after a post-hoc "swap the exit on a fixed real
+    entry list" test badly mispredicted a real MT5 result on this exact kind
+    of candidate: that method can't see that an earlier exit frees the
+    single-position slot sooner for different LATER entries. Wiring the check
+    into this actual entry-gating loop, so a freed slot genuinely can change
+    which entries fire, is the fix). entry_i/entry_px are this trade's own
+    real entry bar/price - resets are automatic since a new trade always gets
+    a fresh entry_i. Checked FIRST in the exit-priority chain below, right
+    after the hard daily/Friday session-close flatten and before Price21/
+    VWAP/ALIGN_BREAK - by design, since the whole point of an early-warning
+    exit candidate is to fire before those slower, already-shipped exits
+    would. fired reason defaults to "DIVERGENCE" (backward compatible with
+    divergence_exit_test.py's own reason-based reporting) - pass
+    extra_exit_reason for a different label. None (the default) leaves every
+    existing baseline byte-identical."""
     p = params or P
     n = ctx["n"]
     close, high, low = ctx["close"], ctx["high"], ctx["low"]
@@ -121,8 +133,8 @@ def simulate(ctx, extra_filter=None, params=None, extra_exit=None):
             fired = None
             if ctx["near_daily_close"][i] or ctx["friday_flatten"][i]:
                 fired = "SESSION_CLOSE"
-            if fired is None and extra_exit is not None and extra_exit(ctx, i, is_buy):
-                fired = "DIVERGENCE"
+            if fired is None and extra_exit is not None and extra_exit(ctx, i, is_buy, entry_i, entry_px):
+                fired = extra_exit_reason
             if fired is None and p["use_price21_exit"]:
                 m21 = ctx["m21"][i]
                 if not np.isnan(m21) and atr[i] > 0:

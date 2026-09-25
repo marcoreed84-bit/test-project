@@ -56,7 +56,7 @@ def run(ctx, params, label, extra_exit=None):
 
 
 def make_exit(bear, bull):
-    def f(ctx, i, is_buy):
+    def f(ctx, i, is_buy, entry_i, entry_px):
         return bool(bear[i]) if is_buy else bool(bull[i])
     return f
 

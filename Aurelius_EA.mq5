@@ -849,16 +849,25 @@
 //|  designed. UNRESOLVED: whether tick-level (real) vs bar-level (Python) peak                                          |
 //|  tracking also contributes is not yet isolated from the cascade effect.                                               |
 //|                                                                                                                         |
-//|  PORTFOLIO IMPACT: the identical feature was ALSO shipped (same Python-only                                             |
-//|  methodology, same blind spot) on Meridian_EA.mq5, Aurelius_M15_EA.mq5,                                                  |
-//|  Vanguard_EA.mq5 and Vanguard_M15_EA.mq5. None of those have a real MT5 result                                            |
-//|  yet. Given this real rejection on the one file that HAS been tested, do NOT                                               |
-//|  turn InpUseGivebackExit on for any of the other four until each gets its own                                               |
-//|  real Strategy Tester A/B run - the Python "generalizes to 5 systems" finding                                                |
-//|  from earlier today should now be treated as unconfirmed, not validated.                                                      |
+//|  PORTFOLIO IMPACT / UPDATE (same day): the Python method was fixed - the                                                 |
+//|  giveback check is now wired directly into sim.py's real entry-gating loop                                               |
+//|  (extra_exit(ctx,i,is_buy,entry_i,entry_px), checked every bar like Price21/                                             |
+//|  VWAP/ALIGN_BREAK - research/aurelius/giveback_event_driven_test.py) instead of                                          |
+//|  a post-hoc swap on a fixed entry list, so a giveback exit can now genuinely                                             |
+//|  change which later entries fire, the same as the real EA. Re-run on THIS                                                |
+//|  file: net 2587.24->933.66 (-63.9%), trades 885->1012 (+14.3%), win% 31.3->46.8 -            |
+//|  matches the real MT5 result almost exactly (real: -64.3% net, +12.9% trades,                |
+//|  28.9->48.1% win), confirming the cascade diagnosis was correct. The SAME                     |
+//|  corrected method was then run on all four siblings and EVERY ONE is also net-                 |
+//|  negative: Aurelius_M15_EA.mq5 -82%, Meridian_EA.mq5 -43%, Vanguard_EA.mq5 -61%,                 |
+//|  Vanguard_M15_EA.mq5 -48% (same signature every time: trades up, win% roughly                    |
+//|  doubles, net down hard). This is now a decisive rejection across the whole                       |
+//|  portfolio, not an unconfirmed one - do not enable InpUseGivebackExit anywhere                     |
+//|  in this project, and no further real MT5 test on this specific feature is                          |
+//|  expected to be worth running.                                                                        |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.51"
+#property version   "1.52"
 #property strict
 
 #include <Trade\Trade.mqh>
