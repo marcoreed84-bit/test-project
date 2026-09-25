@@ -164,10 +164,31 @@
 //|  detection itself hasn't confirmed yet without abandoning the N-bar fractal definition the whole                     |
 //|  real-validated construction is built on. Purely visual/cosmetic - no signal, entry, exit, sizing, or                 |
 //|  risk-management logic touched.                                                                                         |
+//|                                                                    |
+//|  v1.08: the stacked combo (InpStopBufferATR 0.3->1.0, InpBreakTolATR 0.10->0.35,               |
+//|  InpUsePullbackEntry false->true, InpUseRunner false->true) is now the DEFAULT, not an              |
+//|  opt-in toggle - the first change in this file's history to promote a candidate to default            |
+//|  rather than ship it off. Real MT5 evidence behind this call (both real GOLD, same account):            |
+//|  (1) a 2026-only run (9 months): net 7234.04->18183.37 ZAR (+151%), PF 1.238->1.983, equity DD             |
+//|  22.91%->11.26%; (2) a full 2020-2026 run (6.73 years, 538 trades): net +17781.01, PF 1.227 -               |
+//|  weaker than the 2026-only figure because 82% of the total came from 2026 alone, and 2025 was a              |
+//|  losing year (-2175.46). Investigated rather than waved away: 2025's loss traced to just 2-3 bad               |
+//|  months (Feb -1971, Nov -2673, Dec -1672, win% collapsing to 12-27% in those specific months) with              |
+//|  7 of 12 months still profitable - the signature of a breakout system hitting a real choppy/false-               |
+//|  breakout regime, not a broken mechanism (every 2025 exit closing via a stop-type order, including               |
+//|  wins, is InpUseRunner working exactly as designed - no broker-side TP exists once it's on, so a                  |
+//|  winning trade also technically exits via its own trailed stop). The 2020-2023 portion of the full                 |
+//|  run carries a real, disclosed, and NOT independently fixable caveat: that Strategy Tester run's own                 |
+//|  History Quality was only 34% real ticks (vs 100% for the 2026-only run) - this project's own real GOLD              |
+//|  bar data doesn't even cover 2020 - mid-2022 (research/aurelius/engine.py's M5 loader starts 2022-07-04),             |
+//|  so there is no way to independently re-derive that stretch at higher fidelity than MT5's Tester already              |
+//|  gives it. Decision to default this made explicitly by the user after being shown all of the above, not               |
+//|  unilaterally - matching this file's own standing rule that a candidate earns default status only once                 |
+//|  someone has actually looked at the real evidence and chosen it, not on my say-so alone.                                  |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.07"
-#property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
+#property version   "1.08"
+#property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo now default (v1.08)"
 #property strict
 #include <Trade\Trade.mqh>
 CTrade trade;
@@ -182,25 +203,25 @@ input int    InpRecomputeEveryBars = 5;    // Full swing rescan throttle, every 
 
 input group "=== Head & Shoulders construction (real-validated target, see header) ==="
 input double InpShoulderTolATR  = 1.5;     // Shoulder level tolerance, x ATR
-input double InpBreakTolATR     = 0.10;    // Neckline break tolerance, x ATR
+input double InpBreakTolATR     = 0.35;    // Neckline break tolerance, x ATR
 input int    InpBreakConfirmCloses = 3;    // Closes to confirm breakout
 input double InpMaxHorizonMult  = 4.0;     // Pattern "live" horizon, x formation length
 
-input group "=== Stop-loss (disclosed, NOT real-validated - see header) ==="
-input double InpStopBufferATR   = 0.3;     // SL buffer beyond right shoulder, x ATR
+input group "=== Stop-loss (real-MT5-confirmed default since v1.08 - see header) ==="
+input double InpStopBufferATR   = 1.0;     // SL buffer beyond right shoulder, x ATR
 
 input group "=== RSI confluence filter (v1.02 candidate, off by default) ==="
 input bool   InpUseRSIFilter    = false;   // Require RSI extreme to enter
 input int    InpRSIPeriod       = 14;      // RSI period
 input double InpRSIThreshold    = 30.0;    // RSI oversold/overbought threshold
 
-input group "=== Pullback / retest entry (v1.03 candidate, off by default) ==="
-input bool   InpUsePullbackEntry = false;  // Wait for neckline retest, not market entry
+input group "=== Pullback / retest entry (real-MT5-confirmed default since v1.08) ==="
+input bool   InpUsePullbackEntry = true;   // Wait for neckline retest, not market entry
 input double InpPullbackTolATR   = 0.75;   // Retest tolerance, x ATR
 input int    InpPullbackWindowBars = 30;   // Retest window, bars
 
-input group "=== Trailing runner past target (v1.03 candidate, off by default) ==="
-input bool   InpUseRunner        = false;  // Trail stop past target, not fixed TP
+input group "=== Trailing runner past target (real-MT5-confirmed default since v1.08) ==="
+input bool   InpUseRunner        = true;   // Trail stop past target, not fixed TP
 input double InpRunnerTrailATR   = 0.5;    // Runner trail distance, x ATR
 
 input group "=== Trade management ==="
