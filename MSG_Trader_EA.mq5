@@ -790,9 +790,24 @@
 //|  vs 900-1600+) - MSG1 trades are diluting quality, not adding independent edge. Nothing about MSG3 itself         |
 //|  changes; MSG1 is simply not carrying its own weight in the one real report that tested it. Set                   |
 //|  InpMsg1Enable=true to restore the original source report's config if you want to re-test it.                      |
+//|                                                                    |
+//|  v1.18 DRAWS THE SESSION BOX LIVE WHILE FORMING, not just once the window closes (2026-09-25, user pushback -    |
+//|  "surely the msg blocks can form live while the chart is running"). Correct: DrawSessionBox() was only ever      |
+//|  called with the FROZEN g_sesRangeHigh/Low, gated behind g_sesRangeValid[i], which stays true FOREVER after the   |
+//|  first freeze - so on every day after the first, a new session forming its range was silently still showing       |
+//|  YESTERDAY's frozen box/numbers until today's window closed too, not "nothing", which is worse than it looked.     |
+//|  UpdateRangeDrawings() now checks g_sesWasIn[i] (currently inside the window right now) and, while forming, draws   |
+//|  the box from the LIVE g_sesFormHigh/Low, growing every new bar, styled DASHED (DrawSessionBox()'s new `dashed`      |
+//|  param) and labelled "(forming)" to mark it as not-yet-validated - matching the panel's own existing "forming"        |
+//|  terminology. Fib levels stay gated to AFTER freeze only: they are computed FROM the final H/L, so showing them        |
+//|  against a still-moving forming range would mean every level shifts bar to bar, which is more misleading than          |
+//|  simply not drawing them yet; any fib lines left over from the previous closed session are purged the instant a        |
+//|  new session starts forming (the `forming` guard routes through the existing delete-else branch). Still only            |
+//|  updates once per new bar (the same IsNewBar() cadence every other drawing in this EA already uses) - not sub-           |
+//|  second tick-by-tick, which nothing else here is either.                                                                  |
 //+------------------------------------------------------------------+
 #property copyright "MSG_Trader_EA (reconstruction)"
-#property version   "1.17"
+#property version   "1.18"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1768,7 +1783,7 @@ void UpdateLevelLines()
 //| Session range box + fib zone lines - current range per session,    |
 //| plus (InpDrawHistory) a fading trail of past InpHistoryDays worth. |
 //+------------------------------------------------------------------+
-void DrawSessionBox(const string tag, datetime t1, datetime t2, double hi, double lo, color col, bool emphasis)
+void DrawSessionBox(const string tag, datetime t1, datetime t2, double hi, double lo, color col, bool emphasis, bool dashed = false)
   {
    if(!InpDrawRange) { return; }
    string nm = g_pz + tag;
@@ -1780,7 +1795,7 @@ void DrawSessionBox(const string tag, datetime t1, datetime t2, double hi, doubl
    ObjectSetDouble (0, nm, OBJPROP_PRICE, 1, lo);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, emphasis ? InpZoneLineWidth : 1);
-   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, nm, OBJPROP_STYLE, dashed ? STYLE_DASH : STYLE_SOLID);
    ObjectSetInteger(0, nm, OBJPROP_FILL, false);
    ObjectSetInteger(0, nm, OBJPROP_BACK, true);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
@@ -1812,20 +1827,41 @@ void UpdateRangeDrawings()
 
    for(int i = 0; i < 4; i++)
      {
-      if(!g_sesEnable[i] || !g_sesRangeValid[i]) continue;
-      string base = "cur" + IntegerToString(i) + "_";
-      datetime t1 = g_sesRangeStartTime[i], t2 = now + PeriodSeconds(_Period) * 20;
-      double H = g_sesRangeHigh[i], L = g_sesRangeLow[i], rng = H - L;
+      if(!g_sesEnable[i]) continue;
+      //--- LIVE FORMING BOX (v1.18): while currently inside this session's
+      //--- window, draw the range as it grows bar by bar (g_sesFormHigh/Low),
+      //--- dashed to mark it not-yet-validated, rather than showing nothing
+      //--- (or a stale PREVIOUS day's frozen box - g_sesRangeValid[i] stays
+      //--- true forever after the first freeze, so without this branch a new
+      //--- day's forming session would silently keep displaying yesterday's
+      //--- numbers until this window closes again). Once the window closes,
+      //--- UpdateSessionRanges() freezes g_sesRange* and g_sesWasIn[i] goes
+      //--- false, so the branch below takes over with the solid, final box.
+      bool forming = g_sesWasIn[i];
+      if(!forming && !g_sesRangeValid[i]) continue;   // never formed, never closed - nothing to show yet
 
-      DrawSessionBox(base + "box", t1, g_sesRangeEndTime[i], H, L, g_sesCol[i], true);
+      string base = "cur" + IntegerToString(i) + "_";
+      double H = forming ? g_sesFormHigh[i] : g_sesRangeHigh[i];
+      double L = forming ? g_sesFormLow[i]  : g_sesRangeLow[i];
+      datetime t1 = g_sesRangeStartTime[i], t2 = now + PeriodSeconds(_Period) * 20;
+      datetime boxEnd = forming ? now : g_sesRangeEndTime[i];
+      double rng = H - L;
+
+      DrawSessionBox(base + "box", t1, boxEnd, H, L, g_sesCol[i], true, forming);
       if(InpDrawRange)
          DrawChartLabel(g_pz, base + "lbl", t1, H + rng * 0.04,
-                        " MSG" + IntegerToString(i + 1) + "  H " + DoubleToString(H, _Digits)
+                        " MSG" + IntegerToString(i + 1) + (forming ? " (forming)  H " : "  H ") + DoubleToString(H, _Digits)
                         + " / L " + DoubleToString(L, _Digits), g_sesCol[i], 9);
       else
          DeleteChartLabel(g_pz, base + "lbl");
 
-      if(InpDrawFib && rng > 0.0)
+      //--- fib levels are only meaningful once the range is FINAL - while
+      //--- forming, H/L (and therefore every level) would shift bar to bar,
+      //--- which is more misleading than showing nothing. Any fib lines left
+      //--- over from the PREVIOUS closed session are purged below (the
+      //--- `forming` guard forces the else branch) so they don't linger on
+      //--- screen while today's box is still growing.
+      if(!forming && InpDrawFib && rng > 0.0)
         {
          double lvl0   = L, lvl236 = L + 0.236 * rng, lvl382 = L + 0.382 * rng, lvl50 = L + 0.5 * rng;
          double lvl618 = L + (100 - InpZoneTopPct) / 100.0 * rng, lvl786 = L + (100 - InpZoneBotPct) / 100.0 * rng, lvl100 = H;
