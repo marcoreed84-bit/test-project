@@ -258,3 +258,91 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "effort":
         return any(failed_effort_at(k, want_up) for k in range(max(0, i_s2 - 2), i_s2 + 1))
     res, missed, fo = eval_filtered(breakouts, h, l, c, allow_effort)
     report(res, "failed-effort at right shoulder", filtered_out=fo)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "savin":
+    # Savin, Weller & Zvingelis (2003), "The Predictive Power of Head-and-
+    # Shoulders Price Patterns in the U.S. Stock Market" - real academic
+    # study, independently confirms H&S predictive power (7-9%/year real
+    # risk-adjusted excess returns, S&P500/Russell2000, robust to Fama-
+    # French+momentum controls). Their restrictions (R6)-(R9), calibrated
+    # against real Bulkowski examples, are genuinely different filters from
+    # anything tested on this project's H&S construction so far:
+    #   R6/R7: shoulder height (from neckline) as a fraction of head height
+    #          must be between 0.25 and 0.70 - not too small, not too close
+    #          to the head's own height.
+    #   R8:    head height (from neckline) must be >= 3% of the head's own
+    #          price - filters out insignificant/noise-scale patterns.
+    #   R9:    horizontal (time) symmetry - no single gap between
+    #          consecutive extrema may exceed 1.2x the average gap.
+    df5 = E.load_m5()
+    df15 = E.resample_m15_from_m5(df5)
+    breakouts, h, l, c, atr = find_breakouts_full(df15, break_tol=BREAK_TOL)
+
+    print("=" * 95)
+    print("BASELINE (current best construction, no Savin/Weller/Zvingelis filter)")
+    print("=" * 95)
+    base_res, _, _ = eval_filtered(breakouts, h, l, c, lambda b: True)
+    report(base_res, "no confluence filter")
+
+    def avg_shoulder_frac(b):
+        """Mean of the two shoulders' height from the (sloped) neckline at
+        their own time, as a fraction of the head's own height - this
+        project's neckline convention substituted for R6/R7's flat E2/E4
+        average, since our neckline is deliberately sloped (through the two
+        troughs) rather than flat."""
+        nl_s1 = b["neckline_at"](b["i_s1"])
+        nl_s2 = b["neckline_at"](b["i_s2"])
+        sh1 = abs(b["p_s1"] - nl_s1)
+        sh2 = abs(b["p_s2"] - nl_s2)
+        return 0.5 * (sh1 + sh2) / b["head_height"] if b["head_height"] > 0 else None
+
+    print("\n" + "=" * 95)
+    print("TEST 6: R6/R7 - SHOULDER HEIGHT AS FRACTION OF HEAD HEIGHT, 0.25-0.70")
+    print("=" * 95)
+    def allow_r67(b):
+        frac = avg_shoulder_frac(b)
+        return frac is not None and 0.25 <= frac <= 0.70
+    res, missed, fo = eval_filtered(breakouts, h, l, c, allow_r67)
+    report(res, "R6/R7 shoulder-fraction 0.25-0.70", filtered_out=fo)
+
+    print("\n" + "=" * 95)
+    print("TEST 7: R8 - HEAD HEIGHT >= 3% OF THE HEAD'S OWN PRICE")
+    print("=" * 95)
+    for min_pct in (0.01, 0.02, 0.03):
+        def allow_r8(b, min_pct=min_pct):
+            return b["head_height"] / b["p_head"] >= min_pct if b["p_head"] > 0 else False
+        res, missed, fo = eval_filtered(breakouts, h, l, c, allow_r8)
+        tag = "  <-- Savin et al.'s own R8" if min_pct == 0.03 else ""
+        report(res, f"R8 head height >= {100*min_pct:.0f}% of price{tag}", filtered_out=fo)
+
+    print("\n" + "=" * 95)
+    print("TEST 8: R9 - HORIZONTAL (TIME) SYMMETRY, NO GAP > 1.2x THE AVERAGE GAP")
+    print("=" * 95)
+    def allow_r9(b):
+        gaps = [b["i_t1"] - b["i_s1"], b["i_head"] - b["i_t1"],
+                b["i_t2"] - b["i_head"], b["i_s2"] - b["i_t2"]]
+        avg_gap = sum(gaps) / 4.0
+        if avg_gap <= 0:
+            return False
+        return max(abs(g - avg_gap) for g in gaps) <= 1.2 * avg_gap
+    res, missed, fo = eval_filtered(breakouts, h, l, c, allow_r9)
+    report(res, "R9 time symmetry <= 1.2x avg gap", filtered_out=fo)
+
+    print("\n" + "=" * 95)
+    print("TEST 9: ALL THREE SAVIN/WELLER/ZVINGELIS FILTERS COMBINED (R6/R7 + R8[3%] + R9)")
+    print("=" * 95)
+    def allow_all_savin(b):
+        frac = avg_shoulder_frac(b)
+        if frac is None or not (0.25 <= frac <= 0.70):
+            return False
+        if b["p_head"] <= 0 or b["head_height"] / b["p_head"] < 0.03:
+            return False
+        gaps = [b["i_t1"] - b["i_s1"], b["i_head"] - b["i_t1"],
+                b["i_t2"] - b["i_head"], b["i_s2"] - b["i_t2"]]
+        avg_gap = sum(gaps) / 4.0
+        if avg_gap <= 0 or max(abs(g - avg_gap) for g in gaps) > 1.2 * avg_gap:
+            return False
+        return True
+    res, missed, fo = eval_filtered(breakouts, h, l, c, allow_all_savin)
+    report(res, "all three combined", filtered_out=fo)
