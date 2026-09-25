@@ -71,9 +71,28 @@
 //|  still runs every bar regardless, so this only delays noticing a BRAND NEW pattern           |
 //|  shape by up to a few bars, immaterial given a pattern takes many dozens of bars to            |
 //|  even form.                                                                                      |
+//|                                                                                                    |
+//|  v1.02: InpUseRSIFilter added (default OFF - see its own input comment for the real         |
+//|  Python numbers). This is ONE of several real, Python-validated candidates found            |
+//|  2026-09-25 on real GOLD data (this project switched off GOLD# the same day - see            |
+//|  research/ratchet/bars.py's header) with properly single-position-sequenced testing            |
+//|  (the same discipline this project adopted after a real MT5 test caught a flawed                |
+//|  post-hoc-swap methodology elsewhere in the portfolio - see Aurelius_EA.mq5 v1.52).               |
+//|  NOT YET SHIPPED as toggles, still Python-only research only, cited here so nothing gets           |
+//|  lost: (1) pullback/retest entry (wait for a throwback to the neckline instead of                  |
+//|  market-on-confirm) at 0.75xATR/30bar - real net +28-97% depending on what else is stacked           |
+//|  with it; (2) widening InpStopBufferATR to 1.0 (see its own input comment); (3) widening              |
+//|  InpBreakTolATR to 0.35 (net +12-25%); (4) a trailing runner past the measured target                  |
+//|  (0.5xATR trail) instead of closing 100% there (net +48-51%). All four combined (real GOLD,              |
+//|  research/trendbreaker/hs_next_round_test.py "stacked" mode): n=456 net +$4255 (vs this                  |
+//|  file's real, unimproved 0.3xATR-stop MT5 report: 599 trades, net 13999.4 ZAR, PF 1.161,                   |
+//|  NOTE the Python figure is USD price-difference, NOT directly comparable to that ZAR                        |
+//|  number without converting - see research/aurelius/giveback_real_mt5_rejection.py's                         |
+//|  sibling finding on why that comparison needs care), PF 2.377, win 52.0%, max closed-DD                       |
+//|  only 5.4% of net, worst losing streak 7. None of this is real-MT5-confirmed yet.                              |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.01"
+#property version   "1.02"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - first real MT5 run"
 #property strict
 #include <Trade\Trade.mqh>
@@ -94,7 +113,12 @@ input int    InpBreakConfirmCloses = 3;    // Consecutive closes beyond the neck
 input double InpMaxHorizonMult  = 4.0;     // Give the target this many x the pattern's own formation length to hit (else the position runs on stop/target as normal - this only bounds how long a NEW pattern is still considered "live" for a fresh entry)
 
 input group "=== Stop-loss (disclosed, NOT real-validated - see header) ==="
-input double InpStopBufferATR   = 0.3;     // SL = right shoulder extreme +/- this x ATR
+input double InpStopBufferATR   = 0.3;     // SL = right shoulder extreme +/- this x ATR - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_stop_loss_test.py) found 1.0 meaningfully better (net +51%, PF 1.252->1.393 on M15) but this default is left at the original disclosed-not-validated 0.3 pending a real MT5 test - change this value yourself in the Tester's Inputs tab to try 1.0.
+
+input group "=== RSI confluence filter (v1.02 candidate, off by default) ==="
+input bool   InpUseRSIFilter    = false;   // Only take a trade when RSI is also at an extreme in the pattern's favour (oversold for a bullish Inverse H&S, overbought for a bearish H&S top) - real Python evidence (2026-09-25, real GOLD data, single-position sequenced, research/trendbreaker/hs_confluence_test.py, on top of the already-best pullback+runner construction): win% 52.0->63.4, PF 2.377->2.509, stable IS 65.9%/OOS 57.5% - but trades ~71% less often (n=456->131 over the same real 4.2-year window). Off by default: real, but Python-only, and this file's base construction (market entry, no pullback/runner) hasn't been re-checked with this filter specifically - see header for what HAS and hasn't shipped.
+input int    InpRSIPeriod       = 14;      // RSI period - matches the real, native MT5 iRSI() indicator, not a manual port (RSI is standardized enough across platforms that this project's own ATR-mismatch lesson is not expected to apply the same way)
+input double InpRSIThreshold    = 30.0;    // Oversold/overbought threshold (30 = the real-tested value; RSI <= this for a buy, >= 100-this for a sell)
 
 input group "=== Trade management ==="
 input double InpLots             = 0.01;
@@ -160,19 +184,46 @@ int      g_panelMinW = 0;
 bool     g_panelReclaim = true;
 datetime g_lastPanelDraw = 0;
 int      g_statTrades = 0, g_statWins = 0;
+int      g_rsiHandle = INVALID_HANDLE;   // InpUseRSIFilter - native iRSI(), not a manual port (see input comment)
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
    EventSetTimer(1);
+   if(InpUseRSIFilter)
+     {
+      g_rsiHandle = iRSI(_Symbol, PERIOD_CURRENT, InpRSIPeriod, PRICE_CLOSE);
+      if(g_rsiHandle == INVALID_HANDLE)
+        {
+         Print("HeadShoulders_EA: iRSI handle creation failed, error ", GetLastError());
+         return(INIT_FAILED);
+        }
+     }
    return(INIT_SUCCEEDED);
   }
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
    if(reason != REASON_CHARTCHANGE && reason != REASON_PARAMETERS)
       ObjectsDeleteAll(0, g_pz);
    Comment("");
+  }
+//+------------------------------------------------------------------+
+//| InpUseRSIFilter gate - true means "not blocked" (filter off, or RSI   |
+//| genuinely at the extreme the pattern's direction needs). Reads shift=1 |
+//| (the confirmation bar itself), matching research/trendbreaker/         |
+//| hs_confluence_test.py's rsi[b["brk_q"]] convention exactly - CheckFor-  |
+//| Entry() only ever acts one bar after P.brk_t, so shift=1 IS the          |
+//| confirmation bar at the moment this is called.                            |
+//+------------------------------------------------------------------+
+bool RSIFilterOk(const bool isBuy)
+  {
+   if(!InpUseRSIFilter) return(true);
+   double buf[];
+   if(CopyBuffer(g_rsiHandle, 0, 1, 1, buf) < 1) return(false);   // fail closed on a bad read, not open
+   double r = buf[0];
+   return(isBuy ? (r <= InpRSIThreshold) : (r >= 100.0 - InpRSIThreshold));
   }
 //+------------------------------------------------------------------+
 bool IsNewBar()
@@ -453,6 +504,7 @@ void CheckForEntry()
       if(!isBuy && P.target >= entry) { g_patterns[i].traded = true; continue; }
       if(isBuy && P.stop >= entry) { g_patterns[i].traded = true; continue; }
       if(!isBuy && P.stop <= entry) { g_patterns[i].traded = true; continue; }
+      if(!RSIFilterOk(isBuy)) { g_patterns[i].traded = true; continue; }   // InpUseRSIFilter - see its own input comment
 
       trade.SetExpertMagicNumber(InpMagic);
       trade.SetDeviationInPoints(InpSlippage);
