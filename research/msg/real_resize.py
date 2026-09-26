@@ -25,6 +25,7 @@ LISTS = [
     ("recon v1.12 Backtest_1 GOLD", "28855db1-20260923_-_ReportTester-382043238_-_MSG_-_Backtest_1.xlsx"),
     ("recon v1.12 Fib-SL GOLD", "7a798589-20260923_-_ReportTester-382043238_-_MSG_-_Backtest_1_Fib_true.xlsx"),
     ("recon v1.13 Backtest_2 GOLD", "9d84e911-20260923_-_ReportTester-382043238_-_MSG_-_Backtest_2.xlsx"),
+    ("v1.18 defaults GOLD, 2023-2026 (499 trades)", "181a1802-20260926_-_ReportTester-382043238_-_MSG_-_Backtest_1_-_Defaults.xlsx"),
 ]
 
 
@@ -68,7 +69,7 @@ if __name__ == "__main__":
         print(f"== {label}: n={len(trips)} net ${b[0]:.2f} PF {b[1]:.3f} maxDD ${b[2]:.2f}")
         for lots in (0.01, 0.02):
             cells = []
-            for th in (0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30):
+            for th in (0.10, 0.15, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30):
                 c = st([resized(t, lots) if t["risk_pct"] < th else t["pnl_usd"] for t in trips])
                 cells.append(f"<{th:.2f}: {c[0]-b[0]:+7.2f} PF {c[1]:.2f} DD {c[2]:.0f}")
             print(f"   {lots:.2f} lots  " + " | ".join(cells))
