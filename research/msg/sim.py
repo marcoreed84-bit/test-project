@@ -88,6 +88,29 @@ def load_bars(path=CSV):
     return df
 
 
+M1_CHUNK_DIR = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data/m1_chunks"
+
+
+def load_bars_extended():
+    """load_bars() plus any real M1 chunks dropped in M1_CHUNK_DIR (2026-09-26
+    uploads: 2014.06.13-2021.12.31, real M1, GOLD symbol - same broker/feed as
+    the main CSV, hourly-bar contamination before 2014-06-13 already trimmed).
+    No 2022-2025-11 coverage yet - there's a gap between this and the main
+    CSV's 2025-11-19 start. Extensible the same way engine.py's
+    load_m5_extended() is: drop a new chunk in, no code change needed."""
+    import glob
+    base = load_bars()
+    chunk_files = sorted(glob.glob(f"{M1_CHUNK_DIR}/*.csv"))
+    if not chunk_files:
+        return base
+    frames = [base]
+    for f in chunk_files:
+        frames.append(load_bars(f))
+    out = pd.concat(frames, ignore_index=True)
+    out = out.drop_duplicates(subset="time").sort_values("time").reset_index(drop=True)
+    return out
+
+
 AURELIUS = "/home/user/test-project/research/aurelius"
 M5_SWITCH = pd.Timestamp("2026-08-15")   # first M5 bar NOT in the real GOLD# M5 export
 
@@ -180,12 +203,16 @@ class Params:
     # research hooks (None = exact v1.14 behaviour)
     entry_filter: Optional[Callable] = None   # ctx -> True to REJECT (like InRiskDeadZone: `continue`)
     size_fn: Optional[Callable] = None        # ctx -> lots
-    # GOLD vs GOLD#: every real comparison report ran on symbol "GOLD", but the
-    # only M1 bar export is "GOLD#".  Measured from the real Backtest_1/_2 order
-    # tickets (requested px reconstructed exactly as (TP+2*SL)/3): GOLD's bid is
-    # a near-constant 0.12 below GOLD#'s bar open (59/59 sells, -0.10..-0.14) and
-    # GOLD's ask is 0.16 above GOLD#'s ask (34 buys, IQR tight) - i.e. GOLD is the
-    # same mid with ~0.28 more spread.  0/0 reproduces GOLD# itself.
+    # GOLD vs GOLD#: this offset was measured when the only M1 bar export was
+    # "GOLD#" and every real comparison report ran on symbol "GOLD" - GOLD's
+    # bid a near-constant 0.12 below GOLD#'s bar open (59/59 sells, -0.10..
+    # -0.14), GOLD's ask 0.16 above GOLD#'s ask (34 buys, IQR tight).
+    # STALE as of the 2026-09-25 GOLD# -> real GOLD CSV switch (see CSV path
+    # comment above): the default CSV is now real GOLD itself, so 0/0 is the
+    # correct default (confirmed: 97% entry-minute match, 112/115, against
+    # the 2026-09-26 v1.18 real report's overlap window, vs 10% with the old
+    # -0.12/0.16 double-applying the now-obsolete conversion). Only pass
+    # -0.12/0.16 when deliberately simulating against a genuine GOLD# CSV.
     # post-TP2 stop: "static" = v1.11+ (entry +/- trail*risk, set once),
     # "ratchet" = v1.09/v1.10 (bar-open price -/+ trail*risk, only tightens),
     # "none" = v1.07/v1.08 (breakeven at TP1 only).
@@ -201,8 +228,8 @@ class Params:
     # levels are computed from the REQUESTED price, exactly as the EA does.
     slip_entry: float = 0.0
     slip_sl: float = 0.0
-    bid_off: float = -0.12
-    ask_extra: float = 0.16
+    bid_off: float = 0.0
+    ask_extra: float = 0.0
     start: str = "2026-01-01"
     end: str = "2026-09-22"
     # Aurelius M5 trend gate - see module docstring and aurelius_alignment()

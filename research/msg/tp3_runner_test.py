@@ -26,7 +26,7 @@ import sys
 sys.path.insert(0, ".")
 import numpy as np
 import pandas as pd
-from sim import Params, simulate, load_bars, PT, CONTRACT, LOT_STEP
+from sim import Params, simulate, load_bars, load_bars_extended, M1_CHUNK_DIR, PT, CONTRACT, LOT_STEP
 
 np.random.seed(42)
 
@@ -92,15 +92,42 @@ def run_runner(bars, trades, trail_r, max_extra_hold_h):
 
 
 if __name__ == "__main__":
-    bars = load_bars()
-    p = Params()
-    trades, stats_ = simulate(bars, p)
-    tp3_trades = [t for t in trades if t["legs"] and t["legs"][-1][3] == "tp"]
-    print(f"Real MSG3 trades (default Params, {p.start}->{p.end}): n={len(trades)}")
-    print(f"  of those, final leg reached TP3: {len(tp3_trades)}\n")
+    # 2026-09-26: extended with real M1 chunks (2014.06.13-2021.12.31) to grow
+    # the TP3-reaching sample past the original n=6. There's a ~4yr gap
+    # between that block and the main CSV's 2025-11-19 start (nothing
+    # uploaded for 2022-2025-11 yet), so the two are simulated SEPARATELY
+    # (a single simulate() spanning the gap would treat the jump as one
+    # instant bar-to-bar step and corrupt any position/session state open
+    # at the boundary) and their TP3-reaching legs pooled afterward.
+    import glob
+    segments = []
+    chunk_files = sorted(glob.glob(f"{M1_CHUNK_DIR}/*.csv"))
+    if chunk_files:
+        old_bars = pd.concat([load_bars(f) for f in chunk_files], ignore_index=True)
+        old_bars = old_bars.drop_duplicates(subset="time").sort_values("time").reset_index(drop=True)
+        segments.append(("2014-2021 (new)", old_bars))
+    segments.append(("2025-11 - 2026-09 (original)", load_bars()))
+
+    all_tp3_trades, bars_by_leg = [], {}
+    for label, bars in segments:
+        p = Params(start=str(bars["time"].min().date()), end=str((bars["time"].max() + pd.Timedelta(days=1)).date()))
+        trades, stats_ = simulate(bars, p)
+        tp3_trades = [t for t in trades if t["legs"] and t["legs"][-1][3] == "tp"]
+        print(f"{label}: n={len(trades)} trades ({p.start}->{p.end}), {len(tp3_trades)} reached TP3")
+        for t in tp3_trades:
+            bars_by_leg[id(t)] = bars
+        all_tp3_trades.extend(tp3_trades)
+    print(f"\nTotal TP3-reaching legs pooled across all segments: {len(all_tp3_trades)}\n")
 
     for trail_r in TRAIL_WIDTHS:
-        real_pnls, runner_pnls = run_runner(bars, tp3_trades, trail_r, MAX_EXTRA_HOLD_H)
+        real_all, runner_all = [], []
+        for label, bars in segments:
+            seg_trades = [t for t in all_tp3_trades if bars_by_leg[id(t)] is bars]
+            if not seg_trades:
+                continue
+            r, ru = run_runner(bars, seg_trades, trail_r, MAX_EXTRA_HOLD_H)
+            real_all.append(r); runner_all.append(ru)
+        real_pnls, runner_pnls = np.concatenate(real_all), np.concatenate(runner_all)
         diff = runner_pnls - real_pnls
         print(f"  trail={trail_r:.1f}R: real_leg_net=${real_pnls.sum():8.2f}  "
               f"runner_net=${runner_pnls.sum():8.2f}  diff=${diff.sum():8.2f}  "
@@ -108,11 +135,18 @@ if __name__ == "__main__":
               f"worse on {100*(diff<0).mean():.1f}%)")
 
     # walk-forward: split by TP3 exit time, chronological 70/30
-    exit_times = np.array([t["legs"][-1][0] for t in tp3_trades])
+    exit_times = np.array([t["legs"][-1][0] for t in all_tp3_trades])
     order = np.argsort(exit_times)
     cutoff = exit_times[order][int(len(order) * 0.7)]
     print(f"\n  walk-forward (chronological 70/30 by TP3 exit time) at trail=1.0R:")
-    real_pnls, runner_pnls = run_runner(bars, tp3_trades, 1.0, MAX_EXTRA_HOLD_H)
+    real_all, runner_all = [], []
+    for label, bars in segments:
+        seg_trades = [t for t in all_tp3_trades if bars_by_leg[id(t)] is bars]
+        if not seg_trades:
+            continue
+        r, ru = run_runner(bars, seg_trades, 1.0, MAX_EXTRA_HOLD_H)
+        real_all.append(r); runner_all.append(ru)
+    real_pnls, runner_pnls = np.concatenate(real_all), np.concatenate(runner_all)
     is_m = exit_times < cutoff
     oos_m = exit_times >= cutoff
     print(f"    IS : real=${real_pnls[is_m].sum():.2f}  runner=${runner_pnls[is_m].sum():.2f}  "

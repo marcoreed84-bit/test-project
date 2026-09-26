@@ -5,11 +5,19 @@ simulator cannot simply be tuned to a single report.
 
 Each real report is simulated with the inputs read from its OWN Settings
 block, the exit mechanism of the code version it ran (lock_mode), and the
-symbol it ran on:
+symbol it ran on. ORIGINALLY (every row below was captured this way):
   account 382043238  -> symbol GOLD  (bid -0.12 / ask +0.16 vs the GOLD# CSV,
                                       measured from its own order tickets)
   account 1301959345 -> symbol GOLD# (the CSV's own symbol: sells fill at the
                                       CSV open to the cent, buys at +0.04)
+
+STALE as of the 2026-09-25 GOLD# -> real GOLD CSV switch (see sim.py's CSV
+path comment): load_bars() now returns real GOLD bars, not GOLD#, so GOLD
+below must be 0/0 (confirmed 97% entry-minute match on the 2026-09-26 v1.18
+report) - re-running the GOLDH (account 1301959345, symbol GOLD#) rows below
+against the current CSV would need a NEW real-GOLD-based offset in the
+other direction, not yet measured; those rows are a locked historical
+record of the old GOLD# CSV and should not be re-run as-is.
 """
 import sys
 from dataclasses import replace
@@ -19,8 +27,8 @@ from report import load_deals, load_settings, round_trips, summary  # noqa: E402
 from sim import load_bars, simulate, stats, Params                  # noqa: E402
 
 UP = "/root/.claude/uploads/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/"
-GOLD = dict(bid_off=-0.12, ask_extra=0.16)
-GOLDH = dict(bid_off=0.0, ask_extra=0.04)
+GOLD = dict(bid_off=0.0, ask_extra=0.0)      # bars are already real GOLD post-switch
+GOLDH = dict(bid_off=0.0, ask_extra=0.04)    # STALE - see module docstring; do not re-run against current CSV
 
 # (file, label, code-version exit mechanism, symbol)
 REPORTS = [
