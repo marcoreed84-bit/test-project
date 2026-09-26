@@ -214,6 +214,24 @@
 //|  iATR). Plotting one number while trading another is the exact drift this visual pass is    |
 //|  meant to avoid, so the panel shows the real ComputeADX value against the real threshold.   |
 //|                                                                                             |
+//+------------------------------------------------------------------+
+//|  v1.07 - CORRECTION, no logic touched. The 97.6th/97.3rd percentile claimed above for        |
+//|  PLAIN+ADX (v1.02 note) used a BAR-LEVEL null (matched count/direction/holding-time, random   |
+//|  TK-cross bars) - research/ichimoku/nullcheck.py later found the UNFILTERED base signal       |
+//|  scores the SAME 98.2th percentile on that exact null, meaning it isn't discriminating        |
+//|  "does ADX help" at all, only "do TK-cross entries beat random bars" (a different, weaker      |
+//|  claim). The project's own stricter null (does ADX select a better SUBSET than an equal-size   |
+//|  random subset of the SAME base trades - sim.py's permutation_test) puts PLAIN+ADX at only the  |
+//|  75-76th percentile alone (research/ichimoku/adx_incremental.py), and BEST-OF-N corrected for    |
+//|  the 7 ADX thresholds actually searched (15/18/20/22/25/30/35) before choosing 20, it drops to     |
+//|  the 34.2nd percentile - BELOW the no-effect median. The ADX filter does not survive proper        |
+//|  multiple-testing correction. The v1.03 "real MT5 confirmed a genuine improvement" note is still     |
+//|  a true, real observation (filtered trades DID look better on the actual realized numbers) but        |
+//|  that is a weaker claim than "beats chance," and this file's own later, more skeptical audit          |
+//|  found it doesn't. Do not cite the 97.6th/97.3rd percentile figure above as current - it is             |
+//|  superseded by this note. No configuration searched in this whole Ichimoku effort has been              |
+//|  shown to survive a proper multiple-testing correction.                                                   |
+//+------------------------------------------------------------------+
 //|  PERFORMANCE - the traps this portfolio has already paid for, all avoided here:             |
 //|  g_skipCosmeticDraws (set once in OnInit from MQL_TESTER && !MQL_VISUAL_MODE) gates every   |
 //|  draw INCLUDING EventSetTimer, which is not even started in a non-visual Tester pass; the   |
