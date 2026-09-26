@@ -34,7 +34,101 @@ np.random.seed(42)
 STOP_BUFFER = 1.0   # already-validated real finding, used as baseline everywhere below
 
 
-def find_breakouts_full(df, shoulder_tol=DEFAULT_STOL, break_tol=DEFAULT_BTOL, break_confirm=DEFAULT_BCC):
+def find_breakouts_full(df, shoulder_tol=DEFAULT_STOL, break_tol=DEFAULT_BTOL, break_confirm=DEFAULT_BCC,
+                        causal=True):
+    """BUG FIX (2026-09-26, same lookahead class as the Wolfe Wave CONFIRM_LAG
+    and Bump-and-Run fixes - see hs_causal_detection_check.py for the full
+    write-up and before/after numbers): the original implementation (kept
+    below as find_breakouts_full_lookahead, reachable with causal=False to
+    reproduce old results) counted neckline-break closes from i_s2+1 even
+    though the right shoulder is a PIVOT_STRENGTH-bar fractal not knowable
+    until i_s2+PIVOT_STRENGTH (26% of 2022-26 M15 breakouts confirmed before
+    the shape could exist), and ran on the FINAL zigzag (hindsight about
+    which provisional right shoulder survived). HeadShoulders_EA.mq5 itself
+    was always causal (Recompute() queues a shape only once FindSwings()
+    confirms it; AdvancePending() counts closes from then on) - only this
+    Python EVIDENCE was affected. Default is now the EA-faithful causal
+    detector. Effect: IS 2022-26 %PF 2.014 -> 1.961 (still 100th pct);
+    real-M15 OOS 2014-06 -> 2022-07 %PF 1.490 -> 1.442 (99.9th pct,
+    survives K=27, borderline K=50)."""
+    if causal:
+        return find_breakouts_causal(df, shoulder_tol, break_tol, break_confirm)
+    return find_breakouts_full_lookahead(df, shoulder_tol, break_tol, break_confirm)
+
+
+def find_breakouts_causal(df, shoulder_tol=DEFAULT_STOL, break_tol=DEFAULT_BTOL, break_confirm=DEFAULT_BCC):
+    """EA-faithful: every shape HeadShoulders_EA's per-bar Recompute() would
+    ever queue (found on causal_swing_events() snapshots, deduped by its
+    s1/head/s2 anchors like AlreadyKnown()), closes counted only from the bar
+    the shape became knowable (right shoulder + PIVOT_STRENGTH, inclusive -
+    that close is known at the same moment as the pivot, matching
+    AdvancePending's order). Everything else identical to the original."""
+    import pattern_rigor_common as R
+    from h4_touch_reaction_test import PIVOT_STRENGTH
+    n = len(df)
+    o = df["open"].values; h = df["high"].values; l = df["low"].values; c = df["close"].values
+    atr = sma_atr(h, l, o, ATR_PERIOD)
+    events, _ = R.causal_swing_events(o, h, l, c, atr, tail=12)
+    seen = set()
+    breakouts = []
+    for known, snap in events:
+        types = [s[1] for s in snap]
+        for m in range(len(snap) - 4):
+            seq = types[m:m + 5]
+            if seq == [1, -1, 1, -1, 1]:
+                top = True
+            elif seq == [-1, 1, -1, 1, -1]:
+                top = False
+            else:
+                continue
+            (i1, _, p1), (it1, _, t1), (i2, _, p2), (it2, _, t2), (i3, _, p3) = snap[m:m + 5]
+            if top and not (p2 > p1 and p2 > p3):
+                continue
+            if (not top) and not (p2 < p1 and p2 < p3):
+                continue
+            key = (i1, i2, i3, top)
+            if key in seen:
+                continue
+            seen.add(key)
+            if abs(p1 - p3) > shoulder_tol * atr[i2]:
+                continue
+            neck_slope = (t2 - t1) / (it2 - it1) if it2 != it1 else 0.0
+
+            def neckline_at(q, ia=it1, neck_slope=neck_slope, p_t1=t1):
+                return p_t1 + neck_slope * (q - ia)
+
+            head_height = abs(p2 - neckline_at(i2))
+            if head_height <= 0:
+                continue
+            pattern_len = i3 - i1
+            horizon_end = min(n - 1, i3 + int(min(pattern_len * MAX_HORIZON_MULT, MAX_HORIZON_CAP)))
+            q_from = max(known, i3 + PIVOT_STRENGTH)
+            brk_q, run_ = -1, 0
+            for q in range(q_from, horizon_end):
+                nl = neckline_at(q)
+                beyond = (nl - c[q]) if top else (c[q] - nl)
+                if beyond > break_tol * atr[q]:
+                    run_ += 1
+                    if run_ >= break_confirm:
+                        brk_q = q; break
+                else:
+                    run_ = 0
+            if brk_q < 0:
+                continue
+            brk_price = c[brk_q]
+            target = (brk_price - head_height) if top else (brk_price + head_height)
+            shoulder_ext = max(p1, p3) if top else min(p1, p3)
+            breakouts.append(dict(top=top, brk_q=brk_q, brk_price=brk_price, target=target,
+                                  i_s1=i1, i_head=i2, i_s2=i3, p_s1=p1, p_head=p2, p_s2=p3,
+                                  i_t1=it1, i_t2=it2, head_height=head_height, shoulder_ext=shoulder_ext,
+                                  atr_at_brk=atr[brk_q], max_horizon=min(n - 1, brk_q + MAX_HORIZON_CAP),
+                                  neckline_at=neckline_at, known=known))
+    return sorted(breakouts, key=lambda x: x["brk_q"]), h, l, c, atr
+
+
+def find_breakouts_full_lookahead(df, shoulder_tol=DEFAULT_STOL, break_tol=DEFAULT_BTOL, break_confirm=DEFAULT_BCC):
+    """ORIGINAL (pre-2026-09-26) implementation - has the lookahead described
+    in find_breakouts_full()'s docstring. Kept only to reproduce old numbers."""
     n = len(df)
     o = df["open"].values; h = df["high"].values; l = df["low"].values; c = df["close"].values
     atr = sma_atr(h, l, o, ATR_PERIOD)

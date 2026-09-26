@@ -166,7 +166,16 @@ def load_m15_native():
     M15's FractalK/stop/stale grid, or anything else) - genuine, real,
     untouched-by-tuning out-of-sample data, not a resample or an
     approximation. No real_volume/chk_* columns (exported with the newer
-    ExportBarData.mq5's InpIncludeCheckColumns=false default)."""
+    ExportBarData.mq5's InpIncludeCheckColumns=false default).
+
+    CORRECTION (2026-09-26, found building the textbook-batch tests): this
+    file is NOT M15 all the way back. Before 2013-05 it holds one bar per
+    DAY (~260 rows/yr), then HOURLY bars until 2014-06-13 01:30 - the same
+    broker-history boundary already known for M5. Genuine M15 history is
+    2014-06-13 -> 2026-09 (~12.3 yrs); the genuinely-untouched pre-2022-07
+    part is ~8 years, not ~21. Slice at 2014-06-13 01:30 for M15 work (see
+    research/trendbreaker/pattern_rigor_common.load_m15_real()).
+    load_h4() has the same issue: one bar per DAY before 2013-05-13."""
     df = pd.read_csv(f"{DATA_DIR}/GOLD_M15_native.csv", skiprows=1)
     df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
     df = df.sort_values("time").reset_index(drop=True)

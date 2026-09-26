@@ -95,7 +95,11 @@ def fork_from_snapshot(snap, known):
     return None
 
 
-def detect(h, l, c, atr, events):
+def detect(h, l, c, atr, events, state=None):
+    """state: optional int array (len n) - filled with the direction of the
+    newest LIVE fork as known at each bar's close (+1 bullish, -1 bearish,
+    0 none). Used only by the gate/filter tests on the kept EAs
+    (new_pattern_gate_features.py); signals are identical with or without it."""
     n = len(c)
     sig = dict(magnet=[], bounce_trend=[], reject_counter=[], break_accel=[], break_fail=[])
     live = {True: None, False: None}
@@ -156,6 +160,12 @@ def detect(h, l, c, atr, events):
                     if g is not None and len(snap) >= 2 and snap[-2][0] == g.iB and snap[-1][0] != g.iC:
                         live[bull] = None
             ev += 1
+        if state is not None:
+            fb, fs = live[True], live[False]
+            if fb is not None and (fs is None or fb.known >= fs.known):
+                state[q] = 1
+            elif fs is not None:
+                state[q] = -1
     return sig
 
 
