@@ -15,7 +15,17 @@ import pandas as pd
 DATA_DIR = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data"
 POINT = 0.01  # GOLD# meta_point from the CSV header (meta_digits=2)
 
-# ---- shipped v1.46 defaults (Aurelius_EA.mq5, M5) ----
+# ---- shipped defaults (Aurelius_EA.mq5, M5) - originally snapshotted at
+# v1.46, updated here to v1.52's real, current default for use_price21_exit
+# (found stale during a 2026-09-26 audit prompted by the user's "if you got
+# Ratchet wrong, what else is wrong" question): the real EA REVERTED this to
+# false in v1.48 after its own real MT5 A/B test failed both pre-written
+# PASS conditions (PF only -0.84%, Balance DD actually IMPROVED with it
+# off). Re-running the Aurelius M5 random-timing test with this corrected -
+# real %PF barely moved (1.423->1.424) and the "survives K=100" verdict is
+# unchanged, so this particular drift didn't matter, but it was real and
+# is now fixed rather than left stale. No other real-confirmed change
+# between v1.46 and v1.52 affects a parameter this dict controls. ----
 P = dict(
     p21=21, p50=50, p150=250, p600=500, p2400=2400,
     m21="ema", m50="ema", m150="sma", m600="smma", m2400="ema",
@@ -27,7 +37,7 @@ P = dict(
     use_volume=True, vol_avg_bars=100, min_vol_ratio=1.25,
     use_sr_dist=True, sr_days=3, min_sr_dist_atr=1.50,
     use_stop=True, stop_atr=2.5,
-    use_price21_exit=True, price21_buffer_atr=0.7, price21_confirm_bars=8,
+    use_price21_exit=False, price21_buffer_atr=0.7, price21_confirm_bars=8,
     use_vwap_exit=True, vwap_buffer_atr=0.2, vwap_confirm_bars=8,
     allow_buys=True, allow_sells=True,
     use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
@@ -37,11 +47,15 @@ P = dict(
     use_momentum=False, macd_fast=12, macd_slow=26, macd_signal=9, macd_signal_method="sma",
 )
 
-# ---- Aurelius_M15_EA.mq5 v1.51 true shipped defaults - genuinely different
-# from M5, not just rescaled periods: different pullback MA (21, not 50),
-# much stricter S/R distance (1.50 ATR vs M5's 0.50, real-MT5-confirmed),
-# and a filter that doesn't exist in the M5 file at all (InpUseSlopeSRBlock,
-# Python-only per its own header, NOT yet real-tested). ----
+# ---- Aurelius_M15_EA.mq5 shipped defaults - originally snapshotted at
+# v1.51, use_price21_exit corrected to match v1.54's real, current default
+# (same audit as the M5 dict above - Aurelius_M15_EA.mq5's own header
+# explicitly notes this "matches Aurelius_EA.mq5's (M5) own rejection of
+# this same lever"). Genuinely different from M5 beyond that, not just
+# rescaled periods: different pullback MA (21, not 50), much stricter S/R
+# distance (1.50 ATR vs M5's 0.50, real-MT5-confirmed), and a filter that
+# doesn't exist in the M5 file at all (InpUseSlopeSRBlock, Python-only per
+# its own header, NOT yet real-tested). ----
 P15 = dict(
     p21=30, p50=50, p150=150, p600=200, p2400=1200,
     m21="ema", m50="ema", m150="ema", m600="smma", m2400="ema",
@@ -54,7 +68,7 @@ P15 = dict(
     use_sr_dist=True, sr_days=3, min_sr_dist_atr=1.50,
     use_slope_sr_block=True, slope_sr_block_slope=1.00, slope_sr_block_sr=6.00,
     use_stop=True, stop_atr=2.5,
-    use_price21_exit=True, price21_buffer_atr=0.7, price21_confirm_bars=8,
+    use_price21_exit=False, price21_buffer_atr=0.7, price21_confirm_bars=8,
     use_vwap_exit=True, vwap_buffer_atr=0.2, vwap_confirm_bars=8,
     allow_buys=True, allow_sells=True,
     use_breakeven=False, breakeven_atr=2.0, breakeven_lock_atr=0.1, use_trail_after_be=False,
