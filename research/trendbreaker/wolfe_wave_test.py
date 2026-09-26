@@ -53,7 +53,7 @@ sys.path.insert(0, "/home/user/test-project/research/aurelius")
 sys.path.insert(0, "/home/user/test-project/research/trendbreaker")
 import numpy as np
 import engine as E
-from h4_touch_reaction_test import sma_atr, find_swings, ATR_PERIOD, BREAK_TOL_ATR, BREAK_CONFIRM_CLOSES
+from h4_touch_reaction_test import sma_atr, find_swings, ATR_PERIOD, BREAK_TOL_ATR, BREAK_CONFIRM_CLOSES, PIVOT_STRENGTH
 from hs_next_round_test import walk, pnl_of, report
 
 np.random.seed(42)
@@ -61,6 +61,15 @@ np.random.seed(42)
 MAX_HORIZON_CAP = 400
 STOP_BUFFER = 1.0
 CONFIRM_WINDOW = 60   # bars allowed to wait for the reversal-confirm after wave 5
+
+# LOOKAHEAD FIX (found 2026-09-26, same bug class as the trendline research):
+# find_swings()'s fractal test needs PIVOT_STRENGTH bars AFTER a bar to confirm
+# it as a genuine swing pivot - so wave 5 itself isn't KNOWABLE as a real pivot
+# until bar i5+PIVOT_STRENGTH has closed. The original version started scanning
+# for entry confirmation at i5+1, which let 98 of 130 raw H4 bullish "entries"
+# fire before wave 5 could have been causally recognized at all - pure
+# lookahead. Entries now can't fire before i5+PIVOT_STRENGTH+1.
+CONFIRM_LAG = PIVOT_STRENGTH + 1
 
 
 def find_candidates(zIdx, zType, zPx, require_fib=False):
@@ -113,9 +122,10 @@ def build_trades(cands, h, l, c, atr, n):
     out = []
     for p in cands:
         i5 = p["i5"]
+        scan_start = i5 + CONFIRM_LAG
         horizon_end = min(n - 1, i5 + CONFIRM_WINDOW)
         entry_q, run_ = -1, 0
-        for q in range(i5 + 1, horizon_end):
+        for q in range(scan_start, horizon_end):
             lv = p["line13_at"](q)
             beyond = (c[q] - lv) if p["bull"] else (lv - c[q])
             if beyond > BREAK_TOL_ATR * atr[q]:
