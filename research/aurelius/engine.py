@@ -115,6 +115,39 @@ def load_m5():
     return df
 
 
+def load_m5_extended():
+    """load_m5() (2022-07 onward) plus any older M5 history chunks the user
+    has uploaded into {DATA_DIR}/m5_chunks/ - real GOLD's native M5 history
+    apparently only goes back to 2022 in the terminal's default export
+    (confirmed: two separate InpBars=300000 exports both landed on
+    2022-07-04, independent of when they were run), but the user's own
+    chart scrolls back to 2001, so the real history exists and is being
+    pulled in incrementally via ExportBarData.mq5's InpStartDate/InpEndDate
+    in ~4-year chunks (each full 2001-2022 M5 pull would be ~80-90MB,
+    too large for one upload). This function concatenates load_m5() with
+    whatever chunk files exist so far, dedupes any overlapping timestamps
+    (keeping one copy), and sorts - genuinely out-of-sample history for
+    any M5-tuned system (e.g. Vanguard M5's FractalK/stop/stale grid,
+    tuned entirely on the 2022-2026 window) grows as more chunks arrive,
+    no code changes needed each time - just drop the new CSV into
+    m5_chunks/. Falls back to plain load_m5() if the directory is empty
+    or doesn't exist yet."""
+    import glob
+    base = load_m5()
+    chunk_dir = f"{DATA_DIR}/m5_chunks"
+    chunk_files = sorted(glob.glob(f"{chunk_dir}/*.csv"))
+    if not chunk_files:
+        return base
+    frames = [base]
+    for f in chunk_files:
+        cdf = pd.read_csv(f, skiprows=1)
+        cdf["time"] = pd.to_datetime(cdf["time"], format="%Y.%m.%d %H:%M:%S")
+        frames.append(cdf)
+    out = pd.concat(frames, ignore_index=True)
+    out = out.drop_duplicates(subset="time").sort_values("time").reset_index(drop=True)
+    return out
+
+
 def load_h4():
     df = pd.read_csv(f"{DATA_DIR}/GOLD_H4.csv", skiprows=1)
     df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
