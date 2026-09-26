@@ -1,9 +1,16 @@
 """
 Same random-timing/multiple-testing discipline applied to Ratchet_EA.mq5's
-real shipped v3.28 (SHIPPED = sim.RP() defaults) construction, reusing the
-ALREADY-BUILT real sequential simulator (sim.py's build_ctx/simulate/close)
-completely unmodified for the exit side - trailing stop, breakeven, tail-
-loss cap, Stochastic exit, MAXBARS, weekend/session flatten, the
+REAL shipped v3.30 construction (sim.SHIPPED - see sim.py's own comment:
+momentum=False per v3.29's real-MT5-confirmed correction, trail_runner_atr
+=6.0/trail_runner_keep=0.60 per v3.30's real-MT5-confirmed addition). This
+file's first run tested the OLD, stale SHIPPED (v3.28: momentum=True, no
+trail-runner - that mechanism didn't exist in sim.py at all) and got a
+weaker, borderline result; sim.py has since been fixed to model the real
+v3.30 config properly, which this file now picks up automatically via
+S.SHIPPED. Reuses the ALREADY-BUILT real sequential simulator (sim.py's
+build_ctx/simulate/close) completely unmodified for the exit side -
+trailing stop (now including the real runner-tighten step), breakeven,
+tail-loss cap, Stochastic exit, MAXBARS, weekend/session flatten, the
 consecutive-loss breaker, all byte-identical to what a real run uses.
 
 ADAPTATION: entry_signal() is called by bare name inside simulate() (a
@@ -68,25 +75,12 @@ def calibrate_p_fire(ctx, rng, target_n, trials=4):
         p_fire = min(max(p_fire, 1e-5), 0.9)
     return p_fire
 
-
-# CORRECTION (found after the first run of this file): v3.29 real-MT5-
-# confirmed InpUseMomentumEntry defaults to FALSE in the real EA (the 90
-# momentum-triggered trades in the real 2026-09-23 backtest LOST -3,182.78
-# ZAR at PF 0.44). sim.py's own RP() dataclass default (momentum=True) is
-# stale relative to this - using it gave n=447/%PF=1.363 above; with
-# momentum=False (dataclasses.replace(S.SHIPPED, momentum=False)), n=372
-# (much closer to the real MT5 trade count of 356) and %PF=1.510. Still
-# does NOT model InpTrailRunnerATR=6.0 (v3.30, also real-MT5-confirmed to
-# help) - sim.py has no trail-runner mechanism coded at all, a real,
-# disclosed gap. Even with the momentum fix, the corrected run still does
-# not survive K=30+ (best-of-14 borderline p=0.146, best-of-30 p=0.295).
-
 if __name__ == "__main__":
     ctx = S.build_ctx()
     real_trades, real_stats = S.simulate(ctx, p=S.SHIPPED)
     real_pct_pf = pct_pf(real_trades)
     pnls = np.array([t["pnl"] for t in real_trades])
-    print(f"REAL Ratchet v3.28 shipped defaults ({S.WIN_START.date()} -> {S.WIN_END.date()}): "
+    print(f"REAL Ratchet v3.30 shipped defaults ({S.WIN_START.date()} -> {S.WIN_END.date()}): "
           f"n={len(real_trades)}  win%={100*(pnls>0).mean():.1f}  net={pnls.sum():.2f}  %PF={real_pct_pf:.3f}")
 
     rng = np.random.default_rng(1)

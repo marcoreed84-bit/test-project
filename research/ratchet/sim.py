@@ -65,6 +65,8 @@ class RP:
     trail: bool = True
     trail_trig: float = 0.5
     keep: float = 0.30
+    trail_runner_atr: float = 0.0    # v3.30 InpTrailRunnerATR (0=off, matches v3.28/v3.29 byte-for-byte)
+    trail_runner_keep: float = 0.60  # v3.30 InpTrailRunnerKeep
     be: bool = True
     be_trig: float = 0.3
     be_buf: float = 0.0
@@ -98,7 +100,13 @@ class RP:
 
 
 BASELINE = RP(wick=False, momentum=False)        # Backtest_1's config
-SHIPPED = RP()                                   # v3.28 defaults = Backtest_2's config
+V328 = RP()                                      # v3.28 defaults = Backtest_2's config (kept for history)
+SHIPPED = RP(momentum=False, trail_runner_atr=6.0, trail_runner_keep=0.60)
+# v3.30 real shipped defaults (Ratchet_EA.mq5 InpUseMomentumEntry=false
+# real-confirmed v3.29; InpTrailRunnerATR=6.0/InpTrailRunnerKeep=0.60 real-
+# confirmed v3.30). SHIPPED previously pointed at the stale v3.28 config
+# (momentum=True, no trail-runner) - fixed here so every file that imports
+# S.SHIPPED gets the CURRENT real defaults on its next run, not v3.28's.
 
 
 def build_ctx(df=None):
@@ -278,7 +286,14 @@ def simulate(ctx, p=SHIPPED, start=WIN_START, end=WIN_END, record_signals=False)
             keep = p.keep if p.keep_fn is None else p.keep_fn(pos)
             if p.trail and fav >= p.trail_trig * pos["atr"]:
                 pf = (pos["peak"] - pos["entry"]) * d
-                cand = pos["entry"] + d * max(0.0, min(1.0, keep)) * pf
+                keep_eff = max(0.0, min(1.0, keep))
+                # v3.30 InpTrailRunnerATR: once the best favorable move
+                # reaches trail_runner_atr x entry ATR, lock in the (larger)
+                # trail_runner_keep fraction instead - monotonic (MAX), so
+                # this can only ever tighten, never loosen, the trail.
+                if p.trail_runner_atr > 0.0 and pf >= p.trail_runner_atr * pos["atr"]:
+                    keep_eff = max(keep_eff, max(0.0, min(1.0, p.trail_runner_keep)))
+                cand = pos["entry"] + d * keep_eff * pf
                 if (cand - best) * d > 0:
                     best, have = cand, True
             if p.be and fav >= p.be_trig * pos["atr"]:
