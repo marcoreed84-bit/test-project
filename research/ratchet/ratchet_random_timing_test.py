@@ -69,6 +69,18 @@ def calibrate_p_fire(ctx, rng, target_n, trials=4):
     return p_fire
 
 
+# CORRECTION (found after the first run of this file): v3.29 real-MT5-
+# confirmed InpUseMomentumEntry defaults to FALSE in the real EA (the 90
+# momentum-triggered trades in the real 2026-09-23 backtest LOST -3,182.78
+# ZAR at PF 0.44). sim.py's own RP() dataclass default (momentum=True) is
+# stale relative to this - using it gave n=447/%PF=1.363 above; with
+# momentum=False (dataclasses.replace(S.SHIPPED, momentum=False)), n=372
+# (much closer to the real MT5 trade count of 356) and %PF=1.510. Still
+# does NOT model InpTrailRunnerATR=6.0 (v3.30, also real-MT5-confirmed to
+# help) - sim.py has no trail-runner mechanism coded at all, a real,
+# disclosed gap. Even with the momentum fix, the corrected run still does
+# not survive K=30+ (best-of-14 borderline p=0.146, best-of-30 p=0.295).
+
 if __name__ == "__main__":
     ctx = S.build_ctx()
     real_trades, real_stats = S.simulate(ctx, p=S.SHIPPED)
