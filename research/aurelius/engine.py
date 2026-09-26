@@ -122,6 +122,24 @@ def load_h4():
     return df
 
 
+def load_m15_native():
+    """REAL, NATIVE M15 export (2026-09-26 upload) - genuinely different
+    from resample_m15_from_m5(load_m5()) used everywhere else in this repo:
+    that resample is only as deep as the M5 export goes (2022-07 onward,
+    this broker apparently doesn't retain M5 history further back). This
+    file is a real MT5 M15 pull covering 2001-06-04 -> 2026-09-25 - the
+    SAME 25-year depth as load_h4(). The ~2001-2022 portion of this file
+    was NEVER touched by any M15 parameter search this session (Vanguard
+    M15's FractalK/stop/stale grid, or anything else) - genuine, real,
+    untouched-by-tuning out-of-sample data, not a resample or an
+    approximation. No real_volume/chk_* columns (exported with the newer
+    ExportBarData.mq5's InpIncludeCheckColumns=false default)."""
+    df = pd.read_csv(f"{DATA_DIR}/GOLD_M15_native.csv", skiprows=1)
+    df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
+    df = df.sort_values("time").reset_index(drop=True)
+    return df
+
+
 def easter_sunday(year):
     """Anonymous Gregorian algorithm (Meeus/Jones/Butcher), ported verbatim
     from EasterSunday() (Aurelius_EA.mq5 ~2130)."""
