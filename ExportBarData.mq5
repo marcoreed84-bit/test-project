@@ -13,13 +13,35 @@
 //|                                                                    |
 //| Output goes to <data folder>\MQL5\Files\<InpFileName> - find it    |
 //| via File > Open Data Folder in the terminal, then MQL5\Files\.     |
+//|                                                                    |
+//| v2 - added InpStartDate/InpEndDate: pull an explicit date RANGE     |
+//| instead of "N bars back from now". Added for real-world file-size   |
+//| limits - a full-history M5 export can be too large to upload, but   |
+//| you rarely need the whole thing again once earlier years have       |
+//| already been exported once: set InpStartDate/InpEndDate to just the |
+//| slice you're missing (e.g. an older stretch never used to tune a    |
+//| strategy, for a genuine out-of-sample check) and only that slice     |
+//| gets written. Leave both at 0 (the default) for the old behavior     |
+//| (InpBars back from the latest bar) - fully backward compatible.      |
+//|                                                                      |
+//| v3 - InpIncludeCheckColumns now DEFAULTS TO FALSE: real_volume       |
+//| (always 0 on GOLD CFDs anyway) and the 5 chk_* validation columns    |
+//| are dropped from the export by default, shrinking the file for the  |
+//| normal case. They exist only to double-check a Python port against  |
+//| MT5's own indicators - not needed for ordinary data pulls, and        |
+//| skipping them also skips the indicator-handle setup/warmup wait,      |
+//| so exports are faster too. Set InpIncludeCheckColumns=true to get      |
+//| the old, full output back when you actually need to validate a port.   |
 //+------------------------------------------------------------------+
 #property script_show_inputs
 
 input string          InpSymbol    = "";               // Symbol (blank = current chart's symbol)
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_CURRENT;    // Timeframe to export (CURRENT = whatever chart this is attached to)
-input int             InpBars      = 300000;            // How many bars back (0 = all available history)
-input string          InpFileName  = "";                // Output filename (blank = auto: <symbol>_<period>.csv)
+input int             InpBars      = 300000;            // How many bars back (0 = all available history) - IGNORED if InpStartDate is set
+input datetime        InpStartDate = 0;                 // Export FROM this date (0 = ignore, use InpBars instead). Format: 2015.01.01
+input datetime        InpEndDate   = 0;                 // Export UP TO this date (0 = latest available bar). Only used if InpStartDate is set.
+input bool            InpIncludeCheckColumns = false;    // Include real_volume + chk_ema3/21/150/atr14/macd (bigger file - only needed to validate a Python port)
+input string          InpFileName  = "";                // Output filename (blank = auto: <symbol>_<period>[_<start>-<end>].csv)
 
 int      g_emaHandle3, g_emaHandle21, g_emaHandle150, g_atrHandle, g_macdHandle;
 
@@ -51,39 +73,56 @@ int OnStart()
 
    // --- indicator handles for the chk_* reference columns - these are
    // MT5's OWN built-in computations, the same ones every engine.py in
-   // this project validates its manual Python port against.
-   g_emaHandle3   = iMA(sym, tf, 3,   0, MODE_EMA, PRICE_CLOSE);
-   g_emaHandle21  = iMA(sym, tf, 21,  0, MODE_EMA, PRICE_CLOSE);
-   g_emaHandle150 = iMA(sym, tf, 150, 0, MODE_EMA, PRICE_CLOSE);
-   g_atrHandle    = iATR(sym, tf, 14);
-   g_macdHandle   = iMACD(sym, tf, 12, 26, 9, PRICE_CLOSE);
-   if(g_emaHandle3 == INVALID_HANDLE || g_emaHandle21 == INVALID_HANDLE ||
-      g_emaHandle150 == INVALID_HANDLE || g_atrHandle == INVALID_HANDLE ||
-      g_macdHandle == INVALID_HANDLE)
+   // this project validates its manual Python port against. Skipped
+   // entirely (including the warmup wait below) unless explicitly asked
+   // for via InpIncludeCheckColumns - not needed for an ordinary pull.
+   if(InpIncludeCheckColumns)
      {
-      Print("ExportBarData: failed to create one or more indicator handles.");
-      return(-1);
-     }
+      g_emaHandle3   = iMA(sym, tf, 3,   0, MODE_EMA, PRICE_CLOSE);
+      g_emaHandle21  = iMA(sym, tf, 21,  0, MODE_EMA, PRICE_CLOSE);
+      g_emaHandle150 = iMA(sym, tf, 150, 0, MODE_EMA, PRICE_CLOSE);
+      g_atrHandle    = iATR(sym, tf, 14);
+      g_macdHandle   = iMACD(sym, tf, 12, 26, 9, PRICE_CLOSE);
+      if(g_emaHandle3 == INVALID_HANDLE || g_emaHandle21 == INVALID_HANDLE ||
+         g_emaHandle150 == INVALID_HANDLE || g_atrHandle == INVALID_HANDLE ||
+         g_macdHandle == INVALID_HANDLE)
+        {
+         Print("ExportBarData: failed to create one or more indicator handles.");
+         return(-1);
+        }
 
-   // --- give the indicators a moment to calculate their buffers on a
-   // fresh handle (0 on the first CopyBuffer call right after creation
-   // is a known MT5 quirk) - retry a few times rather than fail once.
-   for(int tries = 0; tries < 20; tries++)
-     {
-      if(BarsCalculated(g_atrHandle) > 0) break;
-      Sleep(200);
+      // --- give the indicators a moment to calculate their buffers on a
+      // fresh handle (0 on the first CopyBuffer call right after creation
+      // is a known MT5 quirk) - retry a few times rather than fail once.
+      for(int tries = 0; tries < 20; tries++)
+        {
+         if(BarsCalculated(g_atrHandle) > 0) break;
+         Sleep(200);
+        }
      }
 
    MqlRates rates[];
    ArraySetAsSeries(rates, false);
-   int copied = (InpBars <= 0)
-      ? CopyRates(sym, tf, 0, 100000000, rates)
-      : CopyRates(sym, tf, 0, InpBars, rates);
+   bool useDateRange = (InpStartDate > 0);
+   int copied;
+   if(useDateRange)
+     {
+      datetime endD = (InpEndDate > 0) ? InpEndDate : TimeCurrent();
+      copied = CopyRates(sym, tf, InpStartDate, endD, rates);
+     }
+   else
+     {
+      copied = (InpBars <= 0)
+         ? CopyRates(sym, tf, 0, 100000000, rates)
+         : CopyRates(sym, tf, 0, InpBars, rates);
+     }
    if(copied <= 0)
      {
       PrintFormat("ExportBarData: CopyRates returned %d bars - error %d. "
                   "Try Tools>Options>Charts 'Max bars in history', or scroll the "
-                  "chart far left first to force the terminal to download more history.",
+                  "chart far left first to force the terminal to download more history "
+                  "(scroll back PAST InpStartDate if you're using a date range - MT5 only "
+                  "has bars in memory/disk that a chart has actually scrolled to at some point).",
                   copied, GetLastError());
       return(-1);
      }
@@ -91,38 +130,46 @@ int OnStart()
    double ema3[], ema21[], ema150[], atr[], macdMain[];
    ArraySetAsSeries(ema3, false); ArraySetAsSeries(ema21, false);
    ArraySetAsSeries(ema150, false); ArraySetAsSeries(atr, false); ArraySetAsSeries(macdMain, false);
-   if(CopyBuffer(g_emaHandle3,   0, rates[0].time, rates[copied-1].time, ema3)   <= 0 ||
-      CopyBuffer(g_emaHandle21,  0, rates[0].time, rates[copied-1].time, ema21)  <= 0 ||
-      CopyBuffer(g_emaHandle150, 0, rates[0].time, rates[copied-1].time, ema150) <= 0 ||
-      CopyBuffer(g_atrHandle,    0, rates[0].time, rates[copied-1].time, atr)    <= 0 ||
-      CopyBuffer(g_macdHandle,   0, rates[0].time, rates[copied-1].time, macdMain) <= 0)
+   if(InpIncludeCheckColumns)
      {
-      PrintFormat("ExportBarData: CopyBuffer failed for one or more chk_* series, error %d. "
-                  "This usually just means not enough warmup history is loaded - scroll the "
-                  "chart far left to force it to download further back, then re-run.",
-                  GetLastError());
-      return(-1);
-     }
-   // CopyBuffer by time range can return fewer points than CopyRates if any
-   // indicator's own warmup eats into the front of the window - align by
-   // time explicitly rather than assuming array positions line up 1:1.
-   // Build lookup arrays only if needed (rare on M5/H4 with 14/21/150-period
-   // warmups against a few hundred thousand bars); simplest robust approach:
-   // require exact length match, else abort with a clear message rather than
-   // silently misaligning chk_* columns against the wrong bar.
-   if(ArraySize(ema3) != copied || ArraySize(ema21) != copied ||
-      ArraySize(ema150) != copied || ArraySize(atr) != copied || ArraySize(macdMain) != copied)
-     {
-      PrintFormat("ExportBarData: chk_* buffer length mismatch (rates=%d ema3=%d ema21=%d ema150=%d atr=%d macd=%d) - "
-                  "not enough warmup history loaded before the export window. Scroll the chart far left "
-                  "(or reduce InpBars) so every indicator has its full lookback available, then re-run.",
-                  copied, ArraySize(ema3), ArraySize(ema21), ArraySize(ema150), ArraySize(atr), ArraySize(macdMain));
-      return(-1);
+      if(CopyBuffer(g_emaHandle3,   0, rates[0].time, rates[copied-1].time, ema3)   <= 0 ||
+         CopyBuffer(g_emaHandle21,  0, rates[0].time, rates[copied-1].time, ema21)  <= 0 ||
+         CopyBuffer(g_emaHandle150, 0, rates[0].time, rates[copied-1].time, ema150) <= 0 ||
+         CopyBuffer(g_atrHandle,    0, rates[0].time, rates[copied-1].time, atr)    <= 0 ||
+         CopyBuffer(g_macdHandle,   0, rates[0].time, rates[copied-1].time, macdMain) <= 0)
+        {
+         PrintFormat("ExportBarData: CopyBuffer failed for one or more chk_* series, error %d. "
+                     "This usually just means not enough warmup history is loaded - scroll the "
+                     "chart far left to force it to download further back, then re-run.",
+                     GetLastError());
+         return(-1);
+        }
+      // CopyBuffer by time range can return fewer points than CopyRates if any
+      // indicator's own warmup eats into the front of the window - align by
+      // time explicitly rather than assuming array positions line up 1:1.
+      // Build lookup arrays only if needed (rare on M5/H4 with 14/21/150-period
+      // warmups against a few hundred thousand bars); simplest robust approach:
+      // require exact length match, else abort with a clear message rather than
+      // silently misaligning chk_* columns against the wrong bar.
+      if(ArraySize(ema3) != copied || ArraySize(ema21) != copied ||
+         ArraySize(ema150) != copied || ArraySize(atr) != copied || ArraySize(macdMain) != copied)
+        {
+         PrintFormat("ExportBarData: chk_* buffer length mismatch (rates=%d ema3=%d ema21=%d ema150=%d atr=%d macd=%d) - "
+                     "not enough warmup history loaded before the export window. Scroll the chart far left "
+                     "(or reduce InpBars) so every indicator has its full lookback available, then re-run.",
+                     copied, ArraySize(ema3), ArraySize(ema21), ArraySize(ema150), ArraySize(atr), ArraySize(macdMain));
+         return(-1);
+        }
      }
 
-   string fname = (InpFileName == "")
-      ? StringFormat("%s_%s.csv", sym, EnumToString(tf))
-      : InpFileName;
+   string fname = InpFileName;
+   if(fname == "")
+     {
+      fname = useDateRange
+         ? StringFormat("%s_%s_%s-%s.csv", sym, EnumToString(tf),
+                         TimeToString(rates[0].time, TIME_DATE), TimeToString(rates[copied-1].time, TIME_DATE))
+         : StringFormat("%s_%s.csv", sym, EnumToString(tf));
+     }
    int fh = FileOpen(fname, FILE_WRITE | FILE_TXT | FILE_ANSI);
    if(fh == INVALID_HANDLE)
      {
@@ -136,25 +183,39 @@ int OnStart()
 
    FileWrite(fh, StringFormat("meta_symbol,%s,meta_digits,%d,meta_point,%s,meta_contract_size,%s",
              sym, digits, DoubleToString(point, digits), DoubleToString(contractSize, 2)));
-   FileWrite(fh, "time,open,high,low,close,tick_volume,real_volume,spread,chk_ema3,chk_ema21,chk_ema150,chk_atr14,chk_macd");
+   if(InpIncludeCheckColumns)
+      FileWrite(fh, "time,open,high,low,close,tick_volume,real_volume,spread,chk_ema3,chk_ema21,chk_ema150,chk_atr14,chk_macd");
+   else
+      FileWrite(fh, "time,open,high,low,close,tick_volume,spread");
 
    for(int i = 0; i < copied; i++)
      {
-      FileWrite(fh,
-         StringFormat("%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%s,%s,%s",
-            TimeToString(rates[i].time, TIME_DATE | TIME_SECONDS),
-            DoubleToString(rates[i].open, digits),
-            DoubleToString(rates[i].high, digits),
-            DoubleToString(rates[i].low, digits),
-            DoubleToString(rates[i].close, digits),
-            (int)rates[i].tick_volume,
-            (int)rates[i].real_volume,
-            (int)rates[i].spread,
-            DoubleToString(ema3[i], digits + 3),
-            DoubleToString(ema21[i], digits + 3),
-            DoubleToString(ema150[i], digits + 3),
-            DoubleToString(atr[i], digits + 3),
-            DoubleToString(macdMain[i], digits + 3)));
+      if(InpIncludeCheckColumns)
+         FileWrite(fh,
+            StringFormat("%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%s,%s,%s",
+               TimeToString(rates[i].time, TIME_DATE | TIME_SECONDS),
+               DoubleToString(rates[i].open, digits),
+               DoubleToString(rates[i].high, digits),
+               DoubleToString(rates[i].low, digits),
+               DoubleToString(rates[i].close, digits),
+               (int)rates[i].tick_volume,
+               (int)rates[i].real_volume,
+               (int)rates[i].spread,
+               DoubleToString(ema3[i], digits + 3),
+               DoubleToString(ema21[i], digits + 3),
+               DoubleToString(ema150[i], digits + 3),
+               DoubleToString(atr[i], digits + 3),
+               DoubleToString(macdMain[i], digits + 3)));
+      else
+         FileWrite(fh,
+            StringFormat("%s,%s,%s,%s,%s,%d,%d",
+               TimeToString(rates[i].time, TIME_DATE | TIME_SECONDS),
+               DoubleToString(rates[i].open, digits),
+               DoubleToString(rates[i].high, digits),
+               DoubleToString(rates[i].low, digits),
+               DoubleToString(rates[i].close, digits),
+               (int)rates[i].tick_volume,
+               (int)rates[i].spread));
      }
    FileClose(fh);
 
