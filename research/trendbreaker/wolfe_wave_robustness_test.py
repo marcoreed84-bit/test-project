@@ -102,3 +102,36 @@ if __name__ == "__main__":
         report(res_n, f"  PIVOT_STRENGTH={N} ({len(cands_n)} raw shapes)")
 
     print("\nVERDICT: printed above - see chat for interpretation.")
+
+# ============================================================================
+# FINAL VERDICT (Opus review, 2026-09-26, after the two checks above):
+# REJECTED. Confirmed CONFIRM_LAG is correct (off-by-one in the safe
+# direction) and found one more real issue of the same class: find_swings()
+# can replace wave 5 with a later, deeper low before the pattern's own
+# BREAK_CONFIRM_CLOSES trigger fires - a live EA would have traded the
+# earlier (overtaken) version too. A causal swing tracker that trades every
+# version as soon as it's knowable didn't change the PF much (Wolfe
+# 1.46-1.56, ANY-shape 1.28-1.36 in points), so this specific issue wasn't
+# the deciding one - but three things WERE:
+#   1. sma_atr(h, l, o, ...) still has the open-vs-close bug documented in
+#      touch_reaction_corrected.py. Fixing it drops Wolfe's risk-normalized
+#      PF (0.5xATR stop) from 1.02 to 0.96 and IS-R ranges 0.67-1.45 across
+#      settings - unstable.
+#   2. GOLD ran from ~$270 to ~$4000 over this dataset, so a POINTS-based PF
+#      weights recent trades ~10x+ more than old ones. Measured as % of
+#      entry price instead, Wolfe's own in-sample PF is only 1.09-1.33, and
+#      the 70/30 IS/OOS split lands around 2021 - so "OOS beats IS" mostly
+#      just means the 2021-26 rally carried it, not that the edge is robust.
+#   3. THE DECIDING CHECK: taking each taken trade's own stop/target
+#      distances (as % of price) and firing them at 300 sets of RANDOM H4
+#      bars, long-only, same brackets - produced a median PF of 1.29-1.46
+#      (5-95% range ~0.9-2.0). Both Wolfe (%PF 1.48-1.52) and the ANY-shape
+#      control (%PF 1.43-1.66) land INSIDE that random-timing band. Neither
+#      beats "be long GOLD with this bracket, entered whenever."
+#
+# Lesson carried forward for every future long-only-GOLD pattern test in
+# this repo: report PF in R (risk units) or % of price, not raw points, and
+# run this same random-entry/same-bracket baseline BEFORE calling anything
+# promising. A points-based PF on a 25-year GOLD dataset will flatter almost
+# any long-biased idea just from the underlying trend.
+# ============================================================================
