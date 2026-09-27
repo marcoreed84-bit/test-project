@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Smart Trend Strategy julzALGO, KAMA/Kalman+BOS/CHoCH, long RR=2.0/short RR=1.0 pooled (STOP_ATR_MULT, SYNC_BARS, ENTRY_CONFIRM)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 5, 'bos_only'): IS n=  248  IS %PF=1.160
+   (3.0, 10, 'bos_only'): IS n=  317  IS %PF=1.108
+   (4.5, 5, 'bos_only'): IS n=  235  IS %PF=1.104
+   (4.5, 10, 'bos_only'): IS n=  298  IS %PF=1.092
+   (4.5, 20, 'bos_only'): IS n=  444  IS %PF=1.065
+   (3.0, 20, 'bos_only'): IS n=  483  IS %PF=1.019
+   (1.5, 5, 'bos_only'): IS n=  255  IS %PF=0.984
+   (1.5, 10, 'bos_only'): IS n=  326  IS %PF=0.968
+FROZEN WINNER (IS only): (3.0, 5, 'bos_only')  IS n=248  IS %PF=1.160
+OOS (untouched): n=242 (long=118, short=124)  win%=44.2  %PF=0.905  sum%=-6.4
+random-timing OOS null (pooled long+short, 1000 draws): median=0.982  p95=1.255
+REAL OOS %PF=0.905 -> 28.4th percentile; p(K=1)=0.7160 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.320) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Smart Trend Strategy julzALGO, KAMA/Kalman+BOS/CHoCH, long RR=2.0/short RR=1.0 pooled (STOP_ATR_MULT, SYNC_BARS, ENTRY_CONFIRM)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (4.5, 5, 'choch_only'): IS n=  832  IS %PF=0.672
+   (4.5, 5, 'bos_or_choch'): IS n= 1045  IS %PF=0.630
+   (4.5, 10, 'bos_only'): IS n=  305  IS %PF=0.626
+   (4.5, 10, 'choch_only'): IS n= 1118  IS %PF=0.607
+   (4.5, 5, 'bos_only'): IS n=  236  IS %PF=0.587
+   (4.5, 20, 'choch_only'): IS n= 1408  IS %PF=0.584
+   (4.5, 10, 'bos_or_choch'): IS n= 1379  IS %PF=0.575
+   (4.5, 20, 'bos_only'): IS n=  440  IS %PF=0.568
+FROZEN WINNER (IS only): (4.5, 5, 'choch_only')  IS n=832  IS %PF=0.672
+OOS (untouched): n=694 (long=308, short=386)  win%=39.3  %PF=0.795  sum%=-117.4
+random-timing OOS null (pooled long+short, 1000 draws): median=0.820  p95=0.955
+REAL OOS %PF=0.795 -> 36.3th percentile; p(K=1)=0.6370 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.983) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Smart Trend Strategy julzALGO, KAMA/Kalman+BOS/CHoCH, long RR=2.0/short RR=1.0 pooled (STOP_ATR_MULT, SYNC_BARS, ENTRY_CONFIRM)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (4.5, 5, 'choch_only'): IS n=  508  IS %PF=0.961
+   (4.5, 20, 'choch_only'): IS n=  821  IS %PF=0.897
+   (4.5, 5, 'bos_or_choch'): IS n=  654  IS %PF=0.873
+   (4.5, 20, 'bos_or_choch'): IS n=  967  IS %PF=0.845
+   (3.0, 5, 'choch_only'): IS n=  597  IS %PF=0.845
+   (4.5, 10, 'choch_only'): IS n=  675  IS %PF=0.844
+   (3.0, 20, 'choch_only'): IS n=  940  IS %PF=0.834
+   (3.0, 10, 'choch_only'): IS n=  785  IS %PF=0.804
+FROZEN WINNER (IS only): (4.5, 5, 'choch_only')  IS n=508  IS %PF=0.961
+OOS (untouched): n=514 (long=244, short=270)  win%=41.8  %PF=0.972  sum%=-11.9
+random-timing OOS null (pooled long+short, 1000 draws): median=0.933  p95=1.102
+REAL OOS %PF=0.972 -> 66.2th percentile; p(K=1)=0.3380 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.134) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (3.0, 5, 'bos_only'), 'is_n': 248, 'is_pf': np.float64(1.1599287096233952), 'oos_n': 242, 'oos_pf': np.float64(0.904614813087677), 'pctile': np.float64(28.4), 'p1': 0.716, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (4.5, 5, 'choch_only'), 'is_n': 832, 'is_pf': np.float64(0.6718233268982355), 'oos_n': 694, 'oos_pf': np.float64(0.7949766406595045), 'pctile': np.float64(36.3), 'p1': 0.637, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (4.5, 5, 'choch_only'), 'is_n': 508, 'is_pf': np.float64(0.9607783783427242), 'oos_n': 514, 'oos_pf': np.float64(0.971663951561189), 'pctile': np.float64(66.2), 'p1': 0.338, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
