@@ -1,0 +1,24 @@
+
+==========================================================================================
+SILVER H1 (traded) vs GOLD H1 (reference) -- log-ratio z-score reversion (N, Z, HOLD)
+SILVER: n=72693 bars 2014-06-13 00:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:00:00 (38811 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (240, 1.5, 48): IS n=  421  IS %PF=0.724  long%=54
+   (240, 2.5, 48): IS n=  200  IS %PF=0.718  long%=50
+   (48, 1.5, 48): IS n=  773  IS %PF=0.689  long%=51
+   (240, 2.0, 48): IS n=  331  IS %PF=0.672  long%=56
+   (48, 2.5, 48): IS n=  508  IS %PF=0.632  long%=52
+   (48, 2.0, 48): IS n=  673  IS %PF=0.612  long%=53
+   (240, 1.5, 12): IS n=  672  IS %PF=0.552  long%=55
+   (48, 1.5, 12): IS n= 1444  IS %PF=0.522  long%=51
+FROZEN WINNER (IS only): (240, 1.5, 48)  IS n=421  IS %PF=0.724
+IS sanity: random-timing IS pool median=0.740; IS winner vs best-of-12 random (median 0.896): p=1.0000
+OOS (untouched): n=381  win%=40.2  %PF=0.852  sum%=-61.4  long%=49 (long %PF=0.995 n=186, short %PF=0.720 n=195)
+random-timing OOS null (1000 draws, p_fire=0.01754, mean n=377 vs real 381): median=0.890  p95=1.113
+REAL OOS %PF=0.852 -> 37.5th percentile; p(K=1)=0.6250 [DOES NOT SURVIVE]; p(K=12)=1.0000 (best-of-K median 1.103) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.49): median=0.897  p(K=1)=0.6390
+
+SUMMARY
+  {'label': 'SILVER H1 (traded) vs GOLD H1 (reference) -- log-ratio z-score reversion (N, Z, HOLD)', 'K': 12, 'cfg': (240, 1.5, 48), 'is_n': 421, 'is_pf': np.float64(0.7238346857574008), 'oos_n': 381, 'oos_pf': np.float64(0.851776959055838), 'p_is_k': 1.0, 'pctile': np.float64(37.5), 'p1': 0.625, 'pK': 1.0, 'p1_dir': 0.639, 'null_median': 0.8901459811851911, 'verdict': 'DOES NOT SURVIVE'}
