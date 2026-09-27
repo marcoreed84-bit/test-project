@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Range Breakout Targets (WIN, PCT, MULT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (20, 40, 2.0): IS n= 1098  IS %PF=0.907
+   (20, 30, 1.0): IS n= 1077  IS %PF=0.904
+   (20, 40, 1.5): IS n= 1176  IS %PF=0.899
+   (10, 30, 2.0): IS n=  790  IS %PF=0.897
+   (20, 30, 2.0): IS n=  970  IS %PF=0.877
+   (20, 30, 1.5): IS n= 1004  IS %PF=0.872
+   (10, 30, 1.5): IS n=  807  IS %PF=0.869
+   (10, 20, 2.0): IS n=  439  IS %PF=0.869
+FROZEN WINNER (IS only): (20, 40, 2.0)  IS n=1098  IS %PF=0.907
+OOS (untouched): n=1003  win%=41.5  %PF=0.988  sum%=-3.7
+random-timing OOS null (1000 draws, p_fire=0.01143): median=0.946  p95=1.073
+REAL OOS %PF=0.988 -> 71.7th percentile; p(K=1)=0.2830 [DOES NOT SURVIVE]; p(K=18)=0.9970 (best-of-K median 1.089) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Range Breakout Targets (WIN, PCT, MULT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (20, 30, 2.0): IS n=  948  IS %PF=0.612
+   (20, 40, 2.0): IS n= 1104  IS %PF=0.565
+   (20, 20, 2.0): IS n=  689  IS %PF=0.539
+   (20, 40, 1.5): IS n= 1176  IS %PF=0.509
+   (20, 30, 1.5): IS n=  999  IS %PF=0.508
+   (10, 40, 2.0): IS n= 1121  IS %PF=0.479
+   (10, 30, 2.0): IS n=  816  IS %PF=0.477
+   (20, 20, 1.5): IS n=  714  IS %PF=0.443
+FROZEN WINNER (IS only): (20, 30, 2.0)  IS n=948  IS %PF=0.612
+OOS (untouched): n=899  win%=40.0  %PF=0.690  sum%=-183.8
+random-timing OOS null (1000 draws, p_fire=0.00954): median=0.762  p95=0.869
+REAL OOS %PF=0.690 -> 11.1th percentile; p(K=1)=0.8890 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 0.881) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Range Breakout Targets (WIN, PCT, MULT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (20, 20, 2.0): IS n=  404  IS %PF=0.937
+   (20, 40, 2.0): IS n=  600  IS %PF=0.894
+   (20, 40, 1.5): IS n=  627  IS %PF=0.872
+   (10, 40, 2.0): IS n=  585  IS %PF=0.832
+   (20, 40, 1.0): IS n=  677  IS %PF=0.816
+   (20, 20, 1.5): IS n=  419  IS %PF=0.801
+   (20, 30, 2.0): IS n=  511  IS %PF=0.788
+   (10, 30, 2.0): IS n=  456  IS %PF=0.763
+FROZEN WINNER (IS only): (20, 20, 2.0)  IS n=404  IS %PF=0.937
+OOS (untouched): n=373  win%=44.0  %PF=0.987  sum%=-3.0
+random-timing OOS null (1000 draws, p_fire=0.00483): median=0.852  p95=1.035
+REAL OOS %PF=0.987 -> 89.6th percentile; p(K=1)=0.1040 [borderline]; p(K=18)=0.8560 (best-of-K median 1.044) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 18, 'cfg': (20, 40, 2.0), 'is_n': 1098, 'is_pf': np.float64(0.9072900867850097), 'oos_n': 1003, 'oos_pf': np.float64(0.988282022255227), 'pctile': np.float64(71.7), 'p1': 0.283, 'pK': 0.997, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 18, 'cfg': (20, 30, 2.0), 'is_n': 948, 'is_pf': np.float64(0.6120485154483172), 'oos_n': 899, 'oos_pf': np.float64(0.6904369738766181), 'pctile': np.float64(11.1), 'p1': 0.889, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 18, 'cfg': (20, 20, 2.0), 'is_n': 404, 'is_pf': np.float64(0.9367550996852524), 'oos_n': 373, 'oos_pf': np.float64(0.9866294408679898), 'pctile': np.float64(89.60000000000001), 'p1': 0.104, 'pK': 0.856, 'verdict': 'DOES NOT SURVIVE'}

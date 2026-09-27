@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- MACD Pullback Sniper (SL_MULT, RR, ADX_MIN)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 2.0, 25.0): IS n=  616  IS %PF=0.764
+   (2.0, 3.0, 25.0): IS n=  617  IS %PF=0.761
+   (1.5, 1.5, 25.0): IS n=  618  IS %PF=0.747
+   (1.5, 3.0, 25.0): IS n=  617  IS %PF=0.743
+   (2.0, 1.5, 25.0): IS n=  618  IS %PF=0.739
+   (3.0, 1.5, 25.0): IS n=  616  IS %PF=0.739
+   (1.5, 2.0, 25.0): IS n=  618  IS %PF=0.739
+   (2.0, 2.0, 25.0): IS n=  618  IS %PF=0.719
+FROZEN WINNER (IS only): (3.0, 2.0, 25.0)  IS n=616  IS %PF=0.764
+OOS (untouched): n=547  win%=36.7  %PF=0.910  sum%=-7.5
+random-timing OOS null (1000 draws, p_fire=0.00438, mean n=557): median=0.909  p95=1.124
+REAL OOS %PF=0.910 -> 50.1th percentile; p(K=1)=0.4990 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.172) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- MACD Pullback Sniper (SL_MULT, RR, ADX_MIN)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 1.5, 25.0): IS n=  584  IS %PF=0.308
+   (3.0, 2.0, 25.0): IS n=  584  IS %PF=0.304
+   (3.0, 3.0, 25.0): IS n=  584  IS %PF=0.304
+   (2.0, 3.0, 25.0): IS n=  584  IS %PF=0.297
+   (2.0, 3.0, 20.0): IS n= 1151  IS %PF=0.284
+   (3.0, 1.5, 20.0): IS n= 1152  IS %PF=0.284
+   (3.0, 2.0, 20.0): IS n= 1148  IS %PF=0.283
+   (2.0, 2.0, 25.0): IS n=  584  IS %PF=0.282
+FROZEN WINNER (IS only): (3.0, 1.5, 25.0)  IS n=584  IS %PF=0.308
+OOS (untouched): n=508  win%=29.3  %PF=0.552  sum%=-88.3
+random-timing OOS null (1000 draws, p_fire=0.00396, mean n=509): median=0.626  p95=0.782
+REAL OOS %PF=0.552 -> 18.0th percentile; p(K=1)=0.8200 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.803) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- MACD Pullback Sniper (SL_MULT, RR, ADX_MIN)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 3.0, 25.0): IS n=  386  IS %PF=0.699
+   (3.0, 2.0, 25.0): IS n=  387  IS %PF=0.681
+   (2.0, 3.0, 25.0): IS n=  387  IS %PF=0.667
+   (2.0, 1.5, 25.0): IS n=  389  IS %PF=0.667
+   (1.5, 2.0, 25.0): IS n=  389  IS %PF=0.652
+   (3.0, 1.5, 25.0): IS n=  388  IS %PF=0.648
+   (1.5, 3.0, 25.0): IS n=  389  IS %PF=0.643
+   (2.0, 2.0, 25.0): IS n=  388  IS %PF=0.626
+FROZEN WINNER (IS only): (3.0, 3.0, 25.0)  IS n=386  IS %PF=0.699
+OOS (untouched): n=342  win%=25.7  %PF=0.614  sum%=-56.9
+random-timing OOS null (1000 draws, p_fire=0.00387, mean n=352): median=0.720  p95=0.943
+REAL OOS %PF=0.614 -> 18.5th percentile; p(K=1)=0.8150 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.984) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (3.0, 2.0, 25.0), 'is_n': 616, 'is_pf': np.float64(0.7637182261663135), 'oos_n': 547, 'oos_pf': np.float64(0.9097331107246931), 'pctile': np.float64(50.1), 'p1': 0.499, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (3.0, 1.5, 25.0), 'is_n': 584, 'is_pf': np.float64(0.3078065175658201), 'oos_n': 508, 'oos_pf': np.float64(0.5524736269023182), 'pctile': np.float64(18.0), 'p1': 0.82, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (3.0, 3.0, 25.0), 'is_n': 386, 'is_pf': np.float64(0.6986851903721754), 'oos_n': 342, 'oos_pf': np.float64(0.614010430195733), 'pctile': np.float64(18.5), 'p1': 0.815, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
