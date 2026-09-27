@@ -65,6 +65,11 @@ EXPECTED_POINT = {"SILVER": 0.001, "BTCUSD": 0.01, "GOLD": 0.01}
 SPLITS = {
     "SILVER": (pd.Timestamp("2014-06-12"), pd.Timestamp("2021-01-01")),
     "BTCUSD": (pd.Timestamp("2021-01-01"), pd.Timestamp("2024-01-01")),
+    # GOLD_M15_native.csv is real M15 from 2014-06-13 (one day after Silver's
+    # own 2014-06-13 real-data start - see research/aurelius/engine.py's own
+    # contamination note). Same 2021-01-01 IS/OOS boundary as Silver, for
+    # direct comparability between the two.
+    "GOLD": (pd.Timestamp("2014-06-13"), pd.Timestamp("2021-01-01")),
 }
 N_RANDOM = 1000
 N_BOOT = 5000
