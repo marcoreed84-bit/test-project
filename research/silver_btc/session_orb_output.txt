@@ -1,0 +1,56 @@
+
+==========================================================================================
+SILVER M15 -- session opening-range breakout (SESSION, RANGE_BARS, TARGET[0=EOD]) [null restricted to 11:00-23:00 server]
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   ((10, 0), 4, 0.0): IS n= 1686  IS %PF=0.464  long%=53
+   ((1, 0), 4, 0.0): IS n= 1681  IS %PF=0.445  long%=58
+   ((15, 15), 2, 0.0): IS n= 1647  IS %PF=0.441  long%=51
+   ((10, 0), 2, 0.0): IS n= 1689  IS %PF=0.433  long%=54
+   ((15, 15), 4, 0.0): IS n= 1545  IS %PF=0.413  long%=52
+   ((15, 15), 2, 2.0): IS n= 1647  IS %PF=0.407  long%=51
+   ((10, 0), 4, 2.0): IS n= 1686  IS %PF=0.397  long%=53
+   ((1, 0), 2, 0.0): IS n= 1681  IS %PF=0.396  long%=60
+FROZEN WINNER (IS only): ((10, 0), 4, 0.0)  IS n=1686  IS %PF=0.464
+IS sanity: random-timing IS pool median=0.418; IS winner vs best-of-18 random (median 0.476): p=0.7316
+OOS (untouched): n=1479  win%=28.9  %PF=0.746  sum%=-198.3  long%=53 (long %PF=0.666 n=777, short %PF=0.839 n=702)
+random-timing OOS null (1000 draws, p_fire=0.03297, mean n=1480 vs real 1479): median=0.718  p95=0.808
+REAL OOS %PF=0.746 -> 69.9th percentile; p(K=1)=0.3010 [DOES NOT SURVIVE]; p(K=18)=0.9984 (best-of-K median 0.817) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.53): median=0.720  p(K=1)=0.3250
+
+==========================================================================================
+BTCUSD M15 -- session opening-range breakout (SESSION, RANGE_BARS, TARGET[0=EOD]) [null restricted to 17:00-23:00 server]
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100; 1 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   ((16, 30), 2, 0.0): IS n=  952  IS %PF=1.076  long%=49
+   ((16, 30), 2, 2.0): IS n=  952  IS %PF=0.958  long%=49
+   ((16, 30), 4, 0.0): IS n=  902  IS %PF=0.942  long%=48
+   ((0, 0), 4, 0.0): IS n=  970  IS %PF=0.899  long%=56
+   ((16, 30), 4, 2.0): IS n=  902  IS %PF=0.879  long%=48
+   ((16, 30), 2, 1.0): IS n=  952  IS %PF=0.865  long%=49
+   ((0, 0), 2, 0.0): IS n=  977  IS %PF=0.849  long%=53
+   ((16, 30), 4, 1.0): IS n=  902  IS %PF=0.818  long%=48
+FROZEN WINNER (IS only): ((16, 30), 2, 0.0)  IS n=952  IS %PF=1.076
+IS sanity: random-timing IS pool median=0.720; IS winner vs best-of-18 random (median 0.842): p=0.0000
+OOS (untouched): n=986  win%=38.6  %PF=0.936  sum%=-28.4  long%=54 (long %PF=0.891 n=536, short %PF=0.987 n=450)
+random-timing OOS null (1000 draws, p_fire=0.08282, mean n=1012 vs real 986): median=0.761  p95=0.886
+REAL OOS %PF=0.936 -> 98.9th percentile; p(K=1)=0.0110 [SURVIVES]; p(K=18)=0.1802 (best-of-K median 0.902) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.54): median=0.757  p(K=1)=0.0100
+
+SUMMARY
+  {'label': 'SILVER M15 -- session opening-range breakout (SESSION, RANGE_BARS, TARGET[0=EOD]) [null restricted to 11:00-23:00 server]', 'K': 18, 'cfg': ((10, 0), 4, 0.0), 'is_n': 1686, 'is_pf': np.float64(0.4638303221129162), 'oos_n': 1479, 'oos_pf': np.float64(0.7457160208325689), 'p_is_k': 0.7316, 'pctile': np.float64(69.89999999999999), 'p1': 0.301, 'pK': 0.9984, 'p1_dir': 0.325, 'null_median': 0.7179901009135607, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- session opening-range breakout (SESSION, RANGE_BARS, TARGET[0=EOD]) [null restricted to 17:00-23:00 server]', 'K': 18, 'cfg': ((16, 30), 2, 0.0), 'is_n': 952, 'is_pf': np.float64(1.0763472056148642), 'oos_n': 986, 'oos_pf': np.float64(0.9358445393231204), 'p_is_k': 0.0, 'pctile': np.float64(98.9), 'p1': 0.011, 'pK': 0.1802, 'p1_dir': 0.01, 'null_median': 0.7614095628550179, 'verdict': 'DOES NOT SURVIVE'}
+
+DIAGNOSTIC ONLY (run after the frozen OOS result above; nothing was re-selected from it)
+BTCUSD winner ((16,30), RANGE_BARS=2, EOD):
+  real spread   IS  n=952 %PF=1.076 mean/trade=+0.0427%   OOS n=986 %PF=0.936 mean/trade=-0.0288%
+  ZERO spread   IS  n=952 %PF=1.483 mean/trade=+0.2180%   OOS n=986 %PF=1.151 mean/trade=+0.0597%
+  OOS median spread at entry = 0.0747% of price -> the gross edge (+0.06%/trade) is smaller than one spread.
+  OOS by year (real spread): 2024 0.930, 2025 1.093, 2026 0.736.
+  Reading: US-equity-open breakouts on BTC carry genuine directional TIMING information (beats random at
+  K=1 OOS p=0.011 and best-of-18 random on IS), but the gross edge shrank ~3.6x IS->OOS and no longer
+  covers this broker's spread. Fails its real K=18 (p=0.18) and is a net loser OOS - not tradeable.
