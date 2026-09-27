@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD D1 (resampled) -- Silver Always Long + Flush Protection (macro filter OMITTED: no DXY/US10Y data) (SILVER_SLOW_LEN, ONE_DAY_FLUSH_PCT, ATR_SHOCK_MULT)
+n=6583 bars 2001-06-04 00:00:00 -> 2026-09-25 00:00:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 00:00:00 (1692 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 00:00:00 (1480 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=15
+==========================================================================================
+27/27 combos had IS n>=15. Top 8 by IS %PF:
+   (200, 3.5, 2.5): IS n=   36  IS %PF=2.250
+   (200, 4.5, 1.8): IS n=   45  IS %PF=2.214
+   (200, 6.0, 1.8): IS n=   45  IS %PF=2.214
+   (150, 3.5, 2.5): IS n=   38  IS %PF=2.174
+   (150, 4.5, 1.8): IS n=   47  IS %PF=2.160
+   (150, 6.0, 1.8): IS n=   47  IS %PF=2.160
+   (200, 3.5, 1.8): IS n=   46  IS %PF=2.159
+   (150, 3.5, 1.8): IS n=   48  IS %PF=2.105
+FROZEN WINNER (IS only): (200, 3.5, 2.5)  IS n=36  IS %PF=2.250
+OOS (untouched): n=43  win%=23.3  %PF=2.786  sum%=84.7
+random-timing OOS null (1000 draws, p_fire=0.07407, mean n=45): median=2.975  p95=4.569
+REAL OOS %PF=2.786 -> 37.8th percentile; p(K=1)=0.6220 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 4.916) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER D1 (resampled) -- Silver Always Long + Flush Protection (macro filter OMITTED: no DXY/US10Y data) (SILVER_SLOW_LEN, ONE_DAY_FLUSH_PCT, ATR_SHOCK_MULT)
+n=3174 bars 2014-06-12 00:00:00 -> 2026-09-25 00:00:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 00:00:00 (1694 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 00:00:00 (1480 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=15
+==========================================================================================
+27/27 combos had IS n>=15. Top 8 by IS %PF:
+   (150, 6.0, 1.8): IS n=   54  IS %PF=1.366
+   (150, 4.5, 1.8): IS n=   55  IS %PF=1.316
+   (150, 6.0, 2.5): IS n=   42  IS %PF=1.219
+   (150, 4.5, 2.5): IS n=   44  IS %PF=1.192
+   (150, 6.0, 1.4): IS n=   70  IS %PF=1.185
+   (150, 4.5, 1.4): IS n=   71  IS %PF=1.150
+   (150, 3.5, 1.8): IS n=   63  IS %PF=1.147
+   (200, 6.0, 1.8): IS n=   59  IS %PF=1.129
+FROZEN WINNER (IS only): (150, 6.0, 1.8)  IS n=54  IS %PF=1.366
+OOS (untouched): n=65  win%=32.3  %PF=1.442  sum%=71.0
+random-timing OOS null (1000 draws, p_fire=0.07498, mean n=66): median=1.430  p95=2.134
+REAL OOS %PF=1.442 -> 51.0th percentile; p(K=1)=0.4900 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 2.288) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD D1 (resampled) -- Silver Always Long + Flush Protection (macro filter OMITTED: no DXY/US10Y data) (SILVER_SLOW_LEN, ONE_DAY_FLUSH_PCT, ATR_SHOCK_MULT)
+n=2887 bars 2017-07-03 00:00:00 -> 2026-09-27 00:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 00:00:00 (978 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 00:00:00 (1001 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=15
+==========================================================================================
+27/27 combos had IS n>=15. Top 8 by IS %PF:
+   (100, 6.0, 2.5): IS n=   24  IS %PF=2.496
+   (150, 6.0, 2.5): IS n=   22  IS %PF=2.108
+   (100, 6.0, 1.8): IS n=   25  IS %PF=1.948
+   (100, 3.5, 2.5): IS n=   41  IS %PF=1.898
+   (100, 6.0, 1.4): IS n=   43  IS %PF=1.893
+   (100, 4.5, 2.5): IS n=   33  IS %PF=1.861
+   (100, 3.5, 1.4): IS n=   49  IS %PF=1.683
+   (150, 3.5, 2.5): IS n=   42  IS %PF=1.672
+FROZEN WINNER (IS only): (100, 6.0, 2.5)  IS n=24  IS %PF=2.496
+OOS (untouched): n=28  win%=17.9  %PF=2.057  sum%=81.2
+random-timing OOS null (1000 draws, p_fire=0.04183, mean n=27): median=1.822  p95=3.484
+REAL OOS %PF=2.057 -> 62.3th percentile; p(K=1)=0.3770 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 4.097) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (200, 3.5, 2.5), 'is_n': 36, 'is_pf': np.float64(2.250499932257686), 'oos_n': 43, 'oos_pf': np.float64(2.786478227059287), 'pctile': np.float64(37.8), 'p1': 0.622, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (150, 6.0, 1.8), 'is_n': 54, 'is_pf': np.float64(1.3664500748827628), 'oos_n': 65, 'oos_pf': np.float64(1.4416415805717708), 'pctile': np.float64(51.0), 'p1': 0.49, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (100, 6.0, 2.5), 'is_n': 24, 'is_pf': np.float64(2.4963700955057377), 'oos_n': 28, 'oos_pf': np.float64(2.0570045275581275), 'pctile': np.float64(62.3), 'p1': 0.377, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
