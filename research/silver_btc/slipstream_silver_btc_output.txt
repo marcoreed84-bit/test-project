@@ -1,0 +1,18 @@
+================================================================================================
+SILVER H4 (from native M15) 2014-06-12 00:00:00 -> 2026-09-25 20:00:00 n=18951 point=0.001; OOS from 2021-01-04 00:00:00
+  [FULL] n=412 win%=60.7 sum%=8.7 %PF=1.026 long%=56
+         null median=0.781 p95=0.977 -> 97.3th pct; p(K=1)=0.0270 p(K=5)=0.1244 p(K=30)=0.5558 => borderline
+  [OOS] n=204 win%=67.2 sum%=61.8 %PF=1.395 long%=62
+         null median=0.947 p95=1.336 -> 96.9th pct; p(K=1)=0.0310 p(K=5)=0.1490 p(K=30)=0.6070 => borderline
+================================================================================================
+BTCUSD H4 (from native M15) 2017-07-03 00:00:00 -> 2026-09-27 12:00:00 n=17277 point=0.01; OOS from 2024-01-01 00:00:00
+  [FULL] n=321 win%=61.4 sum%=36.5 %PF=1.080 long%=57
+         null median=0.811 p95=1.047 -> 96.5th pct; p(K=1)=0.0350 p(K=5)=0.1580 p(K=30)=0.6590 => DOES NOT SURVIVE
+  [OOS] n=120 win%=58.3 sum%=9.0 %PF=1.076 long%=56
+         null median=0.986 p95=1.491 -> 65.8th pct; p(K=1)=0.3420 p(K=5)=0.8780 p(K=30)=1.0000 => DOES NOT SURVIVE
+
+SUMMARY (supplementary; verdict on OOS)
+  SILVER  FULL n= 412 %PF=1.026 p1=0.0270 p5=0.1244 -> borderline
+  SILVER  OOS  n= 204 %PF=1.395 p1=0.0310 p5=0.1490 -> borderline
+  BTCUSD  FULL n= 321 %PF=1.080 p1=0.0350 p5=0.1580 -> DOES NOT SURVIVE
+  BTCUSD  OOS  n= 120 %PF=1.076 p1=0.3420 p5=0.8780 -> DOES NOT SURVIVE
