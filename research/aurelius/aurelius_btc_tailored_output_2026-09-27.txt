@@ -1,0 +1,38 @@
+=== BTCUSD M15: 275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00; point=0.01
+    chronological split 60%/40% at bar 165502 = 2023-08-03 06:45:00
+    IS  2017-07-03 -> 2023-08-03 (6.1 yrs)   OOS 2023-08-03 -> 2026-09-27 (3.2 yrs)
+    IS selection: max IS %PF subject to n_IS >= 73 (~12 trades/yr floor)
+    IS spread (points) p50/p80/p90/p97: [ 6007. 12650. 12850. 13100.]; OOS p50/p90: [6000. 9381.]
+
+  reference (not part of the search):
+    gold frozen, real point, no gate               IS n= 1033 %PF=0.497 win=0.129 | OOS n=  577 %PF=1.134 win=0.248
+    gold frozen, real point, gold 60-pt gate       IS n=    4 %PF=40.832 win=0.750 | OOS n=    0 %PF=nan win=nan
+    gold frozen, GOLD point (old bug), 60-pt gate  IS n=    4 %PF=40.832 win=0.750 | OOS n=    0 %PF=nan win=nan
+
+  stage 1: 500 random configs (of 7,372,800 grid points), 298 meet n>=73; IS %PF among those: median=0.706 p90=0.960 max=1.761; 26 of 298 have IS %PF > 1
+  stage-1 IS winner: %PF=1.761 n=92  [ma=2.0 slo=0.0 shi=0.8 sr=2.5 vol=1.6 pb=0.1 stop=1.5 vwap=0.2 spq=0.9 spc=0.4 ssb=False]
+  stage 2: coordinate ascent (2 pass(es)), 67 more configs -> TOTAL configs evaluated on IS = K_search = 567
+  FINAL IS winner: %PF=2.002 n=89 win=0.303 long=0.33
+    [ma=2.0 slo=0.1 shi=0.8 sr=2.5 vol=1.6 pb=0.1 stop=1.5 vwap=0.1 spq=off spc=0.4 ssb=False]
+  FROZEN winner on OOS: %PF=1.003 n=206 win=0.214 net=+0.2% (sum of per-trade % returns)
+  diagnostic (reporting only): IS-vs-OOS Spearman rank corr across 298 eligible stage-1 configs = +0.163; OOS %PF of ALL of them: median=1.012, 163 of 298 > 1
+    top-10 by IS %PF -> OOS %PF (n): 1.76->1.12(223), 1.41->1.08(296), 1.38->0.98(227), 1.28->1.55(187), 1.20->1.02(413), 1.15->1.29(293), 1.14->1.03(273), 1.13->1.14(148), 1.12->1.04(424), 1.12->1.07(298)
+
+  random timing on IS (800 draws, calibrated coin p_buy=0.33): real %PF=2.002 (n=89); random median=0.503 p95=1.166; real at 99.8th pct
+    K=   1: best-of-K median=0.508  p=0.0025  [SURVIVES]
+    K=  10: best-of-K median=1.107  p=0.0238  [SURVIVES]
+    K=  30: best-of-K median=1.411  p=0.0655  [borderline]
+    K=  50: best-of-K median=1.628  p=0.1115  [borderline]
+    K= 100: best-of-K median=1.805  p=0.2240  [FAILS]
+    K= 567: best-of-K median=2.285  p=0.7468  [FAILS]  <- this search's real K
+
+  random timing on OOS (800 draws, calibrated coin p_buy=0.53): real %PF=1.003 (n=206); random median=0.709 p95=1.218; real at 86.1th pct
+    K=   1: best-of-K median=0.711  p=0.1450  [borderline]
+    K=  10: best-of-K median=1.165  p=0.7785  [FAILS]
+    K=  30: best-of-K median=1.331  p=0.9840  [FAILS]
+    K=  50: best-of-K median=1.391  p=0.9992  [FAILS]
+    K= 100: best-of-K median=1.467  p=1.0000  [FAILS]
+    K= 567: best-of-K median=1.703  p=1.0000  [FAILS]  <- this search's real K
+
+VERDICT BTCUSD M15: IS %PF 2.002 (n=89) -> OOS %PF 1.003 (n=206), OOS pct 86.1, p(K=1)=0.1450 [borderline], p(K=567)=1.0000 [FAILS]
+

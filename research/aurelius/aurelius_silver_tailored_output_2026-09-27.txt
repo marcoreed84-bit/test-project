@@ -1,0 +1,48 @@
+=== SILVER M15: 290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00; point=0.001
+    chronological split 60%/40% at bar 174072 = 2021-10-27 18:30:00
+    IS  2014-06-12 -> 2021-10-27 (7.4 yrs)   OOS 2021-10-27 -> 2026-09-25 (4.9 yrs)
+    IS selection: max IS %PF subject to n_IS >= 88 (~12 trades/yr floor)
+    IS spread (points) p50/p80/p90/p97: [42. 48. 61. 65.]; OOS p50/p90: [33. 60.]
+
+  reference (not part of the search):
+    gold frozen, real point, no gate               IS n= 1291 %PF=0.489 win=0.129 | OOS n=  637 %PF=0.792 win=0.264
+    gold frozen, real point, gold 60-pt gate       IS n= 1117 %PF=0.549 win=0.139 | OOS n=  614 %PF=0.793 win=0.265
+    gold frozen, GOLD point (old bug), 60-pt gate  IS n= 1524 %PF=0.019 win=0.002 | OOS n=  880 %PF=0.073 win=0.028
+
+  stage 1: 500 random configs (of 7,372,800 grid points), 189 meet n>=88; IS %PF among those: median=0.568 p90=0.977 max=1.372; 18 of 189 have IS %PF > 1
+  stage-1 IS winner: %PF=1.372 n=109  [ma=0.75 slo=0.5 shi=off sr=2.5 vol=1.3 pb=1.0 stop=2.5 vwap=0.5 spq=0.97 spc=0.4 ssb=True]
+  stage 2: coordinate ascent (2 pass(es)), 63 more configs -> TOTAL configs evaluated on IS = K_search = 563
+  FINAL IS winner: %PF=1.713 n=94 win=0.372 long=0.41
+    [ma=1.0 slo=0.5 shi=off sr=2.5 vol=1.3 pb=1.0 stop=2.5 vwap=1.0 spq=0.97 spc=0.4 ssb=True]
+  FROZEN winner on OOS: %PF=0.740 n=375 win=0.280 net=-63.1% (sum of per-trade % returns)
+  diagnostic (reporting only): IS-vs-OOS Spearman rank corr across 189 eligible stage-1 configs = +0.471; OOS %PF of ALL of them: median=0.807, 4 of 189 > 1
+    top-10 by IS %PF -> OOS %PF (n): 1.37->0.79(413), 1.31->0.87(445), 1.26->0.86(405), 1.20->0.88(365), 1.20->0.84(288), 1.17->0.72(437), 1.15->0.76(423), 1.12->0.89(408), 1.10->0.81(475), 1.10->0.82(542)
+
+  random timing on IS (800 draws, calibrated coin p_buy=0.41): real %PF=1.713 (n=94); random median=0.672 p95=1.450; real at 98.6th pct
+    K=   1: best-of-K median=0.671  p=0.0170  [SURVIVES]
+    K=  10: best-of-K median=1.360  p=0.1280  [borderline]
+    K=  30: best-of-K median=1.650  p=0.3317  [FAILS]
+    K=  50: best-of-K median=1.751  p=0.5010  [FAILS]
+    K= 100: best-of-K median=1.956  p=0.7580  [FAILS]
+    K= 563: best-of-K median=2.337  p=0.9995  [FAILS]  <- this search's real K
+
+  random timing on OOS (800 draws, calibrated coin p_buy=0.60): real %PF=0.740 (n=375); random median=0.645 p95=0.880; real at 75.8th pct
+    K=   1: best-of-K median=0.647  p=0.2442  [FAILS]
+    K=  10: best-of-K median=0.858  p=0.9377  [FAILS]
+    K=  30: best-of-K median=0.942  p=1.0000  [FAILS]
+    K=  50: best-of-K median=0.990  p=1.0000  [FAILS]
+    K= 100: best-of-K median=1.036  p=1.0000  [FAILS]
+    K= 563: best-of-K median=1.129  p=1.0000  [FAILS]  <- this search's real K
+
+VERDICT SILVER M15: IS %PF 1.713 (n=94) -> OOS %PF 0.740 (n=375), OOS pct 75.8, p(K=1)=0.2442 [FAILS: OOS %PF <= 1], p(K=563)=1.0000 [FAILS: OOS %PF <= 1]
+
+=== SILVER M5: 300000 bars 2022-07-04 01:50:00 -> 2026-09-25 23:55:00; point=0.001
+    chronological split 60%/40% at bar 180000 = 2025-01-16 10:20:00
+    IS  2022-07-04 -> 2025-01-16 (2.5 yrs)   OOS 2025-01-16 -> 2026-09-25 (1.7 yrs)
+    IS selection: max IS %PF subject to n_IS >= 50 (~12 trades/yr floor)
+    IS spread (points) p50/p80/p90/p97: [33. 36. 37. 40.]; OOS p50/p90: [36. 67.]
+
+  reference (not part of the search):
+    gold frozen, real point, no gate               IS n=  774 %PF=0.551 win=0.146 | OOS n=  421 %PF=1.002 win=0.249
+    gold frozen, real point, gold 60-pt gate       IS n=  774 %PF=0.551 win=0.146 | OOS n=  384 %PF=0.976 win=0.245
+    gold frozen, GOLD point (old bug), 60-pt gate  IS n= 1119 %PF=0.000 win=0.000 | OOS n=  597 %PF=0.098 win=0.027
