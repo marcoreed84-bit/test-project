@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- Opening-Range Sweep + Return (TP_ATR_MULT, SL_ATR_MULT, STRICT_BOX)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+  strict_box=True: 11670 raw events
+  strict_box=False: 11891 raw events
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 1.0, True): IS n= 2573  IS %PF=0.696
+   (3.0, 1.0, False): IS n= 2616  IS %PF=0.688
+   (2.0, 1.0, True): IS n= 2806  IS %PF=0.642
+   (2.0, 1.0, False): IS n= 2854  IS %PF=0.642
+   (3.0, 0.75, True): IS n= 2882  IS %PF=0.641
+   (3.0, 0.75, False): IS n= 2931  IS %PF=0.641
+   (1.5, 1.0, False): IS n= 3075  IS %PF=0.609
+   (1.5, 1.0, True): IS n= 3029  IS %PF=0.609
+FROZEN WINNER (IS only): (3.0, 1.0, True)  IS n=2573  IS %PF=0.696
+OOS (untouched): n=2299  win%=24.3  %PF=0.800  sum%=-47.8
+random-timing OOS null (1000 draws, p_fire=0.01995, mean n=2309): median=0.884  p95=0.968
+REAL OOS %PF=0.800 -> 3.4th percentile; p(K=1)=0.9660 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 0.974) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Opening-Range Sweep + Return (TP_ATR_MULT, SL_ATR_MULT, STRICT_BOX)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+  strict_box=True: 10619 raw events
+  strict_box=False: 10796 raw events
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 1.0, True): IS n= 2573  IS %PF=0.204
+   (3.0, 1.0, False): IS n= 2612  IS %PF=0.203
+   (3.0, 0.75, False): IS n= 2939  IS %PF=0.174
+   (3.0, 0.75, True): IS n= 2895  IS %PF=0.173
+   (3.0, 0.5, True): IS n= 3304  IS %PF=0.138
+   (3.0, 0.5, False): IS n= 3362  IS %PF=0.137
+   (2.0, 1.0, True): IS n= 2858  IS %PF=0.127
+   (2.0, 1.0, False): IS n= 2898  IS %PF=0.126
+FROZEN WINNER (IS only): (3.0, 1.0, True)  IS n=2573  IS %PF=0.204
+OOS (untouched): n=2152  win%=24.4  %PF=0.539  sum%=-275.3
+random-timing OOS null (1000 draws, p_fire=0.01846, mean n=2161): median=0.565  p95=0.626
+REAL OOS %PF=0.539 -> 22.3th percentile; p(K=1)=0.7770 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 0.630) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Opening-Range Sweep + Return (TP_ATR_MULT, SL_ATR_MULT, STRICT_BOX)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+  strict_box=True: 10107 raw events
+  strict_box=False: 10333 raw events
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 1.0, True): IS n= 1435  IS %PF=0.536
+   (3.0, 1.0, False): IS n= 1456  IS %PF=0.532
+   (2.0, 1.0, True): IS n= 1564  IS %PF=0.471
+   (2.0, 1.0, False): IS n= 1589  IS %PF=0.462
+   (3.0, 0.75, False): IS n= 1688  IS %PF=0.453
+   (3.0, 0.75, True): IS n= 1659  IS %PF=0.449
+   (1.5, 1.0, True): IS n= 1703  IS %PF=0.424
+   (1.5, 1.0, False): IS n= 1728  IS %PF=0.422
+FROZEN WINNER (IS only): (3.0, 1.0, True)  IS n=1435  IS %PF=0.536
+OOS (untouched): n=1320  win%=26.8  %PF=0.686  sum%=-104.4
+random-timing OOS null (1000 draws, p_fire=0.01597, mean n=1350): median=0.695  p95=0.776
+REAL OOS %PF=0.686 -> 42.3th percentile; p(K=1)=0.5770 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 0.780) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 18, 'cfg': (3.0, 1.0, True), 'is_n': 2573, 'is_pf': np.float64(0.6955535401645608), 'oos_n': 2299, 'oos_pf': np.float64(0.7996486585594323), 'pctile': np.float64(3.4000000000000004), 'p1': 0.966, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 18, 'cfg': (3.0, 1.0, True), 'is_n': 2573, 'is_pf': np.float64(0.203578637564901), 'oos_n': 2152, 'oos_pf': np.float64(0.5389827659379337), 'pctile': np.float64(22.3), 'p1': 0.777, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 18, 'cfg': (3.0, 1.0, True), 'is_n': 1435, 'is_pf': np.float64(0.5360555847100364), 'oos_n': 1320, 'oos_pf': np.float64(0.6856168025931216), 'pctile': np.float64(42.3), 'p1': 0.577, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
