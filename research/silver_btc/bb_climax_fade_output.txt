@@ -1,0 +1,57 @@
+
+==========================================================================================
+SILVER H1 -- Bollinger-extreme volume-climax fade (DEV, VM, TARGET_R)
+SILVER: n=72721 bars 2014-06-12 00:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:00:00 (38839 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+GRID K=8 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+8/8 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (2.5, 2.0, 2.0): IS n=  522  IS %PF=0.649  long%=55
+   (2.0, 2.0, 2.0): IS n=  541  IS %PF=0.644  long%=52
+   (2.5, 0.0, 2.0): IS n= 1094  IS %PF=0.581  long%=50
+   (2.0, 0.0, 2.0): IS n= 1728  IS %PF=0.521  long%=50
+   (2.0, 2.0, 1.0): IS n=  580  IS %PF=0.513  long%=51
+   (2.5, 2.0, 1.0): IS n=  540  IS %PF=0.484  long%=54
+   (2.5, 0.0, 1.0): IS n= 1171  IS %PF=0.430  long%=50
+   (2.0, 0.0, 1.0): IS n= 1999  IS %PF=0.411  long%=49
+FROZEN WINNER (IS only): (2.5, 2.0, 2.0)  IS n=522  IS %PF=0.649
+IS sanity: random-timing IS pool median=0.544; IS winner vs best-of-8 random (median 0.635): p=0.3820
+OOS (untouched): n=430  win%=38.6  %PF=1.026  sum%=6.4  long%=51 (long %PF=1.044 n=220, short %PF=1.004 n=210)
+random-timing OOS null (1000 draws, p_fire=0.01551, mean n=444 vs real 430): median=0.797  p95=0.977
+REAL OOS %PF=1.026 -> 97.9th percentile; p(K=1)=0.0210 [SURVIVES]; p(K=8)=0.1568 (best-of-K median 0.950) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.51): median=0.795  p(K=1)=0.0270
+
+==========================================================================================
+BTCUSD H1 -- Bollinger-extreme volume-climax fade (DEV, VM, TARGET_R)
+BTCUSD: n=69053 bars 2017-07-03 00:00:00 -> 2026-09-27 12:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:00:00 (23459 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:00:00 (24013 bars, untouched)
+GRID K=8 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+6/8 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (2.0, 0.0, 2.0): IS n= 1088  IS %PF=0.729  long%=52
+   (2.0, 0.0, 1.0): IS n= 1246  IS %PF=0.690  long%=51
+   (2.5, 0.0, 2.0): IS n=  724  IS %PF=0.648  long%=50
+   (2.5, 0.0, 1.0): IS n=  773  IS %PF=0.591  long%=49
+   (2.5, 2.0, 2.0): IS n=  101  IS %PF=0.330  long%=62
+   (2.5, 2.0, 1.0): IS n=  102  IS %PF=0.225  long%=62
+FROZEN WINNER (IS only): (2.0, 0.0, 2.0)  IS n=1088  IS %PF=0.729
+IS sanity: random-timing IS pool median=0.798; IS winner vs best-of-8 random (median 0.887): p=1.0000
+OOS (untouched): n=1136  win%=33.0  %PF=0.803  sum%=-146.8  long%=51 (long %PF=0.835 n=583, short %PF=0.765 n=553)
+random-timing OOS null (1000 draws, p_fire=0.10807, mean n=1155 vs real 1136): median=0.858  p95=0.960
+REAL OOS %PF=0.803 -> 18.7th percentile; p(K=1)=0.8130 [DOES NOT SURVIVE]; p(K=8)=1.0000 (best-of-K median 0.943) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.51): median=0.854  p(K=1)=0.8180
+
+SUMMARY
+  {'label': 'SILVER H1 -- Bollinger-extreme volume-climax fade (DEV, VM, TARGET_R)', 'K': 8, 'cfg': (2.5, 2.0, 2.0), 'is_n': 522, 'is_pf': np.float64(0.6488954566395524), 'oos_n': 430, 'oos_pf': np.float64(1.0258312077658016), 'p_is_k': 0.382, 'pctile': np.float64(97.89999999999999), 'p1': 0.021, 'pK': 0.1568, 'p1_dir': 0.027, 'null_median': 0.7971260846703558, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD H1 -- Bollinger-extreme volume-climax fade (DEV, VM, TARGET_R)', 'K': 8, 'cfg': (2.0, 0.0, 2.0), 'is_n': 1088, 'is_pf': np.float64(0.7285891365712623), 'oos_n': 1136, 'oos_pf': np.float64(0.8032515740376865), 'p_is_k': 1.0, 'pctile': np.float64(18.7), 'p1': 0.813, 'pK': 1.0, 'p1_dir': 0.818, 'null_median': 0.8575790819002889, 'verdict': 'DOES NOT SURVIVE'}
+
+DIAGNOSTIC ONLY (run after the frozen OOS result above; nothing re-selected from it)
+SILVER winner (DEV=2.5, VM=2.0, TARGET_R=2):
+  real spread  IS  n=522 %PF=0.649 mean/trade=-0.2066%
+  real spread  OOS n=430 %PF=1.026 mean/trade=+0.0150%
+  ZERO spread  IS  n=522 %PF=1.128 mean/trade=+0.0538%
+  ZERO spread  OOS n=430 %PF=1.281 mean/trade=+0.1417%
+  OOS by year (real spread): 2021 0.893 (n=90), 2022 1.270 (n=86), 2023 1.072 (n=90), 2024 0.912 (n=82), 2025 0.844 (n=58), 2026 1.180 (n=24)
+  IS by year (real spread): 2014 0.820, 2015 0.686, 2016 0.596, 2017 0.306, 2018 0.849, 2019 0.549, 2020 0.987
+  Reading: gross of spread the fade is mildly positive both IS (1.128) and OOS (1.281), and OOS it beats
+  random timing at K=1 (p=0.021) - weak genuine mean reversion at climax band extremes on silver. But net of
+  this broker's spread it is ~breakeven OOS (+0.015%/trade, yearly %PF 0.84-1.27), a net LOSER IS, and it fails
+  its real K=8 (p=0.157). Not tradeable; does not survive.
