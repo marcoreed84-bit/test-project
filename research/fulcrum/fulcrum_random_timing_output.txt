@@ -1,0 +1,34 @@
+==========================================================================================
+Fulcrum_EA.mq5 v2.13 (M5): GOLD M5 2022-07-04 01:40:00 -> 2026-09-25 21:00:00 (300000 bars); 70/30 cut 2025-06-19 10:30:00
+REAL shipped: n=1001 win%=15.6 sum%=36.7 %PF=1.244 | IS n=699 %PF=1.213 | OOS n=302 %PF=1.300   (raw-$ PF 1.294)
+random-timing null: p_fire=0.00505, 1000 draws, mean n=1016 (target 1001)
+  null %PF median=0.993  p95=1.152
+  REAL %PF=1.244 -> 99.2th percentile, one-sided p=0.0080
+  (supplementary) OOS-slice null median=0.987; REAL OOS %PF=1.300 -> p=0.0320
+  (supplementary) direction-matched null (p_long=0.57): median=1.002 p(K=1)=0.0080  p(K=7)=0.0518
+best-of-K correction (K_FILES=7; 30/50/100 = inherited Aurelius-gate scale):
+  K=  1: best-of-K median=0.990  p=0.0086  [SURVIVES]
+  K=  7: best-of-K median=1.122  p=0.0550  [borderline]
+  K= 30: best-of-K median=1.183  p=0.2156  [DOES NOT SURVIVE]
+  K= 50: best-of-K median=1.220  p=0.3308  [DOES NOT SURVIVE]
+  K=100: best-of-K median=1.251  p=0.5498  [DOES NOT SURVIVE]
+==========================================================================================
+Fulcrum_M15_EA.mq5 (M15): GOLD M15 2022-07-04 01:30:00 -> 2026-09-25 21:00:00 (100007 bars); 70/30 cut 2025-06-19 10:45:00
+REAL shipped: n=393 win%=30.0 sum%=39.5 %PF=1.461 | IS n=251 %PF=1.470 | OOS n=142 %PF=1.447   (raw-$ PF 1.483)
+random-timing null: p_fire=0.00539, 1000 draws, mean n=401 (target 393)
+  null %PF median=1.009  p95=1.245
+  REAL %PF=1.461 -> 99.6th percentile, one-sided p=0.0040
+  (supplementary) OOS-slice null median=0.978; REAL OOS %PF=1.447 -> p=0.0340
+  (supplementary) direction-matched null (p_long=0.57): median=1.039 p(K=1)=0.0020  p(K=7)=0.0132
+best-of-K correction (K_FILES=7; 30/50/100 = inherited Aurelius-gate scale):
+  K=  1: best-of-K median=1.010  p=0.0042  [SURVIVES]
+  K=  7: best-of-K median=1.195  p=0.0280  [SURVIVES]
+  K= 30: best-of-K median=1.300  p=0.1190  [borderline]
+  K= 50: best-of-K median=1.347  p=0.1826  [DOES NOT SURVIVE]
+  K=100: best-of-K median=1.409  p=0.3344  [DOES NOT SURVIVE]
+
+real	10m16.896s
+user	10m9.794s
+sys	0m0.981s
+
+[exited with code 0]
