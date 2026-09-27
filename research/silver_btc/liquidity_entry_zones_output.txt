@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- Liquidity Entry Zones (MIN_WICK_PCT, STOP_ATR_MULT, TP_R_MULT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (0.25, 3.0, 6.0): IS n=  816  IS %PF=0.940  long%=51
+   (0.5, 3.0, 6.0): IS n=  771  IS %PF=0.921  long%=50
+   (0.35, 2.0, 6.0): IS n= 1405  IS %PF=0.913  long%=50
+   (0.5, 3.0, 2.0): IS n= 1336  IS %PF=0.901  long%=50
+   (0.5, 2.0, 6.0): IS n= 1215  IS %PF=0.896  long%=51
+   (0.35, 3.0, 6.0): IS n=  808  IS %PF=0.877  long%=51
+   (0.5, 2.0, 4.0): IS n= 1451  IS %PF=0.875  long%=51
+   (0.25, 2.0, 6.0): IS n= 1544  IS %PF=0.874  long%=52
+FROZEN WINNER (IS only): (0.25, 3.0, 6.0)  IS n=816  IS %PF=0.940
+IS sanity: random-timing IS pool median=0.928; IS winner vs best-of-27 random (median 1.129): p=1.0000
+OOS (untouched): n=701  win%=18.0  %PF=1.360  sum%=98.4  long%=52 (long %PF=1.656 n=368, short %PF=1.086 n=333)
+random-timing OOS null (1000 draws, p_fire=0.01718, mean n=681 vs real 701): median=1.066  p95=1.298
+REAL OOS %PF=1.360 -> 98.5th percentile; p(K=1)=0.0150 [SURVIVES]; p(K=27)=0.3366 (best-of-K median 1.329) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.52): median=1.070  p(K=1)=0.0230
+
+==========================================================================================
+SILVER M15 -- Liquidity Entry Zones (MIN_WICK_PCT, STOP_ATR_MULT, TP_R_MULT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (0.25, 3.0, 4.0): IS n=  486  IS %PF=0.856  long%=51
+   (0.5, 3.0, 6.0): IS n=  309  IS %PF=0.845  long%=55
+   (0.35, 3.0, 4.0): IS n=  459  IS %PF=0.812  long%=53
+   (0.35, 3.0, 6.0): IS n=  407  IS %PF=0.805  long%=53
+   (0.25, 3.0, 6.0): IS n=  415  IS %PF=0.778  long%=51
+   (0.5, 3.0, 4.0): IS n=  357  IS %PF=0.769  long%=55
+   (0.35, 2.0, 6.0): IS n=  544  IS %PF=0.758  long%=52
+   (0.25, 2.0, 6.0): IS n=  616  IS %PF=0.719  long%=51
+FROZEN WINNER (IS only): (0.25, 3.0, 4.0)  IS n=486  IS %PF=0.856
+IS sanity: random-timing IS pool median=0.641; IS winner vs best-of-27 random (median 0.814): p=0.1872
+OOS (untouched): n=843  win%=19.7  %PF=0.829  sum%=-128.3  long%=53 (long %PF=0.874 n=448, short %PF=0.782 n=395)
+random-timing OOS null (1000 draws, p_fire=0.01714, mean n=876 vs real 843): median=0.833  p95=0.969
+REAL OOS %PF=0.829 -> 48.4th percentile; p(K=1)=0.5160 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.997) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.53): median=0.836  p(K=1)=0.5300
+
+==========================================================================================
+BTCUSD M15 -- Liquidity Entry Zones (MIN_WICK_PCT, STOP_ATR_MULT, TP_R_MULT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 2 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (0.25, 3.0, 6.0): IS n=  416  IS %PF=1.070  long%=54
+   (0.25, 3.0, 4.0): IS n=  561  IS %PF=1.056  long%=53
+   (0.5, 3.0, 4.0): IS n=  589  IS %PF=0.963  long%=57
+   (0.35, 3.0, 4.0): IS n=  593  IS %PF=0.956  long%=54
+   (0.25, 3.0, 2.0): IS n=  963  IS %PF=0.948  long%=54
+   (0.35, 3.0, 6.0): IS n=  439  IS %PF=0.944  long%=55
+   (0.5, 3.0, 6.0): IS n=  422  IS %PF=0.939  long%=57
+   (0.35, 3.0, 2.0): IS n=  962  IS %PF=0.893  long%=54
+FROZEN WINNER (IS only): (0.25, 3.0, 6.0)  IS n=416  IS %PF=1.070
+IS sanity: random-timing IS pool median=0.915; IS winner vs best-of-27 random (median 1.245): p=0.9862
+OOS (untouched): n=522  win%=15.9  %PF=0.880  sum%=-64.9  long%=52 (long %PF=0.991 n=269, short %PF=0.776 n=253)
+random-timing OOS null (1000 draws, p_fire=0.05513, mean n=463 vs real 522): median=1.016  p95=1.254
+REAL OOS %PF=0.880 -> 12.4th percentile; p(K=1)=0.8760 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.305) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.52): median=1.022  p(K=1)=0.8780
+
+SUMMARY
+  {'label': 'GOLD M15 -- Liquidity Entry Zones (MIN_WICK_PCT, STOP_ATR_MULT, TP_R_MULT)', 'K': 27, 'cfg': (0.25, 3.0, 6.0), 'is_n': 816, 'is_pf': np.float64(0.9403614238809274), 'oos_n': 701, 'oos_pf': np.float64(1.3600856120747595), 'p_is_k': 1.0, 'pctile': np.float64(98.5), 'p1': 0.015, 'pK': 0.3366, 'p1_dir': 0.023, 'null_median': 1.0658165115342564, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- Liquidity Entry Zones (MIN_WICK_PCT, STOP_ATR_MULT, TP_R_MULT)', 'K': 27, 'cfg': (0.25, 3.0, 4.0), 'is_n': 486, 'is_pf': np.float64(0.8558542374715582), 'oos_n': 843, 'oos_pf': np.float64(0.8293535681204598), 'p_is_k': 0.1872, 'pctile': np.float64(48.4), 'p1': 0.516, 'pK': 1.0, 'p1_dir': 0.53, 'null_median': 0.8326506316410764, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- Liquidity Entry Zones (MIN_WICK_PCT, STOP_ATR_MULT, TP_R_MULT)', 'K': 27, 'cfg': (0.25, 3.0, 6.0), 'is_n': 416, 'is_pf': np.float64(1.0699475340157174), 'oos_n': 522, 'oos_pf': np.float64(0.879895580513127), 'p_is_k': 0.9862, 'pctile': np.float64(12.4), 'p1': 0.876, 'pK': 1.0, 'p1_dir': 0.878, 'null_median': 1.0155729636462816, 'verdict': 'DOES NOT SURVIVE'}
