@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- Asian Breakout AutoBot (RR_TARGET, MIN_ASIA_RANGE_ATR_MULT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 0.0): IS n= 2107  IS %PF=0.901  long%=50
+   (3.0, 0.3): IS n= 2107  IS %PF=0.901  long%=50
+   (3.0, 0.6): IS n= 2107  IS %PF=0.901  long%=50
+   (2.0, 0.6): IS n= 2114  IS %PF=0.870  long%=50
+   (2.0, 0.0): IS n= 2115  IS %PF=0.870  long%=50
+   (2.0, 0.3): IS n= 2115  IS %PF=0.870  long%=50
+   (1.5, 0.6): IS n= 2130  IS %PF=0.853  long%=50
+   (1.5, 0.0): IS n= 2131  IS %PF=0.853  long%=50
+FROZEN WINNER (IS only): (3.0, 0.0)  IS n=2107  IS %PF=0.901
+IS sanity: random-timing IS pool median=0.890; IS winner vs best-of-12 random (median 0.971): p=0.9988
+OOS (untouched): n=1844  win%=44.2  %PF=1.094  sum%=38.8  long%=53 (long %PF=1.058 n=969, short %PF=1.133 n=875)
+random-timing OOS null (1000 draws, p_fire=0.06965, mean n=1902 vs real 1844): median=0.961  p95=1.060
+REAL OOS %PF=1.094 -> 98.9th percentile; p(K=1)=0.0110 [SURVIVES]; p(K=12)=0.1222 (best-of-K median 1.056) [borderline]
+supplementary direction-matched null (p_long=0.53): median=0.960  p(K=1)=0.0240
+
+==========================================================================================
+SILVER M15 -- Asian Breakout AutoBot (RR_TARGET, MIN_ASIA_RANGE_ATR_MULT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 0.0): IS n= 2152  IS %PF=0.496  long%=51
+   (3.0, 0.3): IS n= 2152  IS %PF=0.496  long%=51
+   (3.0, 0.6): IS n= 2152  IS %PF=0.496  long%=51
+   (2.0, 0.0): IS n= 2164  IS %PF=0.478  long%=51
+   (2.0, 0.3): IS n= 2164  IS %PF=0.478  long%=51
+   (2.0, 0.6): IS n= 2164  IS %PF=0.478  long%=51
+   (1.5, 0.0): IS n= 2189  IS %PF=0.457  long%=51
+   (1.5, 0.3): IS n= 2189  IS %PF=0.457  long%=51
+FROZEN WINNER (IS only): (3.0, 0.0)  IS n=2152  IS %PF=0.496
+IS sanity: random-timing IS pool median=0.482; IS winner vs best-of-12 random (median 0.526): p=0.9928
+OOS (untouched): n=1862  win%=40.0  %PF=0.837  sum%=-158.4  long%=52 (long %PF=0.832 n=972, short %PF=0.842 n=890)
+random-timing OOS null (1000 draws, p_fire=0.06923, mean n=1893 vs real 1862): median=0.778  p95=0.854
+REAL OOS %PF=0.837 -> 90.5th percentile; p(K=1)=0.0950 [borderline]; p(K=12)=0.7070 (best-of-K median 0.851) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.52): median=0.777  p(K=1)=0.1310
+
+==========================================================================================
+BTCUSD M15 -- Asian Breakout AutoBot (RR_TARGET, MIN_ASIA_RANGE_ATR_MULT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (1.5, 0.0): IS n=  912  IS %PF=0.820  long%=53
+   (1.5, 0.3): IS n=  912  IS %PF=0.820  long%=53
+   (1.5, 0.6): IS n=  912  IS %PF=0.820  long%=53
+   (2.0, 0.0): IS n=  909  IS %PF=0.779  long%=53
+   (2.0, 0.3): IS n=  909  IS %PF=0.779  long%=53
+   (2.0, 0.6): IS n=  909  IS %PF=0.779  long%=53
+   (3.0, 0.0): IS n=  905  IS %PF=0.754  long%=53
+   (3.0, 0.3): IS n=  905  IS %PF=0.754  long%=53
+FROZEN WINNER (IS only): (1.5, 0.0)  IS n=912  IS %PF=0.820
+IS sanity: random-timing IS pool median=0.748; IS winner vs best-of-12 random (median 0.869): p=0.8816
+OOS (untouched): n=1007  win%=46.1  %PF=0.970  sum%=-15.7  long%=52 (long %PF=1.049 n=519, short %PF=0.899 n=488)
+random-timing OOS null (1000 draws, p_fire=0.04653, mean n=1044 vs real 1007): median=0.850  p95=0.974
+REAL OOS %PF=0.970 -> 94.5th percentile; p(K=1)=0.0550 [borderline]; p(K=12)=0.4854 (best-of-K median 0.969) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.52): median=0.849  p(K=1)=0.0510
+
+SUMMARY
+  {'label': 'GOLD M15 -- Asian Breakout AutoBot (RR_TARGET, MIN_ASIA_RANGE_ATR_MULT)', 'K': 12, 'cfg': (3.0, 0.0), 'is_n': 2107, 'is_pf': np.float64(0.90116697675143), 'oos_n': 1844, 'oos_pf': np.float64(1.0939860363942115), 'p_is_k': 0.9988, 'pctile': np.float64(98.9), 'p1': 0.011, 'pK': 0.1222, 'p1_dir': 0.024, 'null_median': 0.9609727511035216, 'verdict': 'borderline'}
+  {'label': 'SILVER M15 -- Asian Breakout AutoBot (RR_TARGET, MIN_ASIA_RANGE_ATR_MULT)', 'K': 12, 'cfg': (3.0, 0.0), 'is_n': 2152, 'is_pf': np.float64(0.49550831086205743), 'oos_n': 1862, 'oos_pf': np.float64(0.8368650103454092), 'p_is_k': 0.9928, 'pctile': np.float64(90.5), 'p1': 0.095, 'pK': 0.707, 'p1_dir': 0.131, 'null_median': 0.7783147744714302, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- Asian Breakout AutoBot (RR_TARGET, MIN_ASIA_RANGE_ATR_MULT)', 'K': 12, 'cfg': (1.5, 0.0), 'is_n': 912, 'is_pf': np.float64(0.820465952150321), 'oos_n': 1007, 'oos_pf': np.float64(0.9703548159505947), 'p_is_k': 0.8816, 'pctile': np.float64(94.5), 'p1': 0.055, 'pK': 0.4854, 'p1_dir': 0.051, 'null_median': 0.8504346669588991, 'verdict': 'DOES NOT SURVIVE'}
