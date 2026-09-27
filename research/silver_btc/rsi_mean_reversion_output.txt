@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- RSI Mean Reversion [off-market port, orig=NatGas Mini/MCX 4H] (RSI_LEN, OVERSOLD, OVERBOUGHT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (5, 34.0, 80.0): IS n= 3242  IS %PF=0.792  long%=64
+   (5, 30.0, 80.0): IS n= 3048  IS %PF=0.775  long%=62
+   (5, 40.0, 80.0): IS n= 3453  IS %PF=0.772  long%=67
+   (5, 30.0, 70.0): IS n= 5129  IS %PF=0.755  long%=50
+   (5, 34.0, 70.0): IS n= 5749  IS %PF=0.750  long%=53
+   (5, 34.0, 60.0): IS n= 7736  IS %PF=0.723  long%=46
+   (5, 30.0, 60.0): IS n= 6583  IS %PF=0.718  long%=43
+   (5, 40.0, 70.0): IS n= 6517  IS %PF=0.718  long%=57
+FROZEN WINNER (IS only): (5, 34.0, 80.0)  IS n=3242  IS %PF=0.792
+IS sanity: random-timing IS pool median=0.774; IS winner vs best-of-27 random (median 0.853): p=1.0000
+OOS (untouched): n=3043  win%=62.5  %PF=0.963  sum%=-21.9  long%=62 (long %PF=1.020 n=1893, short %PF=0.826 n=1150)
+random-timing OOS null (1000 draws, p_fire=0.05639, mean n=3101 vs real 3043): median=0.940  p95=1.019
+REAL OOS %PF=0.963 -> 68.3th percentile; p(K=1)=0.3170 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.035) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.62): median=0.961  p(K=1)=0.4840
+
+==========================================================================================
+SILVER M15 -- RSI Mean Reversion [off-market port, orig=NatGas Mini/MCX 4H] (RSI_LEN, OVERSOLD, OVERBOUGHT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (5, 30.0, 80.0): IS n= 3101  IS %PF=0.394  long%=63
+   (5, 34.0, 80.0): IS n= 3259  IS %PF=0.372  long%=66
+   (5, 40.0, 80.0): IS n= 3470  IS %PF=0.367  long%=70
+   (5, 30.0, 70.0): IS n= 5269  IS %PF=0.291  long%=51
+   (5, 34.0, 70.0): IS n= 5890  IS %PF=0.264  long%=54
+   (5, 40.0, 70.0): IS n= 6708  IS %PF=0.243  long%=59
+   (5, 30.0, 60.0): IS n= 6704  IS %PF=0.225  long%=42
+   (3, 34.0, 80.0): IS n= 8029  IS %PF=0.223  long%=64
+FROZEN WINNER (IS only): (5, 30.0, 80.0)  IS n=3101  IS %PF=0.394
+IS sanity: random-timing IS pool median=0.336; IS winner vs best-of-27 random (median 0.377): p=0.0746
+OOS (untouched): n=2802  win%=56.1  %PF=0.786  sum%=-266.7  long%=61 (long %PF=0.841 n=1712, short %PF=0.667 n=1090)
+random-timing OOS null (1000 draws, p_fire=0.05503, mean n=2884 vs real 2802): median=0.698  p95=0.763
+REAL OOS %PF=0.786 -> 98.7th percentile; p(K=1)=0.0130 [SURVIVES]; p(K=27)=0.3050 (best-of-K median 0.777) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.61): median=0.725  p(K=1)=0.0550
+
+==========================================================================================
+BTCUSD M15 -- RSI Mean Reversion [off-market port, orig=NatGas Mini/MCX 4H] (RSI_LEN, OVERSOLD, OVERBOUGHT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (5, 30.0, 80.0): IS n= 1733  IS %PF=0.779  long%=64
+   (5, 34.0, 80.0): IS n= 1849  IS %PF=0.756  long%=67
+   (5, 40.0, 80.0): IS n= 1936  IS %PF=0.733  long%=70
+   (5, 30.0, 70.0): IS n= 3157  IS %PF=0.668  long%=50
+   (5, 34.0, 70.0): IS n= 3564  IS %PF=0.628  long%=54
+   (5, 30.0, 60.0): IS n= 4091  IS %PF=0.618  long%=41
+   (5, 40.0, 70.0): IS n= 4000  IS %PF=0.572  long%=59
+   (5, 34.0, 60.0): IS n= 4872  IS %PF=0.563  long%=45
+FROZEN WINNER (IS only): (5, 30.0, 80.0)  IS n=1733  IS %PF=0.779
+IS sanity: random-timing IS pool median=0.716; IS winner vs best-of-27 random (median 0.819): p=0.9616
+OOS (untouched): n=1876  win%=61.8  %PF=0.802  sum%=-185.0  long%=62 (long %PF=0.841 n=1162, short %PF=0.717 n=714)
+random-timing OOS null (1000 draws, p_fire=0.04828, mean n=1889 vs real 1876): median=0.782  p95=0.872
+REAL OOS %PF=0.802 -> 64.1th percentile; p(K=1)=0.3590 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.887) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.62): median=0.808  p(K=1)=0.5490
+
+SUMMARY
+  {'label': 'GOLD M15 -- RSI Mean Reversion [off-market port, orig=NatGas Mini/MCX 4H] (RSI_LEN, OVERSOLD, OVERBOUGHT)', 'K': 27, 'cfg': (5, 34.0, 80.0), 'is_n': 3242, 'is_pf': np.float64(0.7917673113906569), 'oos_n': 3043, 'oos_pf': np.float64(0.9633326465571554), 'p_is_k': 1.0, 'pctile': np.float64(68.30000000000001), 'p1': 0.317, 'pK': 1.0, 'p1_dir': 0.484, 'null_median': 0.9404642956116981, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- RSI Mean Reversion [off-market port, orig=NatGas Mini/MCX 4H] (RSI_LEN, OVERSOLD, OVERBOUGHT)', 'K': 27, 'cfg': (5, 30.0, 80.0), 'is_n': 3101, 'is_pf': np.float64(0.3935741453785144), 'oos_n': 2802, 'oos_pf': np.float64(0.7855968525708791), 'p_is_k': 0.0746, 'pctile': np.float64(98.7), 'p1': 0.013, 'pK': 0.305, 'p1_dir': 0.055, 'null_median': 0.6984693602817063, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- RSI Mean Reversion [off-market port, orig=NatGas Mini/MCX 4H] (RSI_LEN, OVERSOLD, OVERBOUGHT)', 'K': 27, 'cfg': (5, 30.0, 80.0), 'is_n': 1733, 'is_pf': np.float64(0.7785603431841338), 'oos_n': 1876, 'oos_pf': np.float64(0.8021919036967444), 'p_is_k': 0.9616, 'pctile': np.float64(64.1), 'p1': 0.359, 'pK': 1.0, 'p1_dir': 0.549, 'null_median': 0.7823147552227905, 'verdict': 'DOES NOT SURVIVE'}

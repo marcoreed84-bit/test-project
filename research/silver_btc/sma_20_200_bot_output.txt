@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- 20/200 SMA Bot, Trend Pullback Entry (TP_R_MULT, FALLBACK_STOP_ATR_MULT, MIN_STOP_ATR_FLOOR)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 9 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 1.0, 0.3): IS n=  314  IS %PF=1.049  long%=48
+   (3.0, 1.0, 0.6): IS n=  314  IS %PF=1.049  long%=48
+   (3.0, 1.0, 1.0): IS n=  314  IS %PF=1.049  long%=48
+   (3.0, 3.0, 0.3): IS n=  264  IS %PF=1.048  long%=50
+   (3.0, 3.0, 0.6): IS n=  264  IS %PF=1.048  long%=50
+   (3.0, 3.0, 1.0): IS n=  264  IS %PF=1.048  long%=50
+   (3.0, 2.0, 0.3): IS n=  281  IS %PF=1.031  long%=50
+   (3.0, 2.0, 0.6): IS n=  281  IS %PF=1.031  long%=50
+FROZEN WINNER (IS only): (3.0, 1.0, 0.3)  IS n=314  IS %PF=1.049
+IS sanity: random-timing IS pool median=0.985; IS winner vs best-of-27 random (median 1.401): p=1.0000
+OOS (untouched): n=238  win%=34.0  %PF=1.176  sum%=35.0  long%=60 (long %PF=1.701 n=142, short %PF=0.743 n=96)
+random-timing OOS null (1000 draws, p_fire=0.01171, mean n=227 vs real 238): median=1.066  p95=1.446
+REAL OOS %PF=1.176 -> 69.8th percentile; p(K=1)=0.3020 [DOES NOT SURVIVE]; p(K=27)=0.9998 (best-of-K median 1.537) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.60): median=1.134  p(K=1)=0.4300
+
+==========================================================================================
+SILVER M15 -- 20/200 SMA Bot, Trend Pullback Entry (TP_R_MULT, FALLBACK_STOP_ATR_MULT, MIN_STOP_ATR_FLOOR)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 2.0, 1.0): IS n=  276  IS %PF=0.986  long%=49
+   (3.0, 2.0, 0.3): IS n=  276  IS %PF=0.986  long%=49
+   (3.0, 2.0, 0.6): IS n=  276  IS %PF=0.986  long%=49
+   (3.0, 3.0, 1.0): IS n=  269  IS %PF=0.979  long%=48
+   (3.0, 3.0, 0.3): IS n=  269  IS %PF=0.979  long%=48
+   (3.0, 3.0, 0.6): IS n=  269  IS %PF=0.979  long%=48
+   (3.0, 1.0, 1.0): IS n=  291  IS %PF=0.971  long%=49
+   (3.0, 1.0, 0.3): IS n=  291  IS %PF=0.971  long%=49
+FROZEN WINNER (IS only): (3.0, 2.0, 1.0)  IS n=276  IS %PF=0.986
+IS sanity: random-timing IS pool median=0.848; IS winner vs best-of-27 random (median 1.215): p=0.9986
+OOS (untouched): n=284  win%=29.9  %PF=1.117  sum%=53.0  long%=52 (long %PF=1.398 n=149, short %PF=0.863 n=135)
+random-timing OOS null (1000 draws, p_fire=0.01795, mean n=263 vs real 284): median=0.953  p95=1.284
+REAL OOS %PF=1.117 -> 83.0th percentile; p(K=1)=0.1700 [DOES NOT SURVIVE]; p(K=27)=0.9920 (best-of-K median 1.336) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.52): median=0.948  p(K=1)=0.1950
+
+==========================================================================================
+BTCUSD M15 -- 20/200 SMA Bot, Trend Pullback Entry (TP_R_MULT, FALLBACK_STOP_ATR_MULT, MIN_STOP_ATR_FLOOR)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 18 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 3.0, 1.0): IS n=  176  IS %PF=1.305  long%=50
+   (3.0, 3.0, 0.6): IS n=  176  IS %PF=1.304  long%=50
+   (3.0, 3.0, 0.3): IS n=  176  IS %PF=1.303  long%=50
+   (3.0, 2.0, 1.0): IS n=  190  IS %PF=1.229  long%=52
+   (3.0, 2.0, 0.6): IS n=  190  IS %PF=1.228  long%=52
+   (3.0, 2.0, 0.3): IS n=  190  IS %PF=1.227  long%=52
+   (3.0, 1.0, 1.0): IS n=  229  IS %PF=1.200  long%=55
+   (3.0, 1.0, 0.6): IS n=  229  IS %PF=1.200  long%=55
+FROZEN WINNER (IS only): (3.0, 3.0, 1.0)  IS n=176  IS %PF=1.305
+IS sanity: random-timing IS pool median=0.992; IS winner vs best-of-27 random (median 1.480): p=0.9528
+OOS (untouched): n=172  win%=33.7  %PF=1.321  sum%=93.4  long%=55 (long %PF=1.557 n=94, short %PF=1.083 n=78)
+random-timing OOS null (1000 draws, p_fire=0.00865, mean n=162 vs real 172): median=0.985  p95=1.375
+REAL OOS %PF=1.321 -> 92.2th percentile; p(K=1)=0.0780 [borderline]; p(K=27)=0.8926 (best-of-K median 1.487) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.55): median=1.024  p(K=1)=0.1170
+
+SUMMARY
+  {'label': 'GOLD M15 -- 20/200 SMA Bot, Trend Pullback Entry (TP_R_MULT, FALLBACK_STOP_ATR_MULT, MIN_STOP_ATR_FLOOR)', 'K': 27, 'cfg': (3.0, 1.0, 0.3), 'is_n': 314, 'is_pf': np.float64(1.0494157080477975), 'oos_n': 238, 'oos_pf': np.float64(1.1759109463369246), 'p_is_k': 1.0, 'pctile': np.float64(69.8), 'p1': 0.302, 'pK': 0.9998, 'p1_dir': 0.43, 'null_median': 1.0661236835227397, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- 20/200 SMA Bot, Trend Pullback Entry (TP_R_MULT, FALLBACK_STOP_ATR_MULT, MIN_STOP_ATR_FLOOR)', 'K': 27, 'cfg': (3.0, 2.0, 1.0), 'is_n': 276, 'is_pf': np.float64(0.9862761844289955), 'oos_n': 284, 'oos_pf': np.float64(1.116605591373398), 'p_is_k': 0.9986, 'pctile': np.float64(83.0), 'p1': 0.17, 'pK': 0.992, 'p1_dir': 0.195, 'null_median': 0.9529545217849176, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- 20/200 SMA Bot, Trend Pullback Entry (TP_R_MULT, FALLBACK_STOP_ATR_MULT, MIN_STOP_ATR_FLOOR)', 'K': 27, 'cfg': (3.0, 3.0, 1.0), 'is_n': 176, 'is_pf': np.float64(1.304712754505324), 'oos_n': 172, 'oos_pf': np.float64(1.3214459466556603), 'p_is_k': 0.9528, 'pctile': np.float64(92.2), 'p1': 0.078, 'pK': 0.8926, 'p1_dir': 0.117, 'null_median': 0.9852969526730818, 'verdict': 'DOES NOT SURVIVE'}
