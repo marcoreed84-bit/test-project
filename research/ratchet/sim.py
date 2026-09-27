@@ -80,6 +80,9 @@ class RP:
     fri_noentry: int = 20
     min_dist_pts: int = 0
     entry_from_min: int = 65                     # no real entry in any of the four reports before 01:05 server time
+    digits: int = 2                              # instrument price digits for SL/entry rounding (GOLD/BTCUSD=2,
+                                                  # SILVER=3 - see ratchet_silver_btc_test.py); default matches
+                                                  # every existing GOLD-only caller byte-for-byte
     # execution model (see noise.py): empirical real-vs-bar-open entry
     # offsets (tester random execution delay) and SL-fill slippage, both
     # measured on the 1,353 bar-matched trades of the two real reports
@@ -303,7 +306,7 @@ def simulate(ctx, p=SHIPPED, start=WIN_START, end=WIN_END, record_signals=False)
             if have:
                 md = max(p.min_dist_pts, 1) * POINT
                 best = min(best, cur - md) if d > 0 else max(best, cur + md)
-                best = round(best, 2)
+                best = round(best, p.digits)
                 if (best - pos["sl"]) * d > 0:
                     pos["sl"] = best
                     pos["trail_moves"] += 1
@@ -342,8 +345,8 @@ def simulate(ctx, p=SHIPPED, start=WIN_START, end=WIN_END, record_signals=False)
                         sm = p.stop_atr if p.stop_mult_fn is None else p.stop_mult_fn(ctx, t, d, kind)
                         entry = ask if d > 0 else bid
                         if p.entry_noise is not None:
-                            entry = round(entry + d * float(rng.choice(p.entry_noise)) * (a if p.noise_in_atr else 1.0), 2)
-                        sl = round(entry - d * sm * a, 2)
+                            entry = round(entry + d * float(rng.choice(p.entry_noise)) * (a if p.noise_in_atr else 1.0), p.digits)
+                        sl = round(entry - d * sm * a, p.digits)
                         pos = dict(entry_i=t, entry_time=t64[t], dir=d, kind=kind, entry=entry, sl=sl,
                                    sl0=sl, atr=a, peak=entry, bars=0, trail_moves=0)
         # 5. intrabar resting SL
