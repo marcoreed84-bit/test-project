@@ -207,6 +207,13 @@ def simulate(ctx, extra_filter=None, params=None, both_hit="stop", report=None):
                         ok = False
                     else:
                         tgt_dist = target_distance(p, lots)
+                        # cross-asset hook (default absent = byte-identical GOLD behaviour):
+                        # InpFixedTargetUSD is a GOLD price distance; on another symbol it is
+                        # re-expressed as a fraction of the fill price or a multiple of ATR.
+                        if p.get("target_pct"):
+                            tgt_dist = p["target_pct"] * ref_px
+                        elif p.get("target_atr"):
+                            tgt_dist = p["target_atr"] * atr[i]
                         in_pos = 1 if is_buy else -1
                         entry_i = b
                         entry_time = times[b]

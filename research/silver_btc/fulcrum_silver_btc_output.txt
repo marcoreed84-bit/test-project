@@ -1,0 +1,66 @@
+====================================================================================================
+SILVER M15 target=pct(0.0172): 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 n=290120, point=0.001, median spread 33 pts -> max_spread gate 66 pts; OOS window from 2021-01-04 01:00:00
+  [FULL] n=1539 win%=18.6 sum%=-222.0 %PF=0.657 long%=46 exits={'STOP': 1216, 'TARGET': 227, 'FRIDAY': 96}
+         null (600 draws, mean n=1553): median=0.580 p95=0.648 -> 96.7th pct; p(K=1)=0.0333 p(K=7)=0.2120 p(K=30)=0.6354  => DOES NOT SURVIVE (net loser, beats random)
+  [OOS] n=664 win%=24.5 sum%=-39.7 %PF=0.860 long%=52 exits={'STOP': 488, 'TARGET': 132, 'FRIDAY': 44}
+         null (600 draws, mean n=682): median=0.718 p95=0.842 -> 96.2th pct; p(K=1)=0.0383 p(K=7)=0.2416 p(K=30)=0.6946  => DOES NOT SURVIVE (net loser, beats random)
+====================================================================================================
+SILVER M15 target=atr(10.8776): 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 n=290120, point=0.001, median spread 33 pts -> max_spread gate 66 pts; OOS window from 2021-01-04 01:00:00
+  [FULL] n=1463 win%=14.0 sum%=-264.6 %PF=0.615 long%=46 exits={'STOP': 1213, 'FRIDAY': 135, 'TARGET': 115}
+         null (600 draws, mean n=1488): median=0.597 p95=0.692 -> 64.7th pct; p(K=1)=0.3533 p(K=7)=0.9514 p(K=30)=1.0000  => DOES NOT SURVIVE (net loser)
+  [OOS] n=600 win%=17.0 sum%=-74.3 %PF=0.761 long%=52 exits={'STOP': 480, 'FRIDAY': 68, 'TARGET': 52}
+         null (600 draws, mean n=626): median=0.730 p95=0.887 -> 60.5th pct; p(K=1)=0.3950 p(K=7)=0.9684 p(K=30)=1.0000  => DOES NOT SURVIVE (net loser)
+====================================================================================================
+BTCUSD M15 target=pct(0.0172): 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 n=275838, point=0.01, median spread 6000 pts -> max_spread gate 12000 pts; OOS window from 2024-01-01 00:00:00
+  [FULL] n=985 win%=29.2 sum%=-134.7 %PF=0.779 long%=48 exits={'STOP': 675, 'TARGET': 266, 'FRIDAY': 44}
+         null (600 draws, mean n=1001): median=0.646 p95=0.732 -> 99.5th pct; p(K=1)=0.0050 p(K=7)=0.0350 p(K=30)=0.1472  => DOES NOT SURVIVE (net loser, beats random)
+  [OOS] n=450 win%=32.2 sum%=21.0 %PF=1.099 long%=52 exits={'STOP': 295, 'TARGET': 129, 'FRIDAY': 26}
+         null (600 draws, mean n=459): median=0.853 p95=1.021 -> 99.0th pct; p(K=1)=0.0100 p(K=7)=0.0662 p(K=30)=0.2624  => borderline
+====================================================================================================
+BTCUSD M15 target=atr(10.8776): 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 n=275838, point=0.01, median spread 6000 pts -> max_spread gate 12000 pts; OOS window from 2024-01-01 00:00:00
+  [FULL] n=905 win%=19.4 sum%=-147.3 %PF=0.793 long%=48 exits={'STOP': 705, 'TARGET': 115, 'FRIDAY': 85}
+         null (600 draws, mean n=926): median=0.727 p95=0.839 -> 82.2th pct; p(K=1)=0.1783 p(K=7)=0.7432 p(K=30)=0.9976  => DOES NOT SURVIVE (net loser)
+  [OOS] n=414 win%=21.0 sum%=-22.7 %PF=0.910 long%=53 exits={'STOP': 315, 'TARGET': 56, 'FRIDAY': 43}
+         null (600 draws, mean n=423): median=0.877 p95=1.116 -> 59.7th pct; p(K=1)=0.4033 p(K=7)=0.9726 p(K=30)=1.0000  => DOES NOT SURVIVE (net loser)
+====================================================================================================
+SILVER M5 target=pct(0.0186): 2022-07-04 01:50:00 -> 2026-09-25 23:55:00 n=300000, point=0.001, median spread 34 pts -> max_spread gate 68 pts; OOS window from 2022-07-04 01:50:00
+  [FULL] n=1230 win%=14.5 sum%=-111.7 %PF=0.733 long%=51 exits={'STOP': 1046, 'TARGET': 155, 'FRIDAY': 29}
+         null (600 draws, mean n=1244): median=0.681 p95=0.778 -> 81.7th pct; p(K=1)=0.1833 p(K=7)=0.7564 p(K=30)=0.9978  => DOES NOT SURVIVE (net loser)
+  [OOS] n=1230 win%=14.5 sum%=-111.7 %PF=0.733 long%=51 exits={'STOP': 1046, 'TARGET': 155, 'FRIDAY': 29}
+         null (600 draws, mean n=1244): median=0.681 p95=0.778 -> 81.7th pct; p(K=1)=0.1833 p(K=7)=0.7564 p(K=30)=0.9978  => DOES NOT SURVIVE (net loser)
+====================================================================================================
+SILVER M5 target=atr(22.4757): 2022-07-04 01:50:00 -> 2026-09-25 23:55:00 n=300000, point=0.001, median spread 34 pts -> max_spread gate 68 pts; OOS window from 2022-07-04 01:50:00
+  [FULL] n=1051 win%=10.5 sum%=-99.8 %PF=0.747 long%=52 exits={'STOP': 933, 'FRIDAY': 66, 'TARGET': 52}
+         null (600 draws, mean n=1073): median=0.680 p95=0.821 -> 78.2th pct; p(K=1)=0.2183 p(K=7)=0.8184 p(K=30)=0.9992  => DOES NOT SURVIVE (net loser)
+  [OOS] n=1051 win%=10.5 sum%=-99.8 %PF=0.747 long%=52 exits={'STOP': 933, 'FRIDAY': 66, 'TARGET': 52}
+         null (600 draws, mean n=1073): median=0.680 p95=0.821 -> 78.2th pct; p(K=1)=0.2183 p(K=7)=0.8184 p(K=30)=0.9992  => DOES NOT SURVIVE (net loser)
+====================================================================================================
+BTCUSD M5 target=pct(0.0186): 2023-11-17 11:25:00 -> 2026-09-27 12:15:00 n=300000, point=0.01, median spread 6000 pts -> max_spread gate 12000 pts; OOS window from 2024-01-01 00:00:00
+  [FULL] n=918 win%=18.2 sum%=-36.4 %PF=0.892 long%=50 exits={'STOP': 743, 'TARGET': 157, 'FRIDAY': 18}
+         null (600 draws, mean n=917): median=0.799 p95=0.916 -> 90.5th pct; p(K=1)=0.0950 p(K=7)=0.5118 p(K=30)=0.9474  => DOES NOT SURVIVE (net loser)
+  [OOS] n=895 win%=18.2 sum%=-36.1 %PF=0.890 long%=50 exits={'STOP': 725, 'TARGET': 153, 'FRIDAY': 17}
+         null (600 draws, mean n=890): median=0.796 p95=0.932 -> 88.2th pct; p(K=1)=0.1183 p(K=7)=0.5850 p(K=30)=0.9768  => DOES NOT SURVIVE (net loser)
+====================================================================================================
+BTCUSD M5 target=atr(22.4757): 2023-11-17 11:25:00 -> 2026-09-27 12:15:00 n=300000, point=0.01, median spread 6000 pts -> max_spread gate 12000 pts; OOS window from 2024-01-01 00:00:00
+  [FULL] n=800 win%=12.9 sum%=-4.4 %PF=0.987 long%=50 exits={'STOP': 690, 'TARGET': 68, 'FRIDAY': 42}
+         null (600 draws, mean n=805): median=0.842 p95=1.021 -> 90.3th pct; p(K=1)=0.0967 p(K=7)=0.5054 p(K=30)=0.9520  => DOES NOT SURVIVE (net loser)
+  [OOS] n=778 win%=12.9 sum%=-7.1 %PF=0.978 long%=50 exits={'STOP': 672, 'TARGET': 66, 'FRIDAY': 40}
+         null (600 draws, mean n=783): median=0.836 p95=1.021 -> 90.7th pct; p(K=1)=0.0933 p(K=7)=0.4922 p(K=30)=0.9428  => DOES NOT SURVIVE (net loser)
+
+SUMMARY (verdict taken on the OOS window; FULL shown for context)
+  SILVER M15 target=pct(0.0172)              FULL n= 1539 %PF=0.657 pct=96.7 p1=0.0333 p7=0.2120 p30=0.6354 -> DOES NOT SURVIVE (net loser, beats random)
+  SILVER M15 target=pct(0.0172)              OOS  n=  664 %PF=0.860 pct=96.2 p1=0.0383 p7=0.2416 p30=0.6946 -> DOES NOT SURVIVE (net loser, beats random)
+  SILVER M15 target=atr(10.8776)             FULL n= 1463 %PF=0.615 pct=64.7 p1=0.3533 p7=0.9514 p30=1.0000 -> DOES NOT SURVIVE (net loser)
+  SILVER M15 target=atr(10.8776)             OOS  n=  600 %PF=0.761 pct=60.5 p1=0.3950 p7=0.9684 p30=1.0000 -> DOES NOT SURVIVE (net loser)
+  BTCUSD M15 target=pct(0.0172)              FULL n=  985 %PF=0.779 pct=99.5 p1=0.0050 p7=0.0350 p30=0.1472 -> DOES NOT SURVIVE (net loser, beats random)
+  BTCUSD M15 target=pct(0.0172)              OOS  n=  450 %PF=1.099 pct=99.0 p1=0.0100 p7=0.0662 p30=0.2624 -> borderline
+  BTCUSD M15 target=atr(10.8776)             FULL n=  905 %PF=0.793 pct=82.2 p1=0.1783 p7=0.7432 p30=0.9976 -> DOES NOT SURVIVE (net loser)
+  BTCUSD M15 target=atr(10.8776)             OOS  n=  414 %PF=0.910 pct=59.7 p1=0.4033 p7=0.9726 p30=1.0000 -> DOES NOT SURVIVE (net loser)
+  SILVER M5 target=pct(0.0186)               FULL n= 1230 %PF=0.733 pct=81.7 p1=0.1833 p7=0.7564 p30=0.9978 -> DOES NOT SURVIVE (net loser)
+  SILVER M5 target=pct(0.0186)               OOS  n= 1230 %PF=0.733 pct=81.7 p1=0.1833 p7=0.7564 p30=0.9978 -> DOES NOT SURVIVE (net loser)
+  SILVER M5 target=atr(22.4757)              FULL n= 1051 %PF=0.747 pct=78.2 p1=0.2183 p7=0.8184 p30=0.9992 -> DOES NOT SURVIVE (net loser)
+  SILVER M5 target=atr(22.4757)              OOS  n= 1051 %PF=0.747 pct=78.2 p1=0.2183 p7=0.8184 p30=0.9992 -> DOES NOT SURVIVE (net loser)
+  BTCUSD M5 target=pct(0.0186)               FULL n=  918 %PF=0.892 pct=90.5 p1=0.0950 p7=0.5118 p30=0.9474 -> DOES NOT SURVIVE (net loser)
+  BTCUSD M5 target=pct(0.0186)               OOS  n=  895 %PF=0.890 pct=88.2 p1=0.1183 p7=0.5850 p30=0.9768 -> DOES NOT SURVIVE (net loser)
+  BTCUSD M5 target=atr(22.4757)              FULL n=  800 %PF=0.987 pct=90.3 p1=0.0967 p7=0.5054 p30=0.9520 -> DOES NOT SURVIVE (net loser)
+  BTCUSD M5 target=atr(22.4757)              OOS  n=  778 %PF=0.978 pct=90.7 p1=0.0933 p7=0.4922 p30=0.9428 -> DOES NOT SURVIVE (net loser)
