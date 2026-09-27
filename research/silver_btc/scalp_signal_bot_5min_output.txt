@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- Scalp Signal Bot 5min (RISK_R, SWEEP_MAX_AGE_BARS, PIVOT_LEN)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (1.5, 24, 5): IS n=  484  IS %PF=0.964  long%=0
+   (1.0, 24, 5): IS n=  596  IS %PF=0.962  long%=0
+   (1.5, 12, 5): IS n=  485  IS %PF=0.961  long%=0
+   (1.0, 12, 5): IS n=  597  IS %PF=0.959  long%=0
+   (1.5, 6, 5): IS n=  485  IS %PF=0.959  long%=0
+   (1.0, 6, 5): IS n=  591  IS %PF=0.950  long%=0
+   (0.75, 24, 5): IS n=  702  IS %PF=0.942  long%=0
+   (0.75, 12, 5): IS n=  706  IS %PF=0.942  long%=0
+FROZEN WINNER (IS only): (1.5, 24, 5)  IS n=484  IS %PF=0.964
+IS sanity: random-timing IS pool median=0.954; IS winner vs best-of-27 random (median 1.198): p=1.0000
+OOS (untouched): n=484  win%=36.8  %PF=0.846  sum%=-52.6  long%=0 (long %PF=nan n=0, short %PF=0.846 n=484)
+random-timing OOS null (1000 draws, p_fire=0.01072, mean n=499 vs real 484): median=0.981  p95=1.203
+REAL OOS %PF=0.846 -> 10.1th percentile; p(K=1)=0.8990 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.268) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.00): median=0.821  p(K=1)=0.3450
+
+==========================================================================================
+SILVER M15 -- Scalp Signal Bot 5min (RISK_R, SWEEP_MAX_AGE_BARS, PIVOT_LEN)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (1.0, 24, 5): IS n=  547  IS %PF=0.721  long%=0
+   (1.0, 6, 5): IS n=  546  IS %PF=0.719  long%=0
+   (1.0, 12, 5): IS n=  540  IS %PF=0.717  long%=0
+   (1.5, 6, 5): IS n=  399  IS %PF=0.713  long%=0
+   (1.5, 12, 5): IS n=  402  IS %PF=0.710  long%=0
+   (1.5, 24, 5): IS n=  404  IS %PF=0.701  long%=0
+   (1.5, 24, 3): IS n=  490  IS %PF=0.701  long%=0
+   (1.5, 12, 3): IS n=  479  IS %PF=0.698  long%=0
+FROZEN WINNER (IS only): (1.0, 24, 5)  IS n=547  IS %PF=0.721
+IS sanity: random-timing IS pool median=0.733; IS winner vs best-of-27 random (median 0.949): p=1.0000
+OOS (untouched): n=568  win%=47.4  %PF=0.807  sum%=-139.1  long%=0 (long %PF=nan n=0, short %PF=0.807 n=568)
+random-timing OOS null (1000 draws, p_fire=0.01258, mean n=581 vs real 568): median=0.891  p95=1.083
+REAL OOS %PF=0.807 -> 17.4th percentile; p(K=1)=0.8260 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.121) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.00): median=0.796  p(K=1)=0.4210
+
+==========================================================================================
+BTCUSD M15 -- Scalp Signal Bot 5min (RISK_R, SWEEP_MAX_AGE_BARS, PIVOT_LEN)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (0.75, 24, 5): IS n=  453  IS %PF=0.948  long%=0
+   (0.75, 6, 5): IS n=  452  IS %PF=0.945  long%=0
+   (0.75, 12, 5): IS n=  452  IS %PF=0.945  long%=0
+   (1.5, 24, 5): IS n=  262  IS %PF=0.912  long%=0
+   (1.0, 6, 3): IS n=  435  IS %PF=0.912  long%=0
+   (1.5, 6, 5): IS n=  262  IS %PF=0.911  long%=0
+   (1.5, 12, 5): IS n=  262  IS %PF=0.911  long%=0
+   (1.0, 24, 3): IS n=  435  IS %PF=0.909  long%=0
+FROZEN WINNER (IS only): (0.75, 24, 5)  IS n=453  IS %PF=0.948
+IS sanity: random-timing IS pool median=0.892; IS winner vs best-of-27 random (median 1.161): p=0.9998
+OOS (untouched): n=474  win%=56.1  %PF=0.897  sum%=-62.4  long%=0 (long %PF=nan n=0, short %PF=0.897 n=474)
+random-timing OOS null (1000 draws, p_fire=0.01529, mean n=468 vs real 474): median=0.912  p95=1.105
+REAL OOS %PF=0.897 -> 44.2th percentile; p(K=1)=0.5580 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.160) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.00): median=0.851  p(K=1)=0.2480
+
+SUMMARY
+  {'label': 'GOLD M15 -- Scalp Signal Bot 5min (RISK_R, SWEEP_MAX_AGE_BARS, PIVOT_LEN)', 'K': 27, 'cfg': (1.5, 24, 5), 'is_n': 484, 'is_pf': np.float64(0.9643478589820274), 'oos_n': 484, 'oos_pf': np.float64(0.8455124562198149), 'p_is_k': 1.0, 'pctile': np.float64(10.100000000000001), 'p1': 0.899, 'pK': 1.0, 'p1_dir': 0.345, 'null_median': 0.9811435727677921, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- Scalp Signal Bot 5min (RISK_R, SWEEP_MAX_AGE_BARS, PIVOT_LEN)', 'K': 27, 'cfg': (1.0, 24, 5), 'is_n': 547, 'is_pf': np.float64(0.7206676365460484), 'oos_n': 568, 'oos_pf': np.float64(0.8068977676967369), 'p_is_k': 1.0, 'pctile': np.float64(17.4), 'p1': 0.826, 'pK': 1.0, 'p1_dir': 0.421, 'null_median': 0.8914109229853151, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- Scalp Signal Bot 5min (RISK_R, SWEEP_MAX_AGE_BARS, PIVOT_LEN)', 'K': 27, 'cfg': (0.75, 24, 5), 'is_n': 453, 'is_pf': np.float64(0.9479242315633347), 'oos_n': 474, 'oos_pf': np.float64(0.8965888068842741), 'p_is_k': 0.9998, 'pctile': np.float64(44.2), 'p1': 0.558, 'pK': 1.0, 'p1_dir': 0.248, 'null_median': 0.9117457020490047, 'verdict': 'DOES NOT SURVIVE'}
