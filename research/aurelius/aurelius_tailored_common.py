@@ -49,6 +49,16 @@ aurelius_random_timing_test.py, gold defaults byte-identical):
     Both are searched; "off" is a legal value of each. Whatever the gate,
     the REAL per-bar spread is always CHARGED in the P&L (never zeroed).
 
+OUTCOME (2026-09-27, details in the two per-instrument files): no
+tailored config survives OOS at the search's real K (~550-570) or at the
+family-level K=4 (2 instruments x 2 timeframes). Silver M15 and BTC M15
+fail outright (OOS %PF 0.740 / 1.003); Silver M5 (1.624, n=37, p K=1
+0.021) and BTC M5 (1.305, n=114, p K=1 0.067) are positive OOS but not
+significant beyond K=1-2 and depend on a few trades. A general caveat for
+reading "beats random timing" off gold: at these instruments' spread/ATR,
+the random-entry baseline is cost-crushed (medians 0.07-0.7), so beating
+it is a far lower bar than being profitable - both are required.
+
 Everything else reuses engine.build_context() and sim.simulate()
 unchanged. Indicators are built once on the FULL series (all causal:
 MAs, Wilder ATR, prior-day S/R, same-day VWAP, trailing-window spread
@@ -244,6 +254,16 @@ def warmup_of(p):
     return max(p["p2400"], p["p600"]) + 50
 
 
+def part_slice(ctx, p, split, part):
+    """IS = [0, split); OOS = [split - warmup, end) so the first tradable
+    bar is exactly the split; ALL = whole history (reporting only)."""
+    if part == "IS":
+        return slice_ctx(ctx, 0, split)
+    if part == "OOS":
+        return slice_ctx(ctx, max(0, split - warmup_of(p)), ctx["n"])
+    return ctx
+
+
 # ---------------------------- metrics ----------------------------
 
 def trade_pct(trades):
@@ -305,10 +325,7 @@ def _eval_cfg(args):
     tf, point, split = _G["tf"], _G["point"], _G["split"]
     p = make_params(tf, cfg, point)
     ctx = config_ctx(_G["base"][cfg["ma_scale"]], cfg, p, point, _G["sq"])
-    if part == "IS":
-        c = slice_ctx(ctx, 0, split)
-    else:
-        c = slice_ctx(ctx, max(0, split - warmup_of(p)), ctx["n"])
+    c = part_slice(ctx, p, split, part)
     s = summarize(simulate(c, params=p))
     return cfg_key(cfg), part, s
 
@@ -330,7 +347,7 @@ def _rand_chunk(args):
     p = make_params(tf, cfg, point)
     p["random_p_buy"] = p_buy
     ctx = config_ctx(_G["base"][cfg["ma_scale"]], cfg, p, point, _G["sq"])
-    c = slice_ctx(ctx, 0, split) if part == "IS" else slice_ctx(ctx, max(0, split - warmup_of(p)), ctx["n"])
+    c = part_slice(ctx, p, split, part)
     rng = np.random.default_rng(seed)
     out = []
     for _ in range(n):
@@ -342,7 +359,7 @@ def _real_trades(cfg, part):
     tf, point, split = _G["tf"], _G["point"], _G["split"]
     p = make_params(tf, cfg, point)
     ctx = config_ctx(_G["base"][cfg["ma_scale"]], cfg, p, point, _G["sq"])
-    c = slice_ctx(ctx, 0, split) if part == "IS" else slice_ctx(ctx, max(0, split - warmup_of(p)), ctx["n"])
+    c = part_slice(ctx, p, split, part)
     return c, p, simulate(c, params=p)
 
 
@@ -359,6 +376,20 @@ def random_test(pool_exec, cfg, part, n_draws, ks):
     pct = 100 * (pool < real_pf).mean()
     return dict(real_pf=real_pf, n=len(real), p_buy=p_buy, pool=pool, pctile=pct,
                 ladder=best_of_k(pool, real_pf, ks))
+
+
+def setup(inst, tf, split_frac=0.6):
+    """Populate the module state for inst/tf without running the search
+    (used by aurelius_tailored_extra_checks.py). Returns (df, split)."""
+    point = INSTRUMENTS[inst]["point"]
+    df = load(inst, tf)
+    split = int(len(df) * split_frac)
+    _G.clear()
+    _G.update(tf=tf, point=point, split=split, df=df, h4=resample_h4(df), base={})
+    _ensure_base(SPACE["ma_scale"])
+    _G["sq"] = rolling_spread_quantiles(df["spread"].values.astype(float), SPREAD_WIN[tf],
+                                        [q for q in SPACE["spread_q"] if q is not None])
+    return df, split
 
 
 def run_walkforward(inst, tf, split_frac=0.6, n_stage1=500, seed=2026, n_random=600, log=print):

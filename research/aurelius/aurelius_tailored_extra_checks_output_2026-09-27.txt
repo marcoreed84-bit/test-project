@@ -1,0 +1,34 @@
+
+===== SILVER M15  (OOS from 2021-10-27 18:30:00) =====
+  IS winner on OOS: net %PF=0.740 (n=375)   gross (spread not charged) %PF=0.903 (n=359)
+  OOS by year (net): 2021: 1.10 (n=3), 2022: 0.47 (n=50), 2023: 0.74 (n=39), 2024: 0.99 (n=69), 2025: 1.01 (n=113), 2026: 0.59 (n=101)
+  concentration: OOS %PF without best 1 trade=0.698, without best 3=0.625
+  one-notch OOS neighbourhood (37 of 37 with n>=10): median %PF=0.762, 0 > 1, p25=0.738 p75=0.807
+  OOS random timing (same pool/seeds as the walk-forward log): real %PF=0.740 pct 75.8; K=1: p=0.2442, K=2: p=0.4260, K=4: p=0.6830
+  frozen GOLD config, gate removed, OOS: real %PF=0.792 (n=637, long 0.57); random median=0.462 p95=0.620; pct 99.9; K=1: p=0.0013, K=2: p=0.0022, K=4: p=0.0050
+  frozen GOLD config, gate removed, ALL: real %PF=0.601 (n=1928, long 0.49); random median=0.285 p95=0.353; pct 100.0; K=1: p=0.0000, K=2: p=0.0000, K=4: p=0.0000
+  frozen GOLD config, gate removed, ALL by year: 2014: 0.43 (n=117), 2015: 0.15 (n=219), 2016: 0.49 (n=174), 2017: 0.25 (n=195), 2018: 0.17 (n=171), 2019: 0.74 (n=156), 2020: 1.19 (n=148), 2021: 0.49 (n=141), 2022: 0.62 (n=121), 2023: 0.66 (n=134), 2024: 1.25 (n=132), 2025: 0.81 (n=132), 2026: 0.79 (n=88)
+
+===== BTCUSD M15  (OOS from 2023-08-03 06:45:00) =====
+  IS winner on OOS: net %PF=1.003 (n=206)   gross (spread not charged) %PF=1.325 (n=201)
+  OOS by year (net): 2023: 0.68 (n=11), 2024: 2.89 (n=30), 2025: 0.72 (n=97), 2026: 0.77 (n=68)
+  concentration: OOS %PF without best 1 trade=0.804, without best 3=0.642
+  one-notch OOS neighbourhood (36 of 37 with n>=10): median %PF=1.008, 22 > 1, p25=0.889 p75=1.093
+  OOS random timing (same pool/seeds as the walk-forward log): real %PF=1.003 pct 86.1; K=1: p=0.1450, K=2: p=0.2662, K=4: p=0.4550
+  frozen GOLD config, gate removed, OOS: real %PF=1.134 (n=577, long 0.52); random median=0.680 p95=0.944; pct 99.8; K=1: p=0.0018, K=2: p=0.0053, K=4: p=0.0118
+  frozen GOLD config, gate removed, ALL: real %PF=0.650 (n=1610, long 0.50); random median=0.318 p95=0.404; pct 100.0; K=1: p=0.0000, K=2: p=0.0000, K=4: p=0.0000
+  frozen GOLD config, gate removed, ALL by year: 2017: 1.36 (n=47), 2018: 0.32 (n=126), 2019: 0.09 (n=239), 2020: 0.15 (n=221), 2021: 0.78 (n=85), 2022: 0.78 (n=210), 2023: 1.64 (n=193), 2024: 1.58 (n=159), 2025: 0.78 (n=186), 2026: 1.06 (n=144)
+
+===== SILVER M5  (OOS from 2025-01-16 10:20:00) =====
+  IS winner on OOS: net %PF=1.624 (n=37)   gross (spread not charged) %PF=1.846 (n=36)
+  OOS by year (net): 2025: 1.72 (n=29), 2026: 1.43 (n=8)
+  concentration: OOS %PF without best 1 trade=1.120, without best 3=0.514
+  one-notch OOS neighbourhood (35 of 37 with n>=10): median %PF=1.305, 23 > 1, p25=0.965 p75=1.676
+  OOS random timing (same pool/seeds as the walk-forward log): real %PF=1.624 pct 98.0; K=1: p=0.0213, K=2: p=0.0357, K=4: p=0.0795
+
+===== BTCUSD M5  (OOS from 2025-08-05 11:35:00) =====
+  IS winner on OOS: net %PF=1.305 (n=114)   gross (spread not charged) %PF=1.644 (n=114)
+  OOS by year (net): 2025: 1.41 (n=38), 2026: 1.26 (n=76)
+  concentration: OOS %PF without best 1 trade=1.073, without best 3=0.795
+  one-notch OOS neighbourhood (36 of 37 with n>=10): median %PF=1.253, 32 > 1, p25=1.099 p75=1.305
+  OOS random timing (same pool/seeds as the walk-forward log): real %PF=1.305 pct 93.1; K=1: p=0.0670, K=2: p=0.1370, K=4: p=0.2512

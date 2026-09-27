@@ -29,8 +29,28 @@ METHOD (the project's standard rigor, nothing new invented):
     on OOS, to see whether IS rank predicts OOS rank at all.
   %PF (percent-of-price) throughout, never raw points.
 
-RESULT: see the dated block filled in below after the run, and the full
-log in aurelius_silver_tailored_output_2026-09-27.txt.
+RESULT (2026-09-27) - FAILS on M15; M5 "survives" only at K=1 and does
+not hold up to scrutiny. Full log: aurelius_silver_tailored_output_2026-09-27.txt,
+follow-ups: aurelius_tailored_extra_checks_output_2026-09-27.txt.
+
+M15 (IS 2014-06 -> 2021-10, OOS 2021-10 -> 2026-09, K_search=563):
+  IS winner [ma x1.0, slope 0.5-off, S/R>=2.5, vol>=1.3, pb 1.0, stop 2.5,
+  vwap 1.0, spread q97 + cost/ATR<=0.4, ssb on]: IS %PF 1.713 (n=94) ->
+  OOS %PF 0.740 (n=375), 75.8th pct of random timing, p(K=1)=0.244.
+  Even IN-SAMPLE it fails best-of-K from K=30 up. Only 4 of 189 eligible
+  stage-1 configs had OOS %PF > 1 (median 0.807); every one-notch OOS
+  neighbour of the winner is < 1 (median 0.762). Gross (spread not
+  charged) OOS %PF is still only 0.903 - this is not just costs.
+M5 (IS 2022-07 -> 2025-01, OOS 2025-01 -> 2026-09, K_search=573):
+  IS winner [ma x3.0, slope 0.75-1.25, S/R>=2.5, vol>=1.6, pb 0.25,
+  stop 1.5, vwap 0.1, no spread gate, ssb off]: IS %PF 1.443 (n=74) ->
+  OOS %PF 1.624 (n=37), 98.0th pct, p(K=1)=0.021, p(K=4, the 4 walk-
+  forwards this task ran)=0.080, p(K=10+)>=0.17, p(K=573)=1.0.
+  Why it is NOT a survivor: 37 OOS trades in 1.7 yrs; dropping the best 3
+  trades takes it to %PF 0.514; the OOS window is Silver's 2025-26
+  ~$29->$73 rally (81% of OOS trades long) in which even the frozen gold
+  config breaks even (1.002) and the random baseline is cost-crushed
+  (median 0.31) - "beats random timing" is a very low bar here.
 """
 import sys
 sys.path.insert(0, "/home/user/test-project/research/aurelius")

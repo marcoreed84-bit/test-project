@@ -17,6 +17,21 @@ pure OHLC aggregation, not a separate data source.
 
 The ENTIRE silver dataset is genuinely untouched by any parameter search -
 unlike gold, there's no in-sample portion to worry about excluding.
+
+CORRECTION (2026-09-27, found building aurelius_tailored_common.py): this
+file charged Silver's spread at GOLD's point. sim.simulate() multiplied the
+spread column by engine.POINT = 0.01, but SILVER's meta_point is 0.001, so
+every trade paid 10x its real spread (median 33 points = $0.033 real,
+charged $0.33, several M15 ATRs). The previously reported "%PF 0.042, win
+rate 1.16%, every exit pathway loses" was that artifact. Fixed below by
+passing point=0.001 through params (the 60-point entry gate is kept - it
+IS the frozen EA's own input, in Silver's own points). Corrected: n=1731,
+%PF 0.647, win 18.4% - frozen gold Aurelius still loses on Silver, but not
+catastrophically. Its random-timing percentile is 100 (random median 0.306)
+at every K - i.e. the ENTRY TIMING genuinely beats random entries paying
+the same spread, but the "SURVIVES" labels this file prints only mean
+"better than random", NOT profitable: %PF < 1, a net loser. The joint per-instrument retune that followed is in
+aurelius_silver_tailored_test.py.
 """
 import sys
 sys.path.insert(0, "/home/user/test-project/research/aurelius")
@@ -55,22 +70,23 @@ if __name__ == "__main__":
           f"({(df15['time'].max()-df15['time'].min()).days/365.25:.1f} yrs) - "
           f"never touched by any parameter search")
 
-    ctx15 = E.build_context(df15, h4, E.P15)
+    PS = dict(E.P15, point=0.001)   # SILVER's real point - see CORRECTION above
+    ctx15 = E.build_context(df15, h4, PS)
     n = ctx15["n"]
 
-    real_trades = simulate(ctx15, params=E.P15)
+    real_trades = simulate(ctx15, params=PS)
     real_pct_pf = A.pct_pf(real_trades)
     print(f"\nREAL Aurelius M15 v1.56 defaults (UNCHANGED params) on SILVER: n={len(real_trades)}  %PF={real_pct_pf:.3f}")
 
     rng = np.random.default_rng(1)
-    p_fire = A.calibrate_p_fire(ctx15, E.P15, rng, len(real_trades))
+    p_fire = A.calibrate_p_fire(ctx15, PS, rng, len(real_trades))
     print(f"Calibrated p_fire={p_fire:.5f}")
 
     print(f"Running {N_RANDOM} random-entry/coin-flip-direction baselines on SILVER...")
     rng = np.random.default_rng(42)
     pool = []
     for _ in range(N_RANDOM):
-        tr = A.simulate_random_entry(ctx15, E.P15, rng, p_fire)
+        tr = A.simulate_random_entry(ctx15, PS, rng, p_fire)
         pool.append(A.pct_pf(tr))
     pool = np.array(pool)
     pool = pool[~np.isnan(pool) & ~np.isinf(pool)]
