@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Harmonic XABCD (Gartley/Bat/Butterfly/Crab) (ZIGLEN, MIN_MATCH, TARGET_RR)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3, 2, 3.0): IS n= 1322  IS %PF=0.972
+   (3, 3, 3.0): IS n= 1362  IS %PF=0.888
+   (5, 2, 3.0): IS n=  959  IS %PF=0.881
+   (4, 2, 3.0): IS n= 1119  IS %PF=0.880
+   (3, 2, 1.5): IS n= 2010  IS %PF=0.851
+   (5, 2, 2.0): IS n= 1167  IS %PF=0.838
+   (3, 3, 1.5): IS n= 1624  IS %PF=0.837
+   (4, 2, 2.0): IS n= 1440  IS %PF=0.805
+FROZEN WINNER (IS only): (3, 2, 3.0)  IS n=1322  IS %PF=0.972
+OOS (untouched): n=1155  win%=35.0  %PF=1.030  sum%=11.4
+random-timing OOS null (1000 draws, p_fire=0.02558): median=0.957  p95=1.091
+REAL OOS %PF=1.030 -> 80.5th percentile; p(K=1)=0.1950 [DOES NOT SURVIVE]; p(K=27)=0.9972 (best-of-K median 1.128) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Harmonic XABCD (Gartley/Bat/Butterfly/Crab) (ZIGLEN, MIN_MATCH, TARGET_RR)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/27 combos had IS n>=100. Top 8 by IS %PF:
+   (5, 2, 3.0): IS n= 1047  IS %PF=0.613
+   (5, 2, 2.0): IS n= 1248  IS %PF=0.603
+   (4, 2, 3.0): IS n= 1130  IS %PF=0.562
+   (5, 3, 3.0): IS n=  926  IS %PF=0.539
+   (3, 2, 3.0): IS n= 1336  IS %PF=0.526
+   (4, 2, 2.0): IS n= 1354  IS %PF=0.521
+   (5, 2, 1.5): IS n= 1475  IS %PF=0.503
+   (3, 2, 2.0): IS n= 1603  IS %PF=0.484
+FROZEN WINNER (IS only): (5, 2, 3.0)  IS n=1047  IS %PF=0.613
+OOS (untouched): n=921  win%=29.5  %PF=0.816  sum%=-133.6
+random-timing OOS null (1000 draws, p_fire=0.02040): median=0.839  p95=0.973
+REAL OOS %PF=0.816 -> 39.9th percentile; p(K=1)=0.6010 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.000) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Harmonic XABCD (Gartley/Bat/Butterfly/Crab) (ZIGLEN, MIN_MATCH, TARGET_RR)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3, 2, 3.0): IS n=  794  IS %PF=1.119
+   (4, 2, 3.0): IS n=  673  IS %PF=1.031
+   (5, 2, 3.0): IS n=  595  IS %PF=0.970
+   (4, 2, 2.0): IS n=  848  IS %PF=0.876
+   (5, 2, 2.0): IS n=  722  IS %PF=0.875
+   (3, 2, 2.0): IS n=  940  IS %PF=0.870
+   (3, 3, 2.0): IS n= 1035  IS %PF=0.833
+   (3, 2, 1.5): IS n= 1175  IS %PF=0.824
+FROZEN WINNER (IS only): (3, 2, 3.0)  IS n=794  IS %PF=1.119
+OOS (untouched): n=902  win%=29.8  %PF=0.909  sum%=-60.6
+random-timing OOS null (1000 draws, p_fire=0.02688): median=0.879  p95=1.013
+REAL OOS %PF=0.909 -> 65.0th percentile; p(K=1)=0.3500 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.047) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (3, 2, 3.0), 'is_n': 1322, 'is_pf': np.float64(0.9720444308750139), 'oos_n': 1155, 'oos_pf': np.float64(1.0303904986526427), 'pctile': np.float64(80.5), 'p1': 0.195, 'pK': 0.9972, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (5, 2, 3.0), 'is_n': 1047, 'is_pf': np.float64(0.612604501409448), 'oos_n': 921, 'oos_pf': np.float64(0.8162806591844863), 'pctile': np.float64(39.900000000000006), 'p1': 0.601, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (3, 2, 3.0), 'is_n': 794, 'is_pf': np.float64(1.1191966965237767), 'oos_n': 902, 'oos_pf': np.float64(0.9087571919364037), 'pctile': np.float64(65.0), 'p1': 0.35, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
