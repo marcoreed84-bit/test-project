@@ -1,0 +1,46 @@
+
+==========================================================================================
+SILVER M15 -- horizontal S/R bounce (K_PIVOT, TOL_ATR, TARGET_R)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (5, 0.35, 3.0): IS n= 5517  IS %PF=0.375  long%=50
+   (5, 0.25, 3.0): IS n= 5830  IS %PF=0.362  long%=50
+   (10, 0.35, 3.0): IS n= 4663  IS %PF=0.361  long%=49
+   (20, 0.35, 3.0): IS n= 3836  IS %PF=0.351  long%=49
+   (10, 0.25, 3.0): IS n= 4866  IS %PF=0.347  long%=49
+   (5, 0.15, 3.0): IS n= 6098  IS %PF=0.346  long%=49
+   (20, 0.25, 3.0): IS n= 4023  IS %PF=0.343  long%=49
+   (5, 0.35, 2.0): IS n= 6517  IS %PF=0.341  long%=50
+FROZEN WINNER (IS only): (5, 0.35, 3.0)  IS n=5517  IS %PF=0.375
+IS sanity: random-timing IS pool median=0.379; IS winner vs best-of-27 random (median 0.411): p=1.0000
+OOS (untouched): n=4861  win%=27.9  %PF=0.709  sum%=-565.4  long%=51 (long %PF=0.707 n=2477, short %PF=0.711 n=2384)
+random-timing OOS null (1000 draws, p_fire=0.11679, mean n=4729 vs real 4861): median=0.695  p95=0.744
+REAL OOS %PF=0.709 -> 70.8th percentile; p(K=1)=0.2920 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.754) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.51): median=0.692  p(K=1)=0.2670
+
+==========================================================================================
+BTCUSD M15 -- horizontal S/R bounce (K_PIVOT, TOL_ATR, TARGET_R)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20, 0.35, 3.0): IS n= 2255  IS %PF=0.739  long%=50
+   (20, 0.15, 3.0): IS n= 2418  IS %PF=0.724  long%=50
+   (20, 0.25, 3.0): IS n= 2321  IS %PF=0.715  long%=50
+   (10, 0.25, 3.0): IS n= 2872  IS %PF=0.713  long%=51
+   (10, 0.35, 3.0): IS n= 2741  IS %PF=0.698  long%=50
+   (10, 0.35, 2.0): IS n= 3153  IS %PF=0.668  long%=51
+   (10, 0.15, 3.0): IS n= 2979  IS %PF=0.668  long%=51
+   (10, 0.25, 2.0): IS n= 3264  IS %PF=0.656  long%=52
+FROZEN WINNER (IS only): (20, 0.35, 3.0)  IS n=2255  IS %PF=0.739
+IS sanity: random-timing IS pool median=0.717; IS winner vs best-of-27 random (median 0.811): p=0.9998
+OOS (untouched): n=2323  win%=29.2  %PF=0.858  sum%=-134.0  long%=48 (long %PF=0.900 n=1109, short %PF=0.813 n=1214)
+random-timing OOS null (1000 draws, p_fire=0.05086, mean n=2356 vs real 2323): median=0.792  p95=0.870
+REAL OOS %PF=0.858 -> 91.9th percentile; p(K=1)=0.0810 [borderline]; p(K=27)=0.9060 (best-of-K median 0.884) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.48): median=0.792  p(K=1)=0.0810
+
+SUMMARY
+  {'label': 'SILVER M15 -- horizontal S/R bounce (K_PIVOT, TOL_ATR, TARGET_R)', 'K': 27, 'cfg': (5, 0.35, 3.0), 'is_n': 5517, 'is_pf': np.float64(0.3748116587424504), 'oos_n': 4861, 'oos_pf': np.float64(0.7087383701324407), 'p_is_k': 1.0, 'pctile': np.float64(70.8), 'p1': 0.292, 'pK': 1.0, 'p1_dir': 0.267, 'null_median': 0.6945444302111541, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- horizontal S/R bounce (K_PIVOT, TOL_ATR, TARGET_R)', 'K': 27, 'cfg': (20, 0.35, 3.0), 'is_n': 2255, 'is_pf': np.float64(0.7391629191557768), 'oos_n': 2323, 'oos_pf': np.float64(0.8578658514536829), 'p_is_k': 0.9998, 'pctile': np.float64(91.9), 'p1': 0.081, 'pK': 0.906, 'p1_dir': 0.081, 'null_median': 0.7920850414280249, 'verdict': 'DOES NOT SURVIVE'}
