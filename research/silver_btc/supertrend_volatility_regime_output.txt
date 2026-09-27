@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- SuperTrend + Volatility Regime Switch (ADX_TREND_TH, TIGHT_MULT, WIDE_MULT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (25.0, 2.5, 6.0): IS n= 1179  IS %PF=1.028
+   (30.0, 2.5, 6.0): IS n= 1092  IS %PF=1.020
+   (20.0, 2.5, 6.0): IS n= 1242  IS %PF=0.995
+   (25.0, 2.5, 4.5): IS n= 1177  IS %PF=0.982
+   (30.0, 2.5, 4.5): IS n= 1116  IS %PF=0.969
+   (30.0, 2.5, 3.5): IS n= 1101  IS %PF=0.953
+   (20.0, 2.5, 3.5): IS n= 1197  IS %PF=0.950
+   (25.0, 2.5, 3.5): IS n= 1152  IS %PF=0.944
+FROZEN WINNER (IS only): (25.0, 2.5, 6.0)  IS n=1179  IS %PF=1.028
+OOS (untouched): n=1058  win%=39.9  %PF=0.867  sum%=-48.8
+random-timing OOS null (1000 draws, p_fire=0.02418, mean n=1037): median=0.967  p95=1.129
+REAL OOS %PF=0.867 -> 11.6th percentile; p(K=1)=0.8840 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.162) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- SuperTrend + Volatility Regime Switch (ADX_TREND_TH, TIGHT_MULT, WIDE_MULT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (20.0, 2.5, 6.0): IS n= 1218  IS %PF=0.545
+   (20.0, 2.5, 4.5): IS n= 1226  IS %PF=0.511
+   (30.0, 2.5, 6.0): IS n= 1074  IS %PF=0.506
+   (20.0, 2.5, 3.5): IS n= 1209  IS %PF=0.499
+   (30.0, 2.5, 4.5): IS n= 1110  IS %PF=0.497
+   (25.0, 2.5, 4.5): IS n= 1197  IS %PF=0.488
+   (30.0, 1.75, 6.0): IS n= 1782  IS %PF=0.484
+   (25.0, 2.5, 6.0): IS n= 1162  IS %PF=0.478
+FROZEN WINNER (IS only): (20.0, 2.5, 6.0)  IS n=1218  IS %PF=0.545
+OOS (untouched): n=1137  win%=40.1  %PF=0.842  sum%=-110.6
+random-timing OOS null (1000 draws, p_fire=0.02712, mean n=1120): median=0.861  p95=0.982
+REAL OOS %PF=0.842 -> 40.1th percentile; p(K=1)=0.5990 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.012) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- SuperTrend + Volatility Regime Switch (ADX_TREND_TH, TIGHT_MULT, WIDE_MULT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (20.0, 2.5, 3.5): IS n=  668  IS %PF=0.764
+   (20.0, 1.25, 6.0): IS n= 2052  IS %PF=0.745
+   (20.0, 1.25, 4.5): IS n= 2072  IS %PF=0.745
+   (30.0, 2.5, 3.5): IS n=  611  IS %PF=0.736
+   (20.0, 2.5, 6.0): IS n=  673  IS %PF=0.733
+   (20.0, 1.75, 6.0): IS n= 1272  IS %PF=0.729
+   (30.0, 1.25, 4.5): IS n= 1666  IS %PF=0.716
+   (30.0, 1.25, 3.5): IS n= 1685  IS %PF=0.715
+FROZEN WINNER (IS only): (20.0, 2.5, 3.5)  IS n=668  IS %PF=0.764
+OOS (untouched): n=751  win%=41.4  %PF=0.975  sum%=-12.8
+random-timing OOS null (1000 draws, p_fire=0.02457, mean n=735): median=0.927  p95=1.092
+REAL OOS %PF=0.975 -> 68.7th percentile; p(K=1)=0.3130 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.128) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (25.0, 2.5, 6.0), 'is_n': 1179, 'is_pf': np.float64(1.027847370792528), 'oos_n': 1058, 'oos_pf': np.float64(0.8670978933585084), 'pctile': np.float64(11.600000000000001), 'p1': 0.884, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (20.0, 2.5, 6.0), 'is_n': 1218, 'is_pf': np.float64(0.544594236316379), 'oos_n': 1137, 'oos_pf': np.float64(0.8421121102294002), 'pctile': np.float64(40.1), 'p1': 0.599, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (20.0, 2.5, 3.5), 'is_n': 668, 'is_pf': np.float64(0.7638478040904461), 'oos_n': 751, 'oos_pf': np.float64(0.9751200353834072), 'pctile': np.float64(68.7), 'p1': 0.313, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
