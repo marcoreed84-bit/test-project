@@ -1,0 +1,16 @@
+GOLD H4 2013-01-02 00:00:00 -> 2026-09-25 20:00:00  n=20727 bars; zero-spread bars imputed at 30 pts; 70/30 cut at 2022-09-16 08:00:00
+
+REAL Ichimoku v1.07 shipped (PLAIN+ADX>20, minhold 8, 2.5xATR stop, Fri flatten):
+  n=179  win%=50.8  sum%=39.7  %PF=1.513   IS n=136 %PF=1.396 | OOS n=43 %PF=1.883
+
+random-timing null: p_fire=0.00989, 1000 draws, mean n=177 (target 179)
+  full-window null %PF median=0.956  p95=1.338
+  REAL full %PF=1.513 -> 99.0th percentile, one-sided p=0.0100
+  (supplementary) OOS-slice null median=0.967; REAL OOS %PF=1.883 -> 95.8th pct, p=0.0420
+  (supplementary) direction-matched null (p_long=0.51): median=0.984  p(K=1)=0.0210  p(K=20)=0.3416
+
+best-of-K correction (K_FILES=20 = this dir's research .py count; 50 = documented-scale):
+  K=  1: best-of-K median=0.958  p=0.0112  [SURVIVES]
+  K= 20: best-of-K median=1.385  p=0.1840  [DOES NOT SURVIVE]
+  K= 30: best-of-K median=1.424  p=0.2582  [DOES NOT SURVIVE]
+  K= 50: best-of-K median=1.468  p=0.3922  [DOES NOT SURVIVE]
