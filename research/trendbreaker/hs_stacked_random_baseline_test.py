@@ -1,10 +1,22 @@
 """
 Same random-timing/same-bracket baseline (Opus's Wolfe Wave check,
 2026-09-26) applied to HeadShoulders_EA's own real, shipped "stacked
-combo" (v1.08 default: pullback/retest entry 0.50xATR/30bar + BREAK_TOL_ATR
+combo" (v1.08 default: pullback/retest entry 0.75xATR/30bar + BREAK_TOL_ATR
 =0.35 + runner trail 0.5xATR after target, M15, both directions) - the user
 asked to re-run this against RoundingBottom and H&S before trusting them
 further.
+
+BUG FIX (2026-09-27, same stale-config-vs-real-shipped-EA class as the
+Ratchet/Aurelius/MSG fixes): RETEST_TOL was 0.50 here, but
+HeadShoulders_EA.mq5's real, current InpPullbackTolATR default is 0.75 -
+confirmed directly in the .mq5 source. hs_confluence_test.py already had
+the correct 0.75; this file (and everything that imports RETEST_TOL from
+it - hs_m15_oos_test.py, hs_silver_test.py, hs_causal_detection_check.py,
+hs_new_pattern_gate_test.py, multiple_testing_correction_test.py) did not.
+Found while doing a real-vs-sim trade-by-trade validation against the
+user's real Silver MT5 backtest. Corrected to 0.75; every downstream
+script re-run with the fix - see each file's own header for the
+before/after numbers.
 
 METHOD: reconstruct the real stacked-combo trades via
 hs_next_round_test.py's own eval_pullback_and_runner() (unmodified - that
@@ -30,7 +42,7 @@ from hs_next_round_test import find_breakouts_full, eval_pullback_and_runner, ST
 
 np.random.seed(42)
 N_RANDOM = 1500
-RETEST_TOL, RETEST_WINDOW, TRAIL_MULT = 0.50, 30, 0.5
+RETEST_TOL, RETEST_WINDOW, TRAIL_MULT = 0.75, 30, 0.5
 BREAK_TOL = 0.35
 MAX_HORIZON_CAP = 400
 
