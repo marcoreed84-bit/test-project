@@ -1,0 +1,45 @@
+
+==========================================================================================
+SILVER H4 -- Donchian breakout, turtle N/2 exit (ENTRY_N, STOP_ATR)
+SILVER: n=18951 bars 2014-06-12 00:00:00 -> 2026-09-25 20:00:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 16:00:00 (10091 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 20:00:00 (8860 bars, untouched)
+GRID K=8 (literal grid size); selection = highest IS %PF with IS n>=30
+==========================================================================================
+8/8 combos had IS n>=30; 7 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (40, 6.0): IS n=  133  IS %PF=1.236  long%=53
+   (40, 3.0): IS n=  145  IS %PF=1.189  long%=52
+   (20, 3.0): IS n=  245  IS %PF=1.110  long%=53
+   (80, 3.0): IS n=   99  IS %PF=1.084  long%=55
+   (20, 6.0): IS n=  243  IS %PF=1.072  long%=53
+   (80, 6.0): IS n=   86  IS %PF=1.034  long%=52
+   (160, 3.0): IS n=   61  IS %PF=1.001  long%=51
+   (160, 6.0): IS n=   51  IS %PF=0.873  long%=49
+FROZEN WINNER (IS only): (40, 6.0)  IS n=133  IS %PF=1.236
+IS sanity: random-timing IS pool median=1.171; IS winner vs best-of-8 random (median 1.549): p=0.9842
+OOS (untouched): n=134  win%=42.5  %PF=1.253  sum%=57.1  long%=50 (long %PF=2.185 n=67, short %PF=0.603 n=67)
+random-timing OOS null (1000 draws, p_fire=0.03031, mean n=132 vs real 134): median=1.044  p95=1.478
+REAL OOS %PF=1.253 -> 80.9th percentile; p(K=1)=0.1910 [DOES NOT SURVIVE]; p(K=8)=0.8180 (best-of-K median 1.406) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.50): median=1.049  p(K=1)=0.1870
+
+==========================================================================================
+BTCUSD H4 -- Donchian breakout, turtle N/2 exit (ENTRY_N, STOP_ATR)
+BTCUSD: n=17277 bars 2017-07-03 00:00:00 -> 2026-09-27 12:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 20:00:00 (5866 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:00:00 (6004 bars, untouched)
+GRID K=8 (literal grid size); selection = highest IS %PF with IS n>=30
+==========================================================================================
+7/8 combos had IS n>=30; 5 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (80, 3.0): IS n=   54  IS %PF=1.214  long%=52
+   (20, 6.0): IS n=  137  IS %PF=1.210  long%=50
+   (160, 3.0): IS n=   35  IS %PF=1.177  long%=49
+   (20, 3.0): IS n=  146  IS %PF=1.177  long%=49
+   (40, 6.0): IS n=   80  IS %PF=1.025  long%=51
+   (40, 3.0): IS n=   88  IS %PF=0.976  long%=50
+   (80, 6.0): IS n=   48  IS %PF=0.955  long%=54
+FROZEN WINNER (IS only): (80, 3.0)  IS n=54  IS %PF=1.214
+IS sanity: random-timing IS pool median=0.947; IS winner vs best-of-8 random (median 1.658): p=0.9132
+OOS (untouched): n=56  win%=30.4  %PF=1.241  sum%=36.5  long%=55 (long %PF=1.942 n=31, short %PF=0.707 n=25)
+random-timing OOS null (1000 draws, p_fire=0.02051, mean n=58 vs real 56): median=0.955  p95=1.599
+REAL OOS %PF=1.241 -> 78.6th percentile; p(K=1)=0.2140 [DOES NOT SURVIVE]; p(K=8)=0.8550 (best-of-K median 1.509) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.55): median=0.980  p(K=1)=0.2390
+
+SUMMARY
+  {'label': 'SILVER H4 -- Donchian breakout, turtle N/2 exit (ENTRY_N, STOP_ATR)', 'K': 8, 'cfg': (40, 6.0), 'is_n': 133, 'is_pf': np.float64(1.2363222721841816), 'oos_n': 134, 'oos_pf': np.float64(1.2528056945595094), 'p_is_k': 0.9842, 'pctile': np.float64(80.9), 'p1': 0.191, 'pK': 0.818, 'p1_dir': 0.187, 'null_median': 1.0436258400653653, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD H4 -- Donchian breakout, turtle N/2 exit (ENTRY_N, STOP_ATR)', 'K': 8, 'cfg': (80, 3.0), 'is_n': 54, 'is_pf': np.float64(1.2140106631940177), 'oos_n': 56, 'oos_pf': np.float64(1.240894228539318), 'p_is_k': 0.9132, 'pctile': np.float64(78.60000000000001), 'p1': 0.214, 'pK': 0.855, 'p1_dir': 0.239, 'null_median': 0.9551024471342544, 'verdict': 'DOES NOT SURVIVE'}
