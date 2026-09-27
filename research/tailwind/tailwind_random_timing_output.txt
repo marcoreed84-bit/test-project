@@ -1,0 +1,15 @@
+GOLD H4 trades from 2013-01-02 00:00:00 -> 2026-09-25 20:00:00; zero spreads imputed at 30 pts; 70/30 cut 2022-09-16 08:00:00
+
+REAL Tailwind v1.06 shipped: n=585 win%=29.1 sum%=21.4 %PF=1.084 | IS n=405 %PF=0.979 | OOS n=180 %PF=1.301
+
+random-timing null: p_fire=0.03610, 1000 draws, mean n=564 (target 585)
+  null %PF median=0.998  p95=1.244
+  REAL %PF=1.084 -> 73.1th percentile, one-sided p=0.2690
+  (supplementary) OOS-slice null median=1.107; REAL OOS %PF=1.301 -> p=0.2560
+  (supplementary) direction-matched null (p_long=0.51): median=1.003 p(K=1)=0.2850
+
+best-of-K correction (K_FILES=4; 30/50 = documented-scale reference):
+  K=  1: best-of-K median=0.993  p=0.2610  [DOES NOT SURVIVE]
+  K=  4: best-of-K median=1.149  p=0.7122  [DOES NOT SURVIVE]
+  K= 30: best-of-K median=1.320  p=1.0000  [DOES NOT SURVIVE]
+  K= 50: best-of-K median=1.375  p=1.0000  [DOES NOT SURVIVE]
