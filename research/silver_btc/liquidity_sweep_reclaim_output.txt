@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Liquidity Sweep + Reclaim (TP2_RR, SL_BUFFER_TICKS, SWING_LENGTH)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (4.0, 5.0, 10): IS n= 9027  IS %PF=0.811
+   (4.0, 3.0, 20): IS n= 8315  IS %PF=0.810
+   (4.0, 1.0, 20): IS n= 8404  IS %PF=0.808
+   (4.0, 5.0, 20): IS n= 8175  IS %PF=0.808
+   (4.0, 1.0, 10): IS n= 9325  IS %PF=0.807
+   (4.0, 3.0, 10): IS n= 9207  IS %PF=0.806
+   (4.0, 5.0, 5): IS n=10155  IS %PF=0.803
+   (4.0, 3.0, 5): IS n=10313  IS %PF=0.800
+FROZEN WINNER (IS only): (4.0, 5.0, 10)  IS n=9027  IS %PF=0.811
+OOS (untouched): n=8731  win%=20.7  %PF=0.945  sum%=-52.6
+random-timing OOS null (1000 draws, p_fire=0.27562, mean n=8500): median=0.907  p95=0.961
+REAL OOS %PF=0.945 -> 88.8th percentile; p(K=1)=0.1120 [borderline]; p(K=27)=0.9524 (best-of-K median 0.971) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Liquidity Sweep + Reclaim (TP2_RR, SL_BUFFER_TICKS, SWING_LENGTH)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (4.0, 5.0, 20): IS n= 6431  IS %PF=0.388
+   (4.0, 3.0, 20): IS n= 6990  IS %PF=0.373
+   (4.0, 5.0, 10): IS n= 7108  IS %PF=0.372
+   (4.0, 5.0, 5): IS n= 7727  IS %PF=0.363
+   (4.0, 1.0, 20): IS n= 7449  IS %PF=0.349
+   (4.0, 3.0, 10): IS n= 7745  IS %PF=0.349
+   (3.0, 5.0, 20): IS n= 7800  IS %PF=0.345
+   (4.0, 3.0, 5): IS n= 8415  IS %PF=0.339
+FROZEN WINNER (IS only): (4.0, 5.0, 20)  IS n=6431  IS %PF=0.388
+OOS (untouched): n=7314  win%=20.7  %PF=0.655  sum%=-807.7
+random-timing OOS null (1000 draws, p_fire=0.23177, mean n=7149): median=0.627  p95=0.670
+REAL OOS %PF=0.655 -> 85.5th percentile; p(K=1)=0.1450 [borderline]; p(K=27)=0.9846 (best-of-K median 0.677) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Liquidity Sweep + Reclaim (TP2_RR, SL_BUFFER_TICKS, SWING_LENGTH)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (4.0, 5.0, 20): IS n= 4351  IS %PF=0.654
+   (4.0, 3.0, 20): IS n= 4352  IS %PF=0.654
+   (4.0, 1.0, 20): IS n= 4355  IS %PF=0.653
+   (4.0, 5.0, 10): IS n= 4999  IS %PF=0.646
+   (4.0, 3.0, 10): IS n= 4999  IS %PF=0.646
+   (4.0, 1.0, 10): IS n= 5003  IS %PF=0.645
+   (4.0, 3.0, 5): IS n= 5822  IS %PF=0.637
+   (4.0, 5.0, 5): IS n= 5822  IS %PF=0.637
+FROZEN WINNER (IS only): (4.0, 5.0, 20)  IS n=4351  IS %PF=0.654
+OOS (untouched): n=4926  win%=20.9  %PF=0.767  sum%=-368.9
+random-timing OOS null (1000 draws, p_fire=0.16122, mean n=4778): median=0.720  p95=0.777
+REAL OOS %PF=0.767 -> 91.9th percentile; p(K=1)=0.0810 [borderline]; p(K=27)=0.8962 (best-of-K median 0.790) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (4.0, 5.0, 10), 'is_n': 9027, 'is_pf': np.float64(0.8107863913313803), 'oos_n': 8731, 'oos_pf': np.float64(0.9454532234454185), 'pctile': np.float64(88.8), 'p1': 0.112, 'pK': 0.9524, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (4.0, 5.0, 20), 'is_n': 6431, 'is_pf': np.float64(0.38787832127686106), 'oos_n': 7314, 'oos_pf': np.float64(0.6550570820595782), 'pctile': np.float64(85.5), 'p1': 0.145, 'pK': 0.9846, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (4.0, 5.0, 20), 'is_n': 4351, 'is_pf': np.float64(0.6543156294403955), 'oos_n': 4926, 'oos_pf': np.float64(0.7673613216401088), 'pctile': np.float64(91.9), 'p1': 0.081, 'pK': 0.8962, 'verdict': 'DOES NOT SURVIVE'}
