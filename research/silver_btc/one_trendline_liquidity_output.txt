@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- 1 Trendline Strategy (PIVOT_LEN, SPACE, TP_MULT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (4, 2.0, 30.0): IS n=  299  IS %PF=1.395
+   (4, 4.0, 30.0): IS n=  297  IS %PF=1.378
+   (4, 8.0, 30.0): IS n=  290  IS %PF=1.331
+   (6, 4.0, 30.0): IS n=  283  IS %PF=1.246
+   (6, 2.0, 30.0): IS n=  285  IS %PF=1.212
+   (10, 8.0, 30.0): IS n=  288  IS %PF=1.153
+   (10, 2.0, 30.0): IS n=  279  IS %PF=1.139
+   (4, 8.0, 10.0): IS n=  641  IS %PF=1.123
+FROZEN WINNER (IS only): (4, 2.0, 30.0)  IS n=299  IS %PF=1.395
+OOS (untouched): n=270  win%=20.4  %PF=0.983  sum%=-3.9
+random-timing OOS null (1000 draws, p_fire=0.01355, mean n=255): median=1.076  p95=1.378
+REAL OOS %PF=0.983 -> 30.9th percentile; p(K=1)=0.6910 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.459) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- 1 Trendline Strategy (PIVOT_LEN, SPACE, TP_MULT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (10, 2.0, 30.0): IS n=  290  IS %PF=0.905
+   (10, 2.0, 20.0): IS n=  333  IS %PF=0.859
+   (4, 4.0, 10.0): IS n=  571  IS %PF=0.849
+   (6, 4.0, 20.0): IS n=  349  IS %PF=0.837
+   (4, 2.0, 10.0): IS n=  577  IS %PF=0.829
+   (6, 8.0, 20.0): IS n=  354  IS %PF=0.814
+   (6, 4.0, 10.0): IS n=  586  IS %PF=0.807
+   (4, 8.0, 10.0): IS n=  591  IS %PF=0.801
+FROZEN WINNER (IS only): (10, 2.0, 30.0)  IS n=290  IS %PF=0.905
+OOS (untouched): n=233  win%=22.3  %PF=1.033  sum%=13.0
+random-timing OOS null (1000 draws, p_fire=0.00516, mean n=220): median=0.954  p95=1.268
+REAL OOS %PF=1.033 -> 65.6th percentile; p(K=1)=0.3440 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.353) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- 1 Trendline Strategy (PIVOT_LEN, SPACE, TP_MULT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (10, 8.0, 30.0): IS n=  141  IS %PF=1.313
+   (4, 4.0, 30.0): IS n=  137  IS %PF=1.205
+   (10, 4.0, 30.0): IS n=  150  IS %PF=1.205
+   (10, 2.0, 30.0): IS n=  151  IS %PF=1.195
+   (4, 2.0, 30.0): IS n=  133  IS %PF=1.136
+   (10, 4.0, 10.0): IS n=  310  IS %PF=1.085
+   (10, 2.0, 10.0): IS n=  306  IS %PF=1.071
+   (4, 8.0, 30.0): IS n=  139  IS %PF=1.071
+FROZEN WINNER (IS only): (10, 8.0, 30.0)  IS n=141  IS %PF=1.313
+OOS (untouched): n=181  win%=24.9  %PF=1.300  sum%=97.9
+random-timing OOS null (1000 draws, p_fire=0.01858, mean n=160): median=1.042  p95=1.462
+REAL OOS %PF=1.300 -> 85.0th percentile; p(K=1)=0.1500 [DOES NOT SURVIVE]; p(K=27)=0.9890 (best-of-K median 1.553) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (4, 2.0, 30.0), 'is_n': 299, 'is_pf': np.float64(1.3953798567548827), 'oos_n': 270, 'oos_pf': np.float64(0.9832569574617358), 'pctile': np.float64(30.9), 'p1': 0.691, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (10, 2.0, 30.0), 'is_n': 290, 'is_pf': np.float64(0.9054349016686563), 'oos_n': 233, 'oos_pf': np.float64(1.0331412734966783), 'pctile': np.float64(65.60000000000001), 'p1': 0.344, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (10, 8.0, 30.0), 'is_n': 141, 'is_pf': np.float64(1.3133733188311678), 'oos_n': 181, 'oos_pf': np.float64(1.2999649084926634), 'pctile': np.float64(85.0), 'p1': 0.15, 'pK': 0.989, 'verdict': 'DOES NOT SURVIVE'}
