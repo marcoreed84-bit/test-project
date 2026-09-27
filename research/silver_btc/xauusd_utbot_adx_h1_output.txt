@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- XAUUSD UT Bot+ADX+1H EMA200, long-only (ADX_THRESH, TP_PCT, SL_PCT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 16 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20.0, 2.0, 1.0): IS n=  300  IS %PF=1.072  long%=100
+   (30.0, 2.0, 0.5): IS n=  332  IS %PF=1.057  long%=100
+   (30.0, 1.0, 1.0): IS n=  332  IS %PF=1.054  long%=100
+   (30.0, 2.0, 1.0): IS n=  237  IS %PF=1.051  long%=100
+   (20.0, 1.5, 1.0): IS n=  362  IS %PF=1.049  long%=100
+   (25.0, 1.0, 1.5): IS n=  322  IS %PF=1.046  long%=100
+   (20.0, 1.5, 1.5): IS n=  291  IS %PF=1.040  long%=100
+   (30.0, 1.0, 1.5): IS n=  276  IS %PF=1.038  long%=100
+FROZEN WINNER (IS only): (20.0, 2.0, 1.0)  IS n=300  IS %PF=1.072
+IS sanity: random-timing IS pool median=0.969; IS winner vs best-of-27 random (median 1.310): p=0.9996
+OOS (untouched): n=349  win%=40.4  %PF=1.330  sum%=69.7  long%=100 (long %PF=1.330 n=349, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.00707, mean n=355 vs real 349): median=1.000  p95=1.251
+REAL OOS %PF=1.330 -> 97.4th percentile; p(K=1)=0.0260 [SURVIVES]; p(K=27)=0.5092 (best-of-K median 1.332) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=1.244  p(K=1)=0.2060
+
+==========================================================================================
+SILVER M15 -- XAUUSD UT Bot+ADX+1H EMA200, long-only (ADX_THRESH, TP_PCT, SL_PCT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (30.0, 2.0, 1.5): IS n=  314  IS %PF=0.742  long%=100
+   (20.0, 2.0, 1.5): IS n=  475  IS %PF=0.742  long%=100
+   (30.0, 1.5, 1.5): IS n=  348  IS %PF=0.707  long%=100
+   (25.0, 2.0, 1.5): IS n=  412  IS %PF=0.703  long%=100
+   (20.0, 1.5, 1.5): IS n=  565  IS %PF=0.700  long%=100
+   (25.0, 1.5, 1.5): IS n=  463  IS %PF=0.678  long%=100
+   (30.0, 2.0, 1.0): IS n=  368  IS %PF=0.675  long%=100
+   (20.0, 2.0, 1.0): IS n=  603  IS %PF=0.666  long%=100
+FROZEN WINNER (IS only): (30.0, 2.0, 1.5)  IS n=314  IS %PF=0.742
+IS sanity: random-timing IS pool median=0.739; IS winner vs best-of-27 random (median 0.972): p=1.0000
+OOS (untouched): n=336  win%=46.4  %PF=1.012  sum%=3.5  long%=100 (long %PF=1.012 n=336, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.00357, mean n=338 vs real 336): median=0.871  p95=1.083
+REAL OOS %PF=1.012 -> 87.0th percentile; p(K=1)=0.1300 [borderline]; p(K=27)=0.9754 (best-of-K median 1.136) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=0.940  p(K=1)=0.2730
+
+==========================================================================================
+BTCUSD M15 -- XAUUSD UT Bot+ADX+1H EMA200, long-only (ADX_THRESH, TP_PCT, SL_PCT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (25.0, 2.0, 1.5): IS n=  365  IS %PF=0.790  long%=100
+   (30.0, 2.0, 1.0): IS n=  261  IS %PF=0.789  long%=100
+   (20.0, 2.0, 1.5): IS n=  508  IS %PF=0.787  long%=100
+   (25.0, 2.0, 1.0): IS n=  400  IS %PF=0.762  long%=100
+   (30.0, 2.0, 1.5): IS n=  249  IS %PF=0.745  long%=100
+   (25.0, 1.5, 1.5): IS n=  375  IS %PF=0.742  long%=100
+   (20.0, 1.5, 1.5): IS n=  537  IS %PF=0.739  long%=100
+   (20.0, 2.0, 1.0): IS n=  592  IS %PF=0.725  long%=100
+FROZEN WINNER (IS only): (25.0, 2.0, 1.5)  IS n=365  IS %PF=0.790
+IS sanity: random-timing IS pool median=0.831; IS winner vs best-of-27 random (median 1.105): p=1.0000
+OOS (untouched): n=358  win%=45.5  %PF=1.003  sum%=1.0  long%=100 (long %PF=1.003 n=358, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.00637, mean n=359 vs real 358): median=0.921  p95=1.149
+REAL OOS %PF=1.003 -> 76.3th percentile; p(K=1)=0.2370 [DOES NOT SURVIVE]; p(K=27)=0.9988 (best-of-K median 1.197) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=0.971  p(K=1)=0.3790
+
+SUMMARY
+  {'label': 'GOLD M15 -- XAUUSD UT Bot+ADX+1H EMA200, long-only (ADX_THRESH, TP_PCT, SL_PCT)', 'K': 27, 'cfg': (20.0, 2.0, 1.0), 'is_n': 300, 'is_pf': np.float64(1.0718074888261662), 'oos_n': 349, 'oos_pf': np.float64(1.3302365206096463), 'p_is_k': 0.9996, 'pctile': np.float64(97.39999999999999), 'p1': 0.026, 'pK': 0.5092, 'p1_dir': 0.206, 'null_median': 0.9995313855507739, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- XAUUSD UT Bot+ADX+1H EMA200, long-only (ADX_THRESH, TP_PCT, SL_PCT)', 'K': 27, 'cfg': (30.0, 2.0, 1.5), 'is_n': 314, 'is_pf': np.float64(0.7422402554745904), 'oos_n': 336, 'oos_pf': np.float64(1.0121702284328362), 'p_is_k': 1.0, 'pctile': np.float64(87.0), 'p1': 0.13, 'pK': 0.9754, 'p1_dir': 0.273, 'null_median': 0.8707291184122918, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- XAUUSD UT Bot+ADX+1H EMA200, long-only (ADX_THRESH, TP_PCT, SL_PCT)', 'K': 27, 'cfg': (25.0, 2.0, 1.5), 'is_n': 365, 'is_pf': np.float64(0.7895810509492283), 'oos_n': 358, 'oos_pf': np.float64(1.0033262437467003), 'p_is_k': 1.0, 'pctile': np.float64(76.3), 'p1': 0.237, 'pK': 0.9988, 'p1_dir': 0.379, 'null_median': 0.9214595937568927, 'verdict': 'DOES NOT SURVIVE'}

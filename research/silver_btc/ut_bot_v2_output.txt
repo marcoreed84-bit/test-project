@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- UT Bot v2 (MULT, ATR_LEN)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=15 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+15/15 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 10): IS n= 1964  IS %PF=0.858  long%=0
+   (3.0, 14): IS n= 1984  IS %PF=0.850  long%=0
+   (3.0, 7): IS n= 1978  IS %PF=0.849  long%=0
+   (2.0, 14): IS n= 3671  IS %PF=0.773  long%=0
+   (2.0, 10): IS n= 3637  IS %PF=0.765  long%=0
+   (2.0, 7): IS n= 3635  IS %PF=0.763  long%=0
+   (1.5, 7): IS n= 5486  IS %PF=0.733  long%=0
+   (1.5, 10): IS n= 5486  IS %PF=0.733  long%=0
+FROZEN WINNER (IS only): (3.0, 10)  IS n=1964  IS %PF=0.858
+IS sanity: random-timing IS pool median=0.893; IS winner vs best-of-15 random (median 1.005): p=1.0000
+OOS (untouched): n=1847  win%=32.2  %PF=0.890  sum%=-47.4  long%=0 (long %PF=nan n=0, short %PF=0.890 n=1847)
+random-timing OOS null (1000 draws, p_fire=0.04091, mean n=1796 vs real 1847): median=0.958  p95=1.081
+REAL OOS %PF=0.890 -> 16.2th percentile; p(K=1)=0.8380 [DOES NOT SURVIVE]; p(K=15)=1.0000 (best-of-K median 1.088) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.00): median=0.837  p(K=1)=0.0070
+
+==========================================================================================
+SILVER M15 -- UT Bot v2 (MULT, ATR_LEN)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=15 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+15/15 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 14): IS n= 2109  IS %PF=0.437  long%=100
+   (3.0, 10): IS n= 2085  IS %PF=0.403  long%=0
+   (3.0, 7): IS n= 2099  IS %PF=0.399  long%=0
+   (2.0, 10): IS n= 3842  IS %PF=0.352  long%=100
+   (2.0, 7): IS n= 3823  IS %PF=0.351  long%=100
+   (2.0, 14): IS n= 3878  IS %PF=0.347  long%=100
+   (1.5, 14): IS n= 5867  IS %PF=0.278  long%=100
+   (1.5, 7): IS n= 5844  IS %PF=0.278  long%=100
+FROZEN WINNER (IS only): (3.0, 14)  IS n=2109  IS %PF=0.437
+IS sanity: random-timing IS pool median=0.462; IS winner vs best-of-15 random (median 0.518): p=1.0000
+OOS (untouched): n=1959  win%=31.8  %PF=0.799  sum%=-193.1  long%=100 (long %PF=0.799 n=1959, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.04481, mean n=1917 vs real 1959): median=0.760  p95=0.849
+REAL OOS %PF=0.799 -> 74.0th percentile; p(K=1)=0.2600 [DOES NOT SURVIVE]; p(K=15)=0.9912 (best-of-K median 0.851) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=0.866  p(K=1)=0.9990
+
+==========================================================================================
+BTCUSD M15 -- UT Bot v2 (MULT, ATR_LEN)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=15 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+15/15 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (3.0, 10): IS n= 1037  IS %PF=0.958  long%=100
+   (3.0, 14): IS n= 1051  IS %PF=0.946  long%=100
+   (3.0, 7): IS n= 1037  IS %PF=0.945  long%=100
+   (2.0, 7): IS n= 2080  IS %PF=0.674  long%=0
+   (1.5, 14): IS n= 3206  IS %PF=0.670  long%=100
+   (1.5, 10): IS n= 3200  IS %PF=0.665  long%=100
+   (1.5, 7): IS n= 3197  IS %PF=0.664  long%=100
+   (2.0, 10): IS n= 2117  IS %PF=0.663  long%=0
+FROZEN WINNER (IS only): (3.0, 10)  IS n=1037  IS %PF=0.958
+IS sanity: random-timing IS pool median=0.857; IS winner vs best-of-15 random (median 1.016): p=0.8776
+OOS (untouched): n=1275  win%=33.9  %PF=0.989  sum%=-6.6  long%=100 (long %PF=0.989 n=1275, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.03989, mean n=1237 vs real 1275): median=0.882  p95=1.016
+REAL OOS %PF=0.989 -> 88.7th percentile; p(K=1)=0.1130 [borderline]; p(K=15)=0.8346 (best-of-K median 1.019) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=0.994  p(K=1)=0.5510
+
+SUMMARY
+  {'label': 'GOLD M15 -- UT Bot v2 (MULT, ATR_LEN)', 'K': 15, 'cfg': (3.0, 10), 'is_n': 1964, 'is_pf': np.float64(0.857763195051618), 'oos_n': 1847, 'oos_pf': np.float64(0.8898571538643079), 'p_is_k': 1.0, 'pctile': np.float64(16.2), 'p1': 0.838, 'pK': 1.0, 'p1_dir': 0.007, 'null_median': 0.9584778521644169, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- UT Bot v2 (MULT, ATR_LEN)', 'K': 15, 'cfg': (3.0, 14), 'is_n': 2109, 'is_pf': np.float64(0.4368213689664967), 'oos_n': 1959, 'oos_pf': np.float64(0.7988608157779136), 'p_is_k': 1.0, 'pctile': np.float64(74.0), 'p1': 0.26, 'pK': 0.9912, 'p1_dir': 0.999, 'null_median': 0.7601570771128106, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- UT Bot v2 (MULT, ATR_LEN)', 'K': 15, 'cfg': (3.0, 10), 'is_n': 1037, 'is_pf': np.float64(0.9578422580018332), 'oos_n': 1275, 'oos_pf': np.float64(0.9894924125490008), 'p_is_k': 0.8776, 'pctile': np.float64(88.7), 'p1': 0.113, 'pK': 0.8346, 'p1_dir': 0.551, 'null_median': 0.8818871035427387, 'verdict': 'DOES NOT SURVIVE'}
