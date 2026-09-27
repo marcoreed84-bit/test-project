@@ -1,0 +1,38 @@
+==============================================================================
+SILVER M5 -- Meridian v1.07 frozen defaults (point=0.001)
+==============================================================================
+data: n=300000 M5 bars, 2022-07-04 01:50:00 -> 2026-09-25 23:55:00 (4.23 yrs) - native export start (300000-row cap), never touched by any parameter search
+
+REAL Meridian M5 (frozen v1.07, unchanged) on SILVER:
+  n=3026  win%=15.1  %PF=0.655
+Calibrated p_fire=0.014466
+Running 600 random-entry/coin-flip-direction baselines on SILVER...
+  random-entry %PF distribution: median=0.586  p95=0.662
+
+  REAL %PF=0.655 sits at the 93.3th percentile (one-sided p=0.0667)
+
+Multiple-testing correction (best-of-K; K=15 is Meridian's own gold tuning-history estimate):
+  K=   1: best-of-K median=0.586  p=0.0656  [borderline]
+  K=  15: best-of-K median=0.664  p=0.6474  [DOES NOT SURVIVE]
+  K=  30: best-of-K median=0.677  p=0.8752  [DOES NOT SURVIVE]
+  K=  50: best-of-K median=0.686  p=0.9646  [DOES NOT SURVIVE]
+
+==============================================================================
+BTCUSD M5 -- Meridian v1.07 frozen defaults (point=0.01)
+==============================================================================
+data: n=300000 M5 bars, 2023-11-17 11:25:00 -> 2026-09-27 12:15:00 (2.86 yrs) - native export start (300000-row cap), never touched by any parameter search
+
+REAL Meridian M5 (frozen v1.07, unchanged) on BTCUSD:
+  n=3013  win%=18.9  %PF=0.795
+Calibrated p_fire=0.014620
+Running 600 random-entry/coin-flip-direction baselines on BTCUSD...
+  random-entry %PF distribution: median=0.684  p95=0.762
+
+  REAL %PF=0.795 sits at the 98.3th percentile (one-sided p=0.0167)
+
+Multiple-testing correction (best-of-K; K=15 is Meridian's own gold tuning-history estimate):
+  K=   1: best-of-K median=0.685  p=0.0158  [SURVIVES]
+  K=  15: best-of-K median=0.764  p=0.2230  [DOES NOT SURVIVE]
+  K=  30: best-of-K median=0.777  p=0.3994  [DOES NOT SURVIVE]
+  K=  50: best-of-K median=0.809  p=0.5676  [DOES NOT SURVIVE]
+

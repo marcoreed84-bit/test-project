@@ -1,0 +1,67 @@
+================================================================================================
+GOLD M5 2022-07-04 01:40:00 -> 2026-09-25 21:00:00 (300000 bars) point=0.01 median spread=30 pts (1.24 bp of price)
+  msim V102 frozen: max_spread=60 pts (gate=scaled), entry_from_min=65, hour0_reject=True, stop=2.5xATR, Friday flatten 22:00
+  REAL: n=2638 win%=25.1 sum%=68.6 %PF=1.215 | first70% n=1881 %PF=1.053 | last30% n=757 %PF=1.477 | exits {'SL': 1340, 'REVERSAL': 1194, 'FRIDAY': 103, 'END': 1} | spread-blocked crosses 12
+  random-timing null (1000 draws, p_fire=0.01416, mean n=2592 vs real 2638): median=0.940 p95=1.048
+  REAL %PF=1.215 -> 100.0th percentile, p(K=1)=0.0000
+  (supplementary) direction-matched null p_long=0.53: median=0.950 p(K=1)=0.0000
+    K=  1: best-of-K median=0.940 p=0.0000 [SURVIVES]
+    K= 15: best-of-K median=1.052 p=0.0000 [SURVIVES]
+    K= 30: best-of-K median=1.071 p=0.0000 [SURVIVES]
+    K= 50: best-of-K median=1.081 p=0.0000 [SURVIVES]
+  VERDICT: SURVIVES
+================================================================================================
+SILVER M5 2022-07-04 01:50:00 -> 2026-09-25 23:55:00 (300000 bars) point=0.001 median spread=34 pts (11.93 bp of price)
+  msim V102 frozen: max_spread=68 pts (gate=scaled), entry_from_min=65, hour0_reject=True, stop=2.5xATR, Friday flatten 22:00
+  REAL: n=2787 win%=15.6 sum%=-296.9 %PF=0.638 | first70% n=2054 %PF=0.504 | last30% n=733 %PF=0.901 | exits {'SL': 1942, 'REVERSAL': 770, 'FRIDAY': 75} | spread-blocked crosses 58
+  random-timing null (1000 draws, p_fire=0.01318, mean n=2728 vs real 2787): median=0.575 p95=0.652
+  REAL %PF=0.638 -> 91.1th percentile, p(K=1)=0.0890
+  (supplementary) direction-matched null p_long=0.52: median=0.577 p(K=1)=0.0920
+    K=  1: best-of-K median=0.575 p=0.0942 [borderline]
+    K= 15: best-of-K median=0.654 p=0.7434 [DOES NOT SURVIVE]
+    K= 30: best-of-K median=0.670 p=0.9382 [DOES NOT SURVIVE]
+    K= 50: best-of-K median=0.674 p=0.9902 [DOES NOT SURVIVE]
+  VERDICT: DOES NOT SURVIVE (net loser, %PF<=1)
+================================================================================================
+BTCUSD M5 2023-11-17 11:25:00 -> 2026-09-27 12:15:00 (300000 bars) point=0.01 median spread=6000 pts (7.69 bp of price)
+  msim V102 frozen: max_spread=12000 pts (gate=scaled), entry_from_min=0, hour0_reject=False, stop=2.5xATR, Friday flatten 22:00
+  REAL: n=2855 win%=19.3 sum%=-136.8 %PF=0.827 | first70% n=2013 %PF=0.833 | last30% n=842 %PF=0.811 | exits {'SL': 1824, 'REVERSAL': 963, 'FRIDAY': 67, 'END': 1} | spread-blocked crosses 0
+  random-timing null (1000 draws, p_fire=0.01373, mean n=2775 vs real 2855): median=0.693 p95=0.774
+  REAL %PF=0.827 -> 99.9th percentile, p(K=1)=0.0010
+  (supplementary) direction-matched null p_long=0.52: median=0.695 p(K=1)=0.0080
+    K=  1: best-of-K median=0.694 p=0.0010 [SURVIVES]
+    K= 15: best-of-K median=0.777 p=0.0114 [SURVIVES]
+    K= 30: best-of-K median=0.792 p=0.0278 [SURVIVES]
+    K= 50: best-of-K median=0.802 p=0.0442 [SURVIVES]
+  VERDICT: DOES NOT SURVIVE (net loser, %PF<=1, though it beats random timing)
+================================================================================================
+SILVER M5 2022-07-04 01:50:00 -> 2026-09-25 23:55:00 (300000 bars) point=0.001 median spread=34 pts (11.93 bp of price)
+  msim V102 frozen: max_spread=0 pts (gate=off), entry_from_min=65, hour0_reject=True, stop=2.5xATR, Friday flatten 22:00
+  REAL: n=2818 win%=15.6 sum%=-294.6 %PF=0.645 | first70% n=2054 %PF=0.504 | last30% n=764 %PF=0.913 | exits {'SL': 1963, 'REVERSAL': 780, 'FRIDAY': 75} | spread-blocked crosses 0
+  random-timing null (500 draws, p_fire=0.01325, mean n=2764 vs real 2818): median=0.578 p95=0.654
+  REAL %PF=0.645 -> 94.0th percentile, p(K=1)=0.0600
+  (supplementary) direction-matched null p_long=0.52: median=0.577 p(K=1)=0.0680
+    K=  1: best-of-K median=0.577 p=0.0608 [borderline]
+    K= 15: best-of-K median=0.655 p=0.6152 [DOES NOT SURVIVE]
+    K= 30: best-of-K median=0.666 p=0.8470 [DOES NOT SURVIVE]
+    K= 50: best-of-K median=0.673 p=0.9542 [DOES NOT SURVIVE]
+  VERDICT: DOES NOT SURVIVE (net loser, %PF<=1)
+================================================================================================
+BTCUSD M5 2023-11-17 11:25:00 -> 2026-09-27 12:15:00 (300000 bars) point=0.01 median spread=6000 pts (7.69 bp of price)
+  msim V102 frozen: max_spread=0 pts (gate=off), entry_from_min=0, hour0_reject=False, stop=2.5xATR, Friday flatten 22:00
+  REAL: n=2855 win%=19.3 sum%=-136.8 %PF=0.827 | first70% n=2013 %PF=0.833 | last30% n=842 %PF=0.811 | exits {'SL': 1824, 'REVERSAL': 963, 'FRIDAY': 67, 'END': 1} | spread-blocked crosses 0
+  random-timing null (500 draws, p_fire=0.01373, mean n=2774 vs real 2855): median=0.694 p95=0.779
+  REAL %PF=0.827 -> 99.8th percentile, p(K=1)=0.0020
+  (supplementary) direction-matched null p_long=0.52: median=0.695 p(K=1)=0.0080
+    K=  1: best-of-K median=0.694 p=0.0020 [SURVIVES]
+    K= 15: best-of-K median=0.781 p=0.0262 [SURVIVES]
+    K= 30: best-of-K median=0.793 p=0.0528 [borderline]
+    K= 50: best-of-K median=0.811 p=0.0890 [borderline]
+  VERDICT: DOES NOT SURVIVE (net loser, %PF<=1, though it beats random timing)
+
+SUMMARY (msim.py = the EA-faithful Meridian model; K_REAL=15)
+  GOLD    gate=scaled n= 2638 %PF=1.215 pctile=100.0 p(K=1)=0.0000 p(K=15)=0.0000 -> SURVIVES
+  SILVER  gate=scaled n= 2787 %PF=0.638 pctile=91.1 p(K=1)=0.0942 p(K=15)=0.7434 -> DOES NOT SURVIVE (net loser, %PF<=1)
+  BTCUSD  gate=scaled n= 2855 %PF=0.827 pctile=99.9 p(K=1)=0.0010 p(K=15)=0.0114 -> DOES NOT SURVIVE (net loser, %PF<=1, though it beats random timing)
+  SILVER  gate=off    n= 2818 %PF=0.645 pctile=94.0 p(K=1)=0.0608 p(K=15)=0.6152 -> DOES NOT SURVIVE (net loser, %PF<=1)
+  BTCUSD  gate=off    n= 2855 %PF=0.827 pctile=99.8 p(K=1)=0.0020 p(K=15)=0.0262 -> DOES NOT SURVIVE (net loser, %PF<=1, though it beats random timing)

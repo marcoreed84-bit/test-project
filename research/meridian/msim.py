@@ -84,6 +84,15 @@ class MP:
     entry_filter: Optional[Callable] = None     # f(ctx, t, dir) -> bool
     exit_fn: Optional[Callable] = None          # f(ctx, t, pos) -> reason or None (checked at bar open)
     manage_fn: Optional[Callable] = None        # f(ctx, t, pos) -> None (may move pos['sl'])
+    # cross-asset / rigor hooks (2026-09-27). Defaults are byte-identical to the GOLD# behaviour above.
+    point: Optional[float] = None               # None = module POINT (GOLD 0.01). SILVER=0.001, BTCUSD=0.01 -
+                                                # read from each CSV's own meta_point, never assumed
+    hour0_reject: bool = True                   # GOLD# session quirk (hour-0 bars sit outside the broker session
+                                                # table, so a REVERSAL close there is rejected). False for a symbol
+                                                # whose hour-0 bars are normal trading (e.g. 24/7 BTCUSD)
+    entry_fn: Optional[Callable] = None         # random-timing null: f(ctx, t) -> +1/-1/0 REPLACES the cross +
+                                                # confirm-MA + VWAP + S/R decision; every gate after it (spread,
+                                                # entry filter) and every exit rule is unchanged
 
 
 V102 = MP()                                           # shipped v1.02 = Backtest_2
@@ -161,28 +170,40 @@ def simulate(ctx, p=V102, start=WIN_START, end=WIN_END):
     def try_entry(t, sp):
         nonlocal pos
         s = t - 1
-        if above[s] == above[s - 1]:
-            return
-        if ctx["mod"][t] < p.entry_from_min:
-            stats["blk_session"] = stats.get("blk_session", 0) + 1
-            return
-        d = 1 if above[s] else -1
-        stats["crosses"] += 1
-        if p.max_spread > 0 and spread[t] > p.max_spread:
-            stats["blk_spread"] += 1
-            return
-        if np.isnan(mc[s]):
-            return
-        ok = (c[s] > mc[s]) if d > 0 else (c[s] < mc[s])
-        if p.use_vwap:
-            ok = ok and ((c[s] > vwap[s]) if d > 0 else (c[s] < vwap[s]))
-        if not ok:
-            stats["blk_conf"] += 1
-            return
-        a = atr[s]
-        if not (a > 0):
-            return
-        if p.use_sr and not np.isnan(srh[t]):
+        if p.entry_fn is not None:
+            if ctx["mod"][t] < p.entry_from_min:
+                return
+            d = p.entry_fn(ctx, t)
+            if d == 0:
+                return
+            if p.max_spread > 0 and spread[t] > p.max_spread:
+                return
+            a = atr[s]
+            if not (a > 0):
+                return
+        else:
+            if above[s] == above[s - 1]:
+                return
+            if ctx["mod"][t] < p.entry_from_min:
+                stats["blk_session"] = stats.get("blk_session", 0) + 1
+                return
+            d = 1 if above[s] else -1
+            stats["crosses"] += 1
+            if p.max_spread > 0 and spread[t] > p.max_spread:
+                stats["blk_spread"] += 1
+                return
+            if np.isnan(mc[s]):
+                return
+            ok = (c[s] > mc[s]) if d > 0 else (c[s] < mc[s])
+            if p.use_vwap:
+                ok = ok and ((c[s] > vwap[s]) if d > 0 else (c[s] < vwap[s]))
+            if not ok:
+                stats["blk_conf"] += 1
+                return
+            a = atr[s]
+            if not (a > 0):
+                return
+        if p.entry_fn is None and p.use_sr and not np.isnan(srh[t]):
             sr = abs(srh[t] - c[s]) / a if d > 0 else abs(c[s] - srl[t]) / a
             if sr < p.min_sr:
                 stats["blk_sr"] += 1
@@ -197,15 +218,16 @@ def simulate(ctx, p=V102, start=WIN_START, end=WIN_END):
         pos = dict(entry_i=t, entry_time=t64[t], dir=d, entry=entry, sl=sl, sl0=sl, atr=a, peak=entry,
                    bars=0)
 
+    point = POINT if p.point is None else p.point
     for t in range(i0, i1):
-        sp = spread[t] * POINT
+        sp = spread[t] * point
         if pos is not None and fri(t):
             close(t, o[t] if pos["dir"] > 0 else o[t] + sp, "FRIDAY")
         if pos is not None:
             pos["bars"] += 1
             d = pos["dir"]
             s = t - 1
-            if above[s] != above[s - 1] and (1 if above[s] else -1) != d and ctx["hour"][t] == 0:
+            if above[s] != above[s - 1] and (1 if above[s] else -1) != d and p.hour0_reject and ctx["hour"][t] == 0:
                 stats["lost_reversal"] = stats.get("lost_reversal", 0) + 1   # close rejected, cross stale next bar
             elif above[s] != above[s - 1] and (1 if above[s] else -1) != d:
                 close(t, o[t] if d > 0 else o[t] + sp, "REVERSAL")
