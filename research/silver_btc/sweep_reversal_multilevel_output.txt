@@ -1,0 +1,71 @@
+
+==========================================================================================
+GOLD M15 -- Multi-Level Sweep Reversal (SL_ATR_MULT, RR_RATIO, PIVOT_LEN)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+  pivot_len=5: 1118 raw confirmed events
+  pivot_len=7: 919 raw confirmed events
+  pivot_len=10: 699 raw confirmed events
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (1.8, 2.5, 7): IS n=  407  IS %PF=0.859
+   (1.8, 2.5, 5): IS n=  482  IS %PF=0.852
+   (1.8, 2.5, 10): IS n=  331  IS %PF=0.791
+   (1.2, 2.5, 5): IS n=  516  IS %PF=0.746
+   (1.8, 1.5, 5): IS n=  536  IS %PF=0.711
+   (1.2, 2.5, 7): IS n=  434  IS %PF=0.700
+   (1.8, 1.5, 7): IS n=  445  IS %PF=0.685
+   (1.2, 2.5, 10): IS n=  343  IS %PF=0.666
+FROZEN WINNER (IS only): (1.8, 2.5, 7)  IS n=407  IS %PF=0.859
+OOS (untouched): n=313  win%=23.0  %PF=0.955  sum%=-4.1
+random-timing OOS null (1000 draws, p_fire=0.00308): median=0.938  p95=1.228
+REAL OOS %PF=0.955 -> 54.9th percentile; p(K=1)=0.4510 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.328) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Multi-Level Sweep Reversal (SL_ATR_MULT, RR_RATIO, PIVOT_LEN)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+  pivot_len=5: 1185 raw confirmed events
+  pivot_len=7: 990 raw confirmed events
+  pivot_len=10: 775 raw confirmed events
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (1.8, 2.5, 10): IS n=  367  IS %PF=0.668
+   (1.8, 2.5, 7): IS n=  432  IS %PF=0.635
+   (1.8, 2.5, 5): IS n=  495  IS %PF=0.625
+   (1.2, 2.5, 10): IS n=  387  IS %PF=0.588
+   (1.8, 1.5, 7): IS n=  479  IS %PF=0.574
+   (1.8, 1.5, 10): IS n=  404  IS %PF=0.574
+   (1.2, 2.5, 5): IS n=  529  IS %PF=0.563
+   (1.8, 1.5, 5): IS n=  555  IS %PF=0.559
+FROZEN WINNER (IS only): (1.8, 2.5, 10)  IS n=367  IS %PF=0.668
+OOS (untouched): n=249  win%=20.9  %PF=0.855  sum%=-24.2
+random-timing OOS null (1000 draws, p_fire=0.00227): median=0.792  p95=1.050
+REAL OOS %PF=0.855 -> 66.6th percentile; p(K=1)=0.3340 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.124) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Multi-Level Sweep Reversal (SL_ATR_MULT, RR_RATIO, PIVOT_LEN)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+  pivot_len=5: 888 raw confirmed events
+  pivot_len=7: 724 raw confirmed events
+  pivot_len=10: 551 raw confirmed events
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (1.8, 1.5, 10): IS n=  182  IS %PF=0.763
+   (0.8, 2.5, 10): IS n=  183  IS %PF=0.743
+   (1.2, 1.5, 10): IS n=  185  IS %PF=0.740
+   (1.2, 2.5, 10): IS n=  179  IS %PF=0.711
+   (1.2, 1.5, 7): IS n=  231  IS %PF=0.696
+   (1.8, 1.5, 7): IS n=  225  IS %PF=0.692
+   (1.8, 2.5, 10): IS n=  174  IS %PF=0.666
+   (1.2, 2.5, 7): IS n=  224  IS %PF=0.648
+FROZEN WINNER (IS only): (1.8, 1.5, 10)  IS n=182  IS %PF=0.763
+OOS (untouched): n=139  win%=22.3  %PF=0.787  sum%=-15.4
+random-timing OOS null (1000 draws, p_fire=0.00150): median=0.766  p95=1.124
+REAL OOS %PF=0.787 -> 54.9th percentile; p(K=1)=0.4510 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.206) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (1.8, 2.5, 7), 'is_n': 407, 'is_pf': np.float64(0.8586342125663815), 'oos_n': 313, 'oos_pf': np.float64(0.9554988608111731), 'pctile': np.float64(54.900000000000006), 'p1': 0.451, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (1.8, 2.5, 10), 'is_n': 367, 'is_pf': np.float64(0.6680209902401163), 'oos_n': 249, 'oos_pf': np.float64(0.8545549020465998), 'pctile': np.float64(66.60000000000001), 'p1': 0.334, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (1.8, 1.5, 10), 'is_n': 182, 'is_pf': np.float64(0.7625242373451875), 'oos_n': 139, 'oos_pf': np.float64(0.7873744183616951), 'pctile': np.float64(54.900000000000006), 'p1': 0.451, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
