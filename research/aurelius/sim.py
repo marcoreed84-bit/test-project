@@ -252,7 +252,18 @@ def simulate(ctx, extra_filter=None, params=None, extra_exit=None, extra_exit_re
             continue
         if ctx["is_market_holiday"][fill_i]:
             continue
-        if ctx["spread"][i] > 60:  # InpMaxSpreadPoints, points == this column's own units
+        # InpMaxSpreadPoints, points == this column's own units. Two
+        # per-instrument hooks (both absent => byte-identical gold default):
+        # ctx["spread_block"] (a precomputed per-bar bool mask, e.g. a causal
+        # rolling-percentile gate - see tailored_common.py) replaces the raw
+        # points test entirely; otherwise p["max_spread_points"] overrides
+        # gold's 60. A raw 60-point gate is meaningless off gold: it blocked
+        # 99.3% of BTC entries (2026-09-27).
+        blk = ctx.get("spread_block")
+        if blk is not None:
+            if blk[i]:
+                continue
+        elif ctx["spread"][i] > p.get("max_spread_points", 60):
             continue
         if atr[i] <= 0 or np.isnan(atr[i]):
             continue
@@ -325,7 +336,11 @@ def simulate(ctx, extra_filter=None, params=None, extra_exit=None, extra_exit_re
         # --- enter at fill_i's open (proxied by close[i], see note above),
         # spread charged once round-trip at entry (worse fill in the trade's
         # direction) ---
-        spread_cost = ctx["spread"][fill_i] * POINT
+        # p["point"] MUST be set off gold: POINT is GOLD's 0.01, and silver's
+        # real point is 0.001 - charging silver's spread column at gold's
+        # point overcharged every silver trade 10x (found 2026-09-27, see
+        # aurelius_tailored_common.py docstring). Absent => gold's POINT.
+        spread_cost = ctx["spread"][fill_i] * p.get("point", POINT)
         in_pos = 1 if is_buy else -1
         entry_px = px_fill + spread_cost if is_buy else px_fill - spread_cost
         entry_atr = atr[i]

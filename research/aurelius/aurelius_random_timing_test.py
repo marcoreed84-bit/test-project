@@ -155,16 +155,23 @@ def simulate_random_entry(ctx, params, rng, p_fire):
             continue
         if ctx["is_market_holiday"][fill_i]:
             continue
-        if ctx["spread"][i] > 60:
+        blk = ctx.get("spread_block")          # same per-instrument hooks as sim.py
+        if blk is not None:
+            if blk[i]:
+                continue
+        elif ctx["spread"][i] > p.get("max_spread_points", 60):
             continue
         if atr[i] <= 0 or np.isnan(atr[i]):
             continue
 
         if rng.random() >= p_fire:
             continue
-        is_buy = rng.random() < 0.5
+        # p["random_p_buy"]: calibrated coin-flip (match the real run's long
+        # share, so a long-biased trend follower on a drifting asset isn't
+        # credited with drift) - absent => the original fair 0.5 coin.
+        is_buy = rng.random() < p.get("random_p_buy", 0.5)
 
-        spread_cost = ctx["spread"][fill_i] * POINT
+        spread_cost = ctx["spread"][fill_i] * p.get("point", POINT)
         in_pos = 1 if is_buy else -1
         entry_px = px_fill + spread_cost if is_buy else px_fill - spread_cost
         entry_atr = atr[i]
