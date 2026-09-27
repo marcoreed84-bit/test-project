@@ -1,0 +1,15 @@
+GOLD H4 2013-01-02 00:00:00 -> 2026-09-25 20:00:00; zero spreads imputed at 30 pts; 70/30 cut 2022-09-16 08:00:00
+
+REAL Slipstream v1.08 shipped: n=439 win%=69.9 sum%=72.4 %PF=1.529 | IS n=301 %PF=1.478 | OOS n=138 %PF=1.629   (raw-$ PF 1.572)
+
+random-timing null: p_fire=0.02485, 1000 draws, mean n=433 (target 439)
+  null %PF median=1.125  p95=1.396
+  REAL %PF=1.529 -> 98.9th percentile, one-sided p=0.0110
+  (supplementary) OOS-slice null median=1.212; REAL OOS %PF=1.629 -> p=0.1110
+  (supplementary) direction-matched null (p_long=0.60): median=1.125 p(K=1)=0.0140  p(K=5)=0.0674
+
+best-of-K correction (K_FILES=5; 30/50 = documented-scale reference):
+  K=  1: best-of-K median=1.123  p=0.0120  [SURVIVES]
+  K=  5: best-of-K median=1.317  p=0.0570  [borderline]
+  K= 30: best-of-K median=1.447  p=0.2700  [DOES NOT SURVIVE]
+  K= 50: best-of-K median=1.499  p=0.4178  [DOES NOT SURVIVE]
