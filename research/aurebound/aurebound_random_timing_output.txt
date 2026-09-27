@@ -1,0 +1,15 @@
+GOLD H4 2013-01-02 00:00:00 -> 2026-09-25 20:00:00 (20727 bars); zero spreads imputed at $0.30; 70/30 cut 2022-09-16 08:00:00
+
+REAL AuRebound v1.04 shipped: n=1021 win%=39.2 sum%=12.8 %PF=1.052 | IS n=725 %PF=0.926 | OOS n=296 %PF=1.333
+
+random-timing null: p_fire=0.06618, 1000 draws, mean n=1016 (target 1021)
+  null %PF median=0.934  p95=1.082
+  REAL %PF=1.052 -> 92.1th percentile, one-sided p=0.0790
+  (supplementary) OOS-slice null median=0.979; REAL OOS %PF=1.333 -> p=0.0240
+  (supplementary) direction-matched null (p_long=0.50): median=0.931 p(K=1)=0.0840
+
+best-of-K correction (K_FILES=6; 30/50 = documented-scale reference):
+  K=  1: best-of-K median=0.933  p=0.0790  [borderline]
+  K=  6: best-of-K median=1.041  p=0.3934  [DOES NOT SURVIVE]
+  K= 30: best-of-K median=1.120  p=0.9128  [DOES NOT SURVIVE]
+  K= 50: best-of-K median=1.141  p=0.9838  [DOES NOT SURVIVE]
