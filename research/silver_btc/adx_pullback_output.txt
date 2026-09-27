@@ -1,0 +1,46 @@
+
+==========================================================================================
+SILVER H1 -- ADX-gated pullback-to-EMA continuation (ADX_THR, PB_EMA, EXIT)
+SILVER: n=72721 bars 2014-06-12 00:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:00:00 (38839 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20, 20, '3R'): IS n=  971  IS %PF=0.582  long%=50
+   (30, 20, '3R'): IS n=  481  IS %PF=0.580  long%=49
+   (30, 20, 'trail'): IS n=  440  IS %PF=0.543  long%=49
+   (20, 20, '2R'): IS n= 1096  IS %PF=0.539  long%=49
+   (25, 20, '3R'): IS n=  740  IS %PF=0.537  long%=50
+   (30, 20, '2R'): IS n=  514  IS %PF=0.533  long%=48
+   (20, 50, '2R'): IS n=  497  IS %PF=0.531  long%=45
+   (20, 20, 'trail'): IS n= 1005  IS %PF=0.525  long%=48
+FROZEN WINNER (IS only): (20, 20, '3R')  IS n=971  IS %PF=0.582
+IS sanity: random-timing IS pool median=0.582; IS winner vs best-of-18 random (median 0.691): p=1.0000
+OOS (untouched): n=872  win%=27.4  %PF=0.852  sum%=-88.1  long%=47 (long %PF=0.942 n=411, short %PF=0.772 n=461)
+random-timing OOS null (1000 draws, p_fire=0.04826, mean n=890 vs real 872): median=0.797  p95=0.927
+REAL OOS %PF=0.852 -> 75.2th percentile; p(K=1)=0.2480 [DOES NOT SURVIVE]; p(K=18)=0.9940 (best-of-K median 0.942) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.47): median=0.791  p(K=1)=0.2230
+
+==========================================================================================
+BTCUSD H1 -- ADX-gated pullback-to-EMA continuation (ADX_THR, PB_EMA, EXIT)
+BTCUSD: n=69053 bars 2017-07-03 00:00:00 -> 2026-09-27 12:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:00:00 (23459 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:00:00 (24013 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+16/18 combos had IS n>=100; 2 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (25, 50, 'trail'): IS n=  184  IS %PF=1.069  long%=40
+   (25, 50, '2R'): IS n=  193  IS %PF=1.033  long%=39
+   (20, 50, 'trail'): IS n=  306  IS %PF=0.989  long%=44
+   (30, 50, '2R'): IS n=  100  IS %PF=0.952  long%=30
+   (25, 20, 'trail'): IS n=  439  IS %PF=0.923  long%=48
+   (20, 20, 'trail'): IS n=  605  IS %PF=0.903  long%=48
+   (20, 50, '2R'): IS n=  304  IS %PF=0.901  long%=43
+   (25, 20, '3R'): IS n=  486  IS %PF=0.884  long%=45
+FROZEN WINNER (IS only): (25, 50, 'trail')  IS n=184  IS %PF=1.069
+IS sanity: random-timing IS pool median=0.841; IS winner vs best-of-18 random (median 1.266): p=0.9418
+OOS (untouched): n=165  win%=28.5  %PF=0.870  sum%=-13.1  long%=39 (long %PF=0.998 n=65, short %PF=0.767 n=100)
+random-timing OOS null (1000 draws, p_fire=0.00805, mean n=171 vs real 165): median=0.909  p95=1.311
+REAL OOS %PF=0.870 -> 43.2th percentile; p(K=1)=0.5680 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 1.344) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.39): median=0.871  p(K=1)=0.5020
+
+SUMMARY
+  {'label': 'SILVER H1 -- ADX-gated pullback-to-EMA continuation (ADX_THR, PB_EMA, EXIT)', 'K': 18, 'cfg': (20, 20, '3R'), 'is_n': 971, 'is_pf': np.float64(0.5816072084326901), 'oos_n': 872, 'oos_pf': np.float64(0.8516285531637899), 'p_is_k': 1.0, 'pctile': np.float64(75.2), 'p1': 0.248, 'pK': 0.994, 'p1_dir': 0.223, 'null_median': 0.7971449712885108, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD H1 -- ADX-gated pullback-to-EMA continuation (ADX_THR, PB_EMA, EXIT)', 'K': 18, 'cfg': (25, 50, 'trail'), 'is_n': 184, 'is_pf': np.float64(1.0686348637549448), 'oos_n': 165, 'oos_pf': np.float64(0.8698476237982079), 'p_is_k': 0.9418, 'pctile': np.float64(43.2), 'p1': 0.568, 'pK': 1.0, 'p1_dir': 0.502, 'null_median': 0.9090457043597464, 'verdict': 'DOES NOT SURVIVE'}
