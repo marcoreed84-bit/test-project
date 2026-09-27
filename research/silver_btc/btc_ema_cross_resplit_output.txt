@@ -1,0 +1,24 @@
+
+==========================================================================================
+BTCUSD M15 -- bare EMA cross, hold to reversal (FAST, SLOW, STOP_ATR) [cost-sane re-split]
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=64 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+64/64 combos had IS n>=100; 28 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (10, 300, 4.0): IS n=  504  IS %PF=1.305  long%=42
+   (10, 300, 3.0): IS n=  533  IS %PF=1.270  long%=46
+   (20, 300, 4.0): IS n=  392  IS %PF=1.172  long%=39
+   (50, 150, 2.0): IS n=  517  IS %PF=1.170  long%=49
+   (50, 150, 3.0): IS n=  454  IS %PF=1.162  long%=49
+   (20, 150, 4.0): IS n=  563  IS %PF=1.156  long%=46
+   (50, 150, 5.0): IS n=  369  IS %PF=1.155  long%=44
+   (20, 150, 2.0): IS n=  708  IS %PF=1.129  long%=50
+FROZEN WINNER (IS only): (10, 300, 4.0)  IS n=504  IS %PF=1.305
+IS sanity: random-timing IS pool median=0.999; IS winner vs best-of-64 random (median 1.357): p=0.7092
+OOS (untouched): n=496  win%=19.2  %PF=0.920  sum%=-27.4  long%=50 (long %PF=1.002 n=249, short %PF=0.836 n=247)
+random-timing OOS null (1000 draws, p_fire=0.01441, mean n=506 vs real 496): median=0.957  p95=1.168
+REAL OOS %PF=0.920 -> 38.0th percentile; p(K=1)=0.6200 [DOES NOT SURVIVE]; p(K=64)=1.0000 (best-of-K median 1.260) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.50): median=0.951  p(K=1)=0.6080
+
+SUMMARY
+  {'label': 'BTCUSD M15 -- bare EMA cross, hold to reversal (FAST, SLOW, STOP_ATR) [cost-sane re-split]', 'K': 64, 'cfg': (10, 300, 4.0), 'is_n': 504, 'is_pf': np.float64(1.3054904223857877), 'oos_n': 496, 'oos_pf': np.float64(0.9203814400007024), 'p_is_k': 0.7092, 'pctile': np.float64(38.0), 'p1': 0.62, 'pK': 1.0, 'p1_dir': 0.608, 'null_median': 0.9573045726305094, 'verdict': 'DOES NOT SURVIVE'}
