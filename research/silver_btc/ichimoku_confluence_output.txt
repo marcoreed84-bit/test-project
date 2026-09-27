@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Ichimoku Confluence, long-only (ATR_MULT_SL, ATR_MULT_TP, ENTRY_TIER)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.5, 4.0, 'strong'): IS n=  662  IS %PF=0.930
+   (2.5, 3.0, 'strong'): IS n=  662  IS %PF=0.907
+   (1.5, 4.0, 'strong'): IS n=  662  IS %PF=0.888
+   (1.5, 3.0, 'strong'): IS n=  662  IS %PF=0.867
+   (2.5, 4.0, 'strong_neutral'): IS n= 1076  IS %PF=0.849
+   (2.5, 3.0, 'strong_neutral'): IS n= 1076  IS %PF=0.821
+   (2.5, 2.0, 'strong'): IS n=  662  IS %PF=0.811
+   (1.0, 4.0, 'strong'): IS n=  662  IS %PF=0.809
+FROZEN WINNER (IS only): (2.5, 4.0, 'strong')  IS n=662  IS %PF=0.930
+OOS (untouched): n=670  win%=38.4  %PF=1.110  sum%=9.6
+random-timing OOS null (1000 draws, p_fire=0.01027, mean n=685, restricted to HTF-bullish bars like the real system): median=0.977  p95=1.129
+REAL OOS %PF=1.110 -> 92.3th percentile; p(K=1)=0.0770 [borderline]; p(K=27)=0.8858 (best-of-K median 1.165) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Ichimoku Confluence, long-only (ATR_MULT_SL, ATR_MULT_TP, ENTRY_TIER)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.5, 4.0, 'strong'): IS n=  635  IS %PF=0.385
+   (2.5, 4.0, 'strong_neutral'): IS n= 1018  IS %PF=0.375
+   (1.5, 4.0, 'strong'): IS n=  635  IS %PF=0.364
+   (1.5, 4.0, 'strong_neutral'): IS n= 1018  IS %PF=0.348
+   (2.5, 3.0, 'strong_neutral'): IS n= 1018  IS %PF=0.336
+   (2.5, 3.0, 'strong'): IS n=  635  IS %PF=0.323
+   (1.0, 4.0, 'strong'): IS n=  635  IS %PF=0.314
+   (1.5, 3.0, 'strong_neutral'): IS n= 1018  IS %PF=0.310
+FROZEN WINNER (IS only): (2.5, 4.0, 'strong')  IS n=635  IS %PF=0.385
+OOS (untouched): n=614  win%=33.9  %PF=0.795  sum%=-41.3
+random-timing OOS null (1000 draws, p_fire=0.00980, mean n=623, restricted to HTF-bullish bars like the real system): median=0.673  p95=0.803
+REAL OOS %PF=0.795 -> 93.6th percentile; p(K=1)=0.0640 [borderline]; p(K=27)=0.8304 (best-of-K median 0.829) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Ichimoku Confluence, long-only (ATR_MULT_SL, ATR_MULT_TP, ENTRY_TIER)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.5, 3.0, 'strong'): IS n=  394  IS %PF=0.856
+   (2.5, 2.0, 'strong'): IS n=  394  IS %PF=0.763
+   (2.5, 4.0, 'strong'): IS n=  394  IS %PF=0.745
+   (2.5, 3.0, 'strong_neutral'): IS n=  649  IS %PF=0.738
+   (1.5, 3.0, 'strong'): IS n=  394  IS %PF=0.726
+   (1.5, 2.0, 'strong'): IS n=  394  IS %PF=0.705
+   (2.5, 4.0, 'strong_neutral'): IS n=  649  IS %PF=0.699
+   (1.0, 3.0, 'strong'): IS n=  394  IS %PF=0.665
+FROZEN WINNER (IS only): (2.5, 3.0, 'strong')  IS n=394  IS %PF=0.856
+OOS (untouched): n=420  win%=40.2  %PF=0.959  sum%=-4.8
+random-timing OOS null (1000 draws, p_fire=0.00966, mean n=427, restricted to HTF-bullish bars like the real system): median=0.717  p95=0.875
+REAL OOS %PF=0.959 -> 99.4th percentile; p(K=1)=0.0060 [SURVIVES]; p(K=27)=0.1404 (best-of-K median 0.902) [borderline]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (2.5, 4.0, 'strong'), 'is_n': 662, 'is_pf': np.float64(0.929812593913057), 'oos_n': 670, 'oos_pf': np.float64(1.110199871078343), 'pctile': np.float64(92.30000000000001), 'p1': 0.077, 'pK': 0.8858, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (2.5, 4.0, 'strong'), 'is_n': 635, 'is_pf': np.float64(0.3848568730445565), 'oos_n': 614, 'oos_pf': np.float64(0.7954370041388548), 'pctile': np.float64(93.60000000000001), 'p1': 0.064, 'pK': 0.8304, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (2.5, 3.0, 'strong'), 'is_n': 394, 'is_pf': np.float64(0.8555890338428405), 'oos_n': 420, 'oos_pf': np.float64(0.9587664809386919), 'pctile': np.float64(99.4), 'p1': 0.006, 'pK': 0.1404, 'verdict': 'borderline'}
