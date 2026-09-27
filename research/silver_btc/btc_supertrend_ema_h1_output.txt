@@ -1,0 +1,65 @@
+
+==========================================================================================
+BTCUSD H1 -- SuperTrend + EMA Trend Filter (FACTOR, ATR_PERIOD, EMA_LEN)
+BTCUSD: n=69053 bars 2017-07-03 00:00:00 -> 2026-09-27 12:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:00:00 (23459 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:00:00 (24013 bars, untouched)
+FROZEN DEFAULTS (1.8, 10, 200) (no search): IS n=444 %PF=1.004  |  OOS n=506 %PF=0.975
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.5, 10, 300): IS n=  286  IS %PF=1.135
+   (2.5, 7, 300): IS n=  284  IS %PF=1.114
+   (2.5, 14, 300): IS n=  289  IS %PF=1.070
+   (2.5, 10, 200): IS n=  279  IS %PF=1.056
+   (1.8, 10, 100): IS n=  429  IS %PF=1.049
+   (2.5, 7, 100): IS n=  270  IS %PF=1.035
+   (2.5, 7, 200): IS n=  277  IS %PF=1.032
+   (2.5, 10, 100): IS n=  272  IS %PF=1.024
+FROZEN WINNER (IS only): (2.5, 10, 300)  IS n=286  IS %PF=1.135
+OOS (untouched): n=326  win%=34.4  %PF=1.128  sum%=40.1
+random-timing OOS null (1000 draws, p_fire=0.03815, mean n=334): median=0.910  p95=1.179
+REAL OOS %PF=1.128 -> 91.1th percentile; p(K=1)=0.0890 [borderline]; p(K=27)=0.9280 (best-of-K median 1.236) [DOES NOT SURVIVE]
+
+==========================================================================================
+GOLD H1 -- SuperTrend + EMA Trend Filter (FACTOR, ATR_PERIOD, EMA_LEN)
+GOLD: n=82496 bars 2001-06-04 01:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:00:00 (38814 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+FROZEN DEFAULTS (1.8, 10, 200) (no search): IS n=821 %PF=1.002  |  OOS n=760 %PF=1.084
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.5, 7, 100): IS n=  521  IS %PF=1.071
+   (2.5, 14, 200): IS n=  524  IS %PF=1.069
+   (2.5, 14, 100): IS n=  511  IS %PF=1.066
+   (1.8, 7, 300): IS n=  842  IS %PF=1.062
+   (1.8, 10, 300): IS n=  839  IS %PF=1.039
+   (1.8, 7, 200): IS n=  823  IS %PF=1.036
+   (1.8, 7, 100): IS n=  794  IS %PF=1.029
+   (1.8, 14, 300): IS n=  843  IS %PF=1.016
+FROZEN WINNER (IS only): (2.5, 7, 100)  IS n=521  IS %PF=1.071
+OOS (untouched): n=480  win%=37.1  %PF=1.086  sum%=16.6
+random-timing OOS null (1000 draws, p_fire=0.03522, mean n=489): median=1.009  p95=1.251
+REAL OOS %PF=1.086 -> 71.3th percentile; p(K=1)=0.2870 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.305) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER H1 -- SuperTrend + EMA Trend Filter (FACTOR, ATR_PERIOD, EMA_LEN)
+SILVER: n=72721 bars 2014-06-12 00:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:00:00 (38839 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+FROZEN DEFAULTS (1.8, 10, 200) (no search): IS n=829 %PF=0.651  |  OOS n=790 %PF=0.831
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.5, 10, 200): IS n=  500  IS %PF=0.725
+   (2.5, 10, 100): IS n=  497  IS %PF=0.716
+   (2.5, 7, 100): IS n=  501  IS %PF=0.709
+   (1.8, 7, 100): IS n=  812  IS %PF=0.706
+   (2.5, 7, 200): IS n=  504  IS %PF=0.705
+   (1.8, 10, 100): IS n=  809  IS %PF=0.703
+   (2.5, 10, 300): IS n=  512  IS %PF=0.694
+   (2.5, 7, 300): IS n=  518  IS %PF=0.687
+FROZEN WINNER (IS only): (2.5, 10, 200)  IS n=500  IS %PF=0.725
+OOS (untouched): n=483  win%=36.2  %PF=0.943  sum%=-23.2
+random-timing OOS null (1000 draws, p_fire=0.03630, mean n=491): median=0.874  p95=1.098
+REAL OOS %PF=0.943 -> 70.2th percentile; p(K=1)=0.2980 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.160) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (2.5, 10, 300), 'is_n': 286, 'is_pf': np.float64(1.13516829264702), 'oos_n': 326, 'oos_pf': np.float64(1.1276630148672624), 'pctile': np.float64(91.10000000000001), 'p1': 0.089, 'pK': 0.928, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'GOLD', 'K': 27, 'cfg': (2.5, 7, 100), 'is_n': 521, 'is_pf': np.float64(1.071186545273815), 'oos_n': 480, 'oos_pf': np.float64(1.0860019483433865), 'pctile': np.float64(71.3), 'p1': 0.287, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (2.5, 10, 200), 'is_n': 500, 'is_pf': np.float64(0.7254996007509625), 'oos_n': 483, 'oos_pf': np.float64(0.9434892539829146), 'pctile': np.float64(70.19999999999999), 'p1': 0.298, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
