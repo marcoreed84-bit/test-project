@@ -64,7 +64,16 @@ N_RANDOM = 1000
 
 
 def _in(v, lo, hi):
-    return lo <= v <= hi
+    # int(), not bool: the ab/bc/cd/xd args are numpy.float64 (all upstream
+    # arrays are numpy), so lo<=v<=hi is a numpy.bool_ - and numpy's own `+`
+    # on bool_ values is logical OR, not integer addition (True+True=True,
+    # not 2). Summing four of these in _scores() below was silently
+    # saturating every score at 0 or 1 instead of counting 0-4 matches,
+    # which meant `best >= min_match` (min_match>=2) could never fire -
+    # found by a direct instrumentation check showing 0 qualifying patterns
+    # out of 45,244 checked on GOLD alone, versus a hand-computed ratio from
+    # the very first check that plainly should have scored 2.
+    return int(lo <= v <= hi)
 
 
 def _scores(ab, bc, cd, xd, tol):
