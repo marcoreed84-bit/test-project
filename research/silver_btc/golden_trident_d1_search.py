@@ -114,12 +114,25 @@ def run(symbol, log):
     exargs_f = (fex["target_r"], fex["max_hold"], fex["trail_atr"], fex["exit_long"], fex["exit_short"])
     r_is = C.sim_signals(fb, fd, fdist, b.open, b.high, b.low, b.close, b.spread_px, b.atr, *exargs_f, b.is_lo, b.is_hi)
     r_oos = C.sim_signals(fb, fd, fdist, b.open, b.high, b.low, b.close, b.spread_px, b.atr, *exargs_f, b.oos_lo, b.oos_hi)
-    log(f"FROZEN DEFAULTS {FROZEN} (no search): IS n={len(r_is[3])} %PF={C.pct_pf(r_is[3]):.3f}  |  "
-        f"OOS n={len(r_oos[3])} %PF={C.pct_pf(r_oos[3]):.3f}")
+    frozen_oos_pnl, frozen_oos_dist = r_oos[3], r_oos[4]
+    frozen_oos_pf = C.pct_pf(frozen_oos_pnl)
+    log(f"FROZEN DEFAULTS {FROZEN} (no search, K=1 single-hypothesis test): "
+        f"IS n={len(r_is[3])} %PF={C.pct_pf(r_is[3]):.3f}  |  OOS n={len(frozen_oos_pnl)} %PF={frozen_oos_pf:.3f}")
+    if len(frozen_oos_pnl) >= 5:
+        allowed = np.ones(b.n, dtype=np.bool_)
+        fpool, fp_fire, fmean_n = C.random_pool(b, frozen_oos_dist, len(frozen_oos_pnl), *exargs_f,
+                                                b.oos_lo, b.oos_hi, allowed, n_draws=2000)
+        fpctile = 100 * (fpool < frozen_oos_pf).mean()
+        fp1 = float((fpool >= frozen_oos_pf).mean())
+        log(f"  frozen-defaults random-timing null ({len(fpool)} draws, mean n={fmean_n:.1f}): "
+            f"median={np.median(fpool):.3f}  p95={np.percentile(fpool,95):.3f}")
+        log(f"  FROZEN OOS %PF={frozen_oos_pf:.3f} -> {fpctile:.1f}th percentile of random timing "
+            f"(one-sided p={fp1:.4f}) [{C.verdict(fp1)}] -- NOTE: n={len(frozen_oos_pnl)} is a very small "
+            f"sample for a daily system; treat this p-value as indicative, not conclusive.")
 
     grid = list(itertools.product(SWING_LENS, ATR_STOP_MULTS, RANGE_MULTS))
     K = len(grid)
-    log(f"GRID K={K} (literal grid size); selection = highest IS %PF with IS n>=30 (D1 -> far fewer trades)\n{'='*90}")
+    log(f"GRID K={K} (literal grid size); selection = highest IS %PF with IS n>=10 (D1 -> far fewer trades)\n{'='*90}")
 
     rows = []
     for cfg in grid:
@@ -129,12 +142,12 @@ def run(symbol, log):
         r = C.sim_signals(sig_bar, sig_dir, sig_dist, b.open, b.high, b.low, b.close, b.spread_px, b.atr,
                           *exargs, b.is_lo, b.is_hi)
         n_tr, pnl = len(r[3]), r[3]
-        if n_tr < 30:
+        if n_tr < 10:
             continue
         rows.append(dict(cfg=cfg, n=n_tr, pf=C.pct_pf(pnl), sig_bar=sig_bar, sig_dir=sig_dir, sig_dist=sig_dist, ex=ex))
 
     rows.sort(key=lambda r: r["pf"], reverse=True)
-    log(f"{len(rows)}/{K} combos had IS n>=30. Top 8 by IS %PF:")
+    log(f"{len(rows)}/{K} combos had IS n>=10. Top 8 by IS %PF:")
     for r in rows[:8]:
         log(f"   {r['cfg']}: IS n={r['n']:>5}  IS %PF={r['pf']:.3f}")
     if not rows:
@@ -154,7 +167,7 @@ def run(symbol, log):
         log("No OOS trades."); return dict(label=symbol, K=K, verdict="DOES NOT SURVIVE (0 OOS trades)")
     oos_pf = C.pct_pf(oos_pnl)
     log(f"OOS (untouched): n={n_oos}  win%={100*(oos_pnl>0).mean():.1f}  %PF={oos_pf:.3f}  sum%={100*oos_pnl.sum():.1f}")
-    if n_oos < 15:
+    if n_oos < 5:
         log("Too few OOS trades -> DOES NOT SURVIVE (insufficient evidence).")
         return dict(label=symbol, K=K, verdict="DOES NOT SURVIVE (n<15)")
 

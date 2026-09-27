@@ -1,0 +1,60 @@
+
+==========================================================================================
+GOLD D1 -- Golden Trident, long-only (SWING_LEN, ATR_STOP_MULT, RANGE_MULT)
+GOLD: n=6583 bars 2001-06-04 00:00:00 -> 2026-09-25 00:00:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 00:00:00 (1692 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 00:00:00 (1480 bars, untouched)
+FROZEN DEFAULTS (30, 8.0, 0.8) (no search, K=1 single-hypothesis test): IS n=19 %PF=0.981  |  OOS n=12 %PF=6.024
+  frozen-defaults random-timing null (2000 draws, mean n=7.7): median=1.883  p95=9.316
+  FROZEN OOS %PF=6.024 -> 87.2th percentile of random timing (one-sided p=0.1280) [borderline] -- NOTE: n=12 is a very small sample for a daily system; treat this p-value as indicative, not conclusive.
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=10 (D1 -> far fewer trades)
+==========================================================================================
+27/27 combos had IS n>=10. Top 8 by IS %PF:
+   (20, 8.0, 0.5): IS n=   22  IS %PF=1.496
+   (20, 8.0, 0.8): IS n=   22  IS %PF=1.496
+   (20, 8.0, 1.2): IS n=   22  IS %PF=1.496
+   (20, 12.0, 0.5): IS n=   22  IS %PF=1.496
+   (20, 12.0, 0.8): IS n=   22  IS %PF=1.496
+   (20, 12.0, 1.2): IS n=   22  IS %PF=1.496
+   (20, 5.0, 0.5): IS n=   22  IS %PF=1.479
+   (20, 5.0, 0.8): IS n=   22  IS %PF=1.479
+FROZEN WINNER (IS only): (20, 8.0, 0.5)  IS n=22  IS %PF=1.496
+OOS (untouched): n=25  win%=36.0  %PF=1.698  sum%=37.6
+random-timing OOS null (1000 draws, p_fire=0.50000, mean n=13): median=0.481  p95=1.643
+REAL OOS %PF=1.698 -> 95.5th percentile; p(K=1)=0.0450 [SURVIVES]; p(K=27)=0.7112 (best-of-K median 1.942) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER D1 -- Golden Trident, long-only (SWING_LEN, ATR_STOP_MULT, RANGE_MULT)
+SILVER: n=3174 bars 2014-06-12 00:00:00 -> 2026-09-25 00:00:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 00:00:00 (1694 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 00:00:00 (1480 bars, untouched)
+FROZEN DEFAULTS (30, 8.0, 0.8) (no search, K=1 single-hypothesis test): IS n=18 %PF=0.776  |  OOS n=13 %PF=2.979
+  frozen-defaults random-timing null (2000 draws, mean n=7.1): median=1.260  p95=3.282
+  FROZEN OOS %PF=2.979 -> 94.7th percentile of random timing (one-sided p=0.0530) [borderline] -- NOTE: n=13 is a very small sample for a daily system; treat this p-value as indicative, not conclusive.
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=10 (D1 -> far fewer trades)
+==========================================================================================
+27/27 combos had IS n>=10. Top 8 by IS %PF:
+   (20, 5.0, 0.5): IS n=   23  IS %PF=1.010
+   (20, 5.0, 0.8): IS n=   23  IS %PF=1.010
+   (20, 5.0, 1.2): IS n=   23  IS %PF=1.010
+   (45, 5.0, 0.5): IS n=   13  IS %PF=1.001
+   (45, 5.0, 0.8): IS n=   13  IS %PF=1.001
+   (45, 5.0, 1.2): IS n=   13  IS %PF=1.001
+   (45, 8.0, 0.5): IS n=   13  IS %PF=0.998
+   (45, 8.0, 0.8): IS n=   13  IS %PF=0.998
+FROZEN WINNER (IS only): (20, 5.0, 0.5)  IS n=23  IS %PF=1.010
+OOS (untouched): n=24  win%=37.5  %PF=1.146  sum%=16.0
+random-timing OOS null (1000 draws, p_fire=0.50000, mean n=11): median=0.970  p95=2.947
+REAL OOS %PF=1.146 -> 57.9th percentile; p(K=1)=0.4210 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 3.780) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD D1 -- Golden Trident, long-only (SWING_LEN, ATR_STOP_MULT, RANGE_MULT)
+BTCUSD: n=2887 bars 2017-07-03 00:00:00 -> 2026-09-27 00:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 00:00:00 (978 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 00:00:00 (1001 bars, untouched)
+FROZEN DEFAULTS (30, 8.0, 0.8) (no search, K=1 single-hypothesis test): IS n=7 %PF=3.312  |  OOS n=9 %PF=2.356
+  frozen-defaults random-timing null (2000 draws, mean n=7.1): median=0.330  p95=1.600
+  FROZEN OOS %PF=2.356 -> 97.8th percentile of random timing (one-sided p=0.0220) [SURVIVES] -- NOTE: n=9 is a very small sample for a daily system; treat this p-value as indicative, not conclusive.
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=10 (D1 -> far fewer trades)
+==========================================================================================
+0/27 combos had IS n>=10. Top 8 by IS %PF:
+NO combo cleared the IS trade-count floor -> DOES NOT SURVIVE.
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (20, 8.0, 0.5), 'is_n': 22, 'is_pf': np.float64(1.4957845792138744), 'oos_n': 25, 'oos_pf': np.float64(1.6981939934005204), 'pctile': np.float64(95.5), 'p1': 0.045, 'pK': 0.7112, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (20, 5.0, 0.5), 'is_n': 23, 'is_pf': np.float64(1.0101338545064804), 'oos_n': 24, 'oos_pf': np.float64(1.1462872577765872), 'pctile': np.float64(57.9), 'p1': 0.421, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'verdict': 'DOES NOT SURVIVE (no valid IS combo)'}
