@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Engulfing/Star break-of-pattern (TARGET_RR, VALID_BARS, MIN_ENG_BODY_PCT)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (2.0, 10, 50.0): IS n= 4584  IS %PF=0.738
+   (1.5, 10, 50.0): IS n= 4896  IS %PF=0.734
+   (3.0, 10, 50.0): IS n= 4108  IS %PF=0.730
+   (1.5, 3, 50.0): IS n= 4775  IS %PF=0.729
+   (3.0, 10, 60.0): IS n= 3779  IS %PF=0.727
+   (1.5, 10, 60.0): IS n= 4466  IS %PF=0.726
+   (3.0, 3, 60.0): IS n= 3698  IS %PF=0.726
+   (3.0, 10, 40.0): IS n= 4314  IS %PF=0.726
+FROZEN WINNER (IS only): (2.0, 10, 50.0)  IS n=4584  IS %PF=0.738
+OOS (untouched): n=4805  win%=37.9  %PF=0.906  sum%=-65.5
+random-timing OOS null (1000 draws, p_fire=0.17916): median=0.804  p95=0.874
+REAL OOS %PF=0.906 -> 98.9th percentile; p(K=1)=0.0110 [SURVIVES]; p(K=27)=0.2584 (best-of-K median 0.887) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Engulfing/Star break-of-pattern (TARGET_RR, VALID_BARS, MIN_ENG_BODY_PCT)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (3.0, 3, 60.0): IS n= 2704  IS %PF=0.447
+   (3.0, 10, 50.0): IS n= 2844  IS %PF=0.446
+   (3.0, 10, 40.0): IS n= 2941  IS %PF=0.443
+   (3.0, 10, 60.0): IS n= 2734  IS %PF=0.442
+   (3.0, 5, 60.0): IS n= 2723  IS %PF=0.441
+   (3.0, 5, 40.0): IS n= 2926  IS %PF=0.441
+   (3.0, 5, 50.0): IS n= 2842  IS %PF=0.439
+   (3.0, 3, 40.0): IS n= 2895  IS %PF=0.436
+FROZEN WINNER (IS only): (3.0, 3, 60.0)  IS n=2704  IS %PF=0.447
+OOS (untouched): n=3167  win%=28.7  %PF=0.627  sum%=-477.5
+random-timing OOS null (1000 draws, p_fire=0.14954): median=0.669  p95=0.757
+REAL OOS %PF=0.627 -> 18.8th percentile; p(K=1)=0.8120 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.778) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Engulfing/Star break-of-pattern (TARGET_RR, VALID_BARS, MIN_ENG_BODY_PCT)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (1.5, 3, 60.0): IS n= 2735  IS %PF=0.639
+   (1.5, 10, 60.0): IS n= 2787  IS %PF=0.638
+   (1.5, 5, 60.0): IS n= 2769  IS %PF=0.635
+   (2.0, 3, 60.0): IS n= 2539  IS %PF=0.628
+   (2.0, 10, 60.0): IS n= 2592  IS %PF=0.627
+   (2.0, 5, 60.0): IS n= 2572  IS %PF=0.620
+   (2.0, 3, 50.0): IS n= 2798  IS %PF=0.616
+   (2.0, 10, 50.0): IS n= 2838  IS %PF=0.615
+FROZEN WINNER (IS only): (1.5, 3, 60.0)  IS n=2735  IS %PF=0.639
+OOS (untouched): n=3029  win%=32.8  %PF=0.715  sum%=-336.8
+random-timing OOS null (1000 draws, p_fire=0.08141): median=0.705  p95=0.762
+REAL OOS %PF=0.715 -> 61.5th percentile; p(K=1)=0.3850 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.775) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (2.0, 10, 50.0), 'is_n': 4584, 'is_pf': np.float64(0.7381705950518079), 'oos_n': 4805, 'oos_pf': np.float64(0.9055621302800766), 'pctile': np.float64(98.9), 'p1': 0.011, 'pK': 0.2584, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (3.0, 3, 60.0), 'is_n': 2704, 'is_pf': np.float64(0.44741492446381537), 'oos_n': 3167, 'oos_pf': np.float64(0.62655694484463), 'pctile': np.float64(18.8), 'p1': 0.812, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (1.5, 3, 60.0), 'is_n': 2735, 'is_pf': np.float64(0.6388733854855992), 'oos_n': 3029, 'oos_pf': np.float64(0.7147469976491396), 'pctile': np.float64(61.5), 'p1': 0.385, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
