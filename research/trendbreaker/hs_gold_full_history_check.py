@@ -24,10 +24,15 @@ DATA_DIR = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea84
 POINT = 0.01
 
 
+GOLD_M15_REAL_START = pd.Timestamp("2014-06-13")  # before this: daily/hourly bars mislabeled as M15 - not real
+
+
 def load_gold_m15():
     df = pd.read_csv(f"{DATA_DIR}/GOLD_M15_native.csv", skiprows=1)
     df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
-    return df.sort_values("time").reset_index(drop=True)[["time", "open", "high", "low", "close", "spread"]]
+    df = df.sort_values("time").reset_index(drop=True)
+    df = df[df["time"] >= GOLD_M15_REAL_START].reset_index(drop=True)
+    return df[["time", "open", "high", "low", "close", "spread"]]
 
 
 def pf(a):
