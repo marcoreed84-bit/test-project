@@ -1,0 +1,1 @@
+bt4_defaults   strict=False real= 538 sim= 632 exact-bar= 436 ( 81.0% of real,  69.0% of sim) same-dir=436/436 | same-dir within 1h=478 4h=508 24h=524 (97%)  [30s]

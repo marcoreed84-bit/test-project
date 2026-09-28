@@ -2,9 +2,17 @@
 H&S on GOLD bar-match check, same standard just applied to Vanguard and
 Silver: does the EA-faithful hs_sim.py (NOT the buggy neckline-fill code
 that broke the original Gold verdict) actually reproduce the user's real
-MT5 trades? Ground truth: b745bb00-...-HS_-_Backtest_1.xlsx (GOLD, M15,
-2023.01.01-2026.09.25, 99% history quality, 599 real trades) - the
-cleanest/largest real Gold H&S report uploaded.
+MT5 trades?
+
+CORRECTED (2026-09-28, see audit_2026-09-28/gold_rootcause/): the first
+version of this file used b745bb00 (HS_-_Backtest_1.xlsx) and got a
+2.2% match - traced to comparing against the WRONG report: Backtest_1
+was run on HeadShoulders_EA v1.00 (InpLookbackBars=3000, no throttle,
+InpBreakTolATR=0.1, no pullback/runner at all - a different strategy
+from HS.DEFAULTS, which is v1.08). Re-pointed at d2ffdcc0
+(HS_-_Backtest_4.xlsx, 2020-2026, 538 real trades), whose real Inputs
+section matches HS.DEFAULTS field for field - the correct ground truth
+for the current shipped construction.
 """
 import sys
 sys.path.insert(0, "/home/user/test-project/research/aurelius")
@@ -15,8 +23,8 @@ import openpyxl
 import engine as E
 import hs_sim as HS
 
-XLSX = "/root/.claude/uploads/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/b745bb00-20260925_-_ReportTester-382043238_-_HS_-_Backtest_1.xlsx"
-WIN_LO, WIN_HI = pd.Timestamp("2023-01-01"), pd.Timestamp("2026-09-25")
+XLSX = "/root/.claude/uploads/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/d2ffdcc0-20260925_-_ReportTester-382043238_-_HS_-_Backtest_4.xlsx"
+WIN_LO, WIN_HI = pd.Timestamp("2020-01-01"), pd.Timestamp("2026-09-25")
 
 
 def load_real_deals(path):

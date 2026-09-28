@@ -1,0 +1,8 @@
+Real H&S GOLD trades (M15, 2023-01-01-2026-09-25, 99% quality): n=599
+Simulator data: 2023-01-03 01:00:00 -> 2026-09-24 23:45:00 (88103 bars)
+sim trades in the same window: 349
+
+entry-bar matches: 13 (2.2% of real's 599 trades)
+real-only (sim missed): 586   sim-only (sim invented): 336
+of matched bars, same direction: 13/13
+entry price diff on matched bars: median=0.030  max=0.150

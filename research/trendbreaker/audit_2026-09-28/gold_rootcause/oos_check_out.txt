@@ -1,0 +1,28 @@
+UNTOUCHED slices: M5 2014-06-13 00:00:00 -> 2022-07-01 23:55:00 (570009 bars), M15 2014-06-13 01:30:00 -> 2022-07-01 23:45:00 (190034 bars)
+
+Aurelius M5 (engine.P, frozen) - untouched 2014-06 -> 2022-07
+  real spread : n=2057  win%=21.8  %PF=0.973  net%=-6.1
+  zero spread : n=1933  %PF=1.232  net%=45.9   (gross signal edge)
+  random timing, same exits + same real spread (200 draws): median=0.480  p95=0.604  -> REAL at 100.0th pct (p=0.000)
+    2014-06..2016-07: n= 557 %PF=1.050 (spread/ATR 0.53)
+    2016-07..2018-07: n= 506 %PF=1.169 (spread/ATR 0.63)
+    2018-07..2020-07: n= 487 %PF=0.686 (spread/ATR 0.44)
+    2020-07..2022-07: n= 507 %PF=0.996 (spread/ATR 0.27)
+
+Aurelius M15 (engine.P15, frozen) - untouched 2014-06 -> 2022-07 (native M15)
+  real spread : n=1064  win%=26.7  %PF=1.003  net%=0.6
+  zero spread : n=1047  %PF=1.121  net%=22.2   (gross signal edge)
+  random timing, same exits + same real spread (200 draws): median=0.711  p95=0.883  -> REAL at 100.0th pct (p=0.000)
+    2014-06..2016-07: n= 286 %PF=1.198 (spread/ATR 0.27)
+    2016-07..2018-07: n= 254 %PF=1.046 (spread/ATR 0.33)
+    2018-07..2020-07: n= 269 %PF=0.784 (spread/ATR 0.23)
+    2020-07..2022-07: n= 255 %PF=0.952 (spread/ATR 0.14)
+
+Meridian (frozen) - untouched 2014-06 -> 2022-07
+  real spread : n=5709  win%=20.0  %PF=0.796  net%=-130.4
+  zero spread : n=5709  %PF=1.026  net%=15.1   (gross signal edge)
+  random timing, same exits + same real spread (200 draws): median=0.765  p95=0.820  -> REAL at 81.5th pct (p=0.185)
+    2014-06..2016-07: n=1490 %PF=0.711 (spread/ATR 0.53)
+    2016-07..2018-07: n=1322 %PF=0.765 (spread/ATR 0.63)
+    2018-07..2020-07: n=1424 %PF=0.825 (spread/ATR 0.44)
+    2020-07..2022-07: n=1473 %PF=0.879 (spread/ATR 0.27)

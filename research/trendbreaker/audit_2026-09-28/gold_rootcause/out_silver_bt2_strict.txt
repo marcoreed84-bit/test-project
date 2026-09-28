@@ -1,0 +1,1 @@
+silver_bt2     strict=True  real= 162 sim= 321 exact-bar= 137 ( 84.6% of real,  42.7% of sim) same-dir=137/137 | same-dir within 1h=153 4h=157 24h=158 (98%)  [20s]

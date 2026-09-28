@@ -1,0 +1,1 @@
+bt1_v100       strict=False real= 599 sim= 621 exact-bar= 340 ( 56.8% of real,  54.8% of sim) same-dir=340/340 | same-dir within 1h=561 4h=581 24h=591 (99%)  [81s]

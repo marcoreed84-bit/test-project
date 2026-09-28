@@ -36,6 +36,10 @@ against - a full-bar timing misalignment. Fixing it (trigger on bar k,
 fill at bar k+1's open) took the real-trade entry-minute match on the
 user's real Silver Backtest 2 (2023-2026, 162 real trades) from 1% to
 81% (132/162), with the SAME direction on every single matched entry.
+NOTE (2026-09-28): that 81% figure was measured with a since-fixed
+look-ahead bug in the Recompute() window bound still present (see the
+comment at its call site) - re-measured post-fix at 84.6% on the same
+report, so the number only improved; not a retraction.
 Cold-starting the EA's own state fresh at the tester's start date
 (matching MT5 OnInit(), vs. running continuously from 2014) made no
 measurable difference - Recompute() is a stateless full-window rescan,
@@ -264,7 +268,16 @@ def simulate(m15, params):
         if recompute_every <= 1 or bar_counter % recompute_every == 0:
             win_start = max(0, k - lookback + 2)
             if win_start < k - 4 * N - params["atr_period"] - 20:
-                zIdx, zType, zPx = find_swings_window(cand_idx, isH, isL, h, l, atr, params["swing_min_atr"], win_start, k)
+                # LOOK-AHEAD FIX (found 2026-09-28 during the H&S-on-Gold bar-match
+                # investigation): the real EA's FindSwings only confirms a pivot at
+                # shift=N once N bars have closed AFTER it, i.e. only turning points
+                # in [win_start+N, k-N] are actually knowable at bar k - the un-
+                # clamped end bound let this search "discover" pivots up to N bars
+                # into the future. Fixing this makes H&S's untouched-Gold verdict
+                # WEAKER (p 0.18 -> 0.30), not stronger - the bug had been flattering
+                # it, not hiding a real edge. See GOLD_AUDIT_2026-09-28.md follow-up.
+                zIdx, zType, zPx = find_swings_window(cand_idx, isH, isL, h, l, atr, params["swing_min_atr"],
+                                                      win_start + N, k - N)
                 if len(zIdx) >= 5:
                     found = find_hs_patterns(zIdx, zType, zPx, atr, params["shoulder_tol_atr"], t)
                     for P in found:
