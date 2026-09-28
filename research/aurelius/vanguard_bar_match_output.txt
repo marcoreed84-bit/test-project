@@ -1,0 +1,10 @@
+/usr/local/lib/python3.11/dist-packages/openpyxl/styles/stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
+Real Vanguard trades (GOLD, 2026.01.01-2026.09.25, 100% real ticks): n=153
+Simulator data: 2022-07-04 01:40:00 -> 2026-09-25 21:00:00 (300000 bars)
+sim trades in the SAME 2026.01.01-2026.09.25 window: 157
+
+entry-bar matches: 148 (96.7% of real's 153 trades in this window)
+real-only (sim missed): 5   sim-only (sim invented): 9
+of matched bars, same direction: 148/148
+entry price diff on matched bars: median=0.490  max=5.040
