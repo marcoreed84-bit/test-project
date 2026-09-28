@@ -1,0 +1,13 @@
+GOLD M15: 2014-06-13 00:00:00 -> 2026-09-25 23:45:00 (290056 bars), frozen real-MT5-confirmed defaults (hs_sim.DEFAULTS, matches the real report's own Inputs section)
+
+REAL (hs_sim, EA-faithful fills, real spread): n=1143  win%=45.7  %PF=1.283  net%=77.8
+zero-spread (gross signal): n=1145  %PF=1.331  net%=89.3
+   2014..2016-07: n=184 %PF=0.843
+   2016-07..2018-07: n=202 %PF=1.331
+   2018-07..2020-07: n=222 %PF=1.121
+   2020-07..2022-07: n=168 %PF=1.334
+   2022-07..2024-07: n=171 %PF=1.517
+   2024-07..2027: n=196 %PF=1.582
+
+random-timing null (same brackets/direction, same fill+spread convention, 300 draws): median=1.040  p95=1.178
+REAL %PF=1.283 -> 99.0th percentile; p(K=1)=0.0100 [SURVIVES]
