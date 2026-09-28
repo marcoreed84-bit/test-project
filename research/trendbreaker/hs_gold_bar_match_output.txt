@@ -1,0 +1,10 @@
+/usr/local/lib/python3.11/dist-packages/openpyxl/styles/stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
+Real H&S GOLD trades (M15, 2020-01-01-2026-09-25, 99% quality): n=538
+Simulator data: 2020-01-02 09:00:00 -> 2026-09-24 23:45:00 (159010 bars)
+sim trades in the same window: 586
+
+entry-bar matches: 453 (84.2% of real's 538 trades)
+real-only (sim missed): 85   sim-only (sim invented): 133
+of matched bars, same direction: 453/453
+entry price diff on matched bars: median=0.090  max=5.500
