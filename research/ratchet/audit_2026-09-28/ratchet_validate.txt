@@ -1,0 +1,14 @@
+== Backtest_1 (baseline: momentum OFF, wick OFF)
+   REAL: n=960 net=$703.19 PF=1.205 win(>0)=55.5%
+   SIM : n=986 net=$629.69 PF=1.181 win(>=0)=67.6%
+   entry-bar matches 917 (95.5% of real), real-only 43, sim-only 69; same dir 917; same exit bar 777; P/L within max($0.50,10%) 742
+   matched P/L: real $647.15 vs sim $686.23 (median |diff| $0.210)
+== Backtest_2 (shipped v3.28: momentum ON, wick ON)
+   REAL: n=443 net=$509.80 PF=1.326 win(>0)=55.5%
+   SIM : n=373 net=$773.12 PF=1.63 win(>=0)=67.3%
+   entry-bar matches 343 (77.4% of real), real-only 100, sim-only 30; same dir 343; same exit bar 292; P/L within max($0.50,10%) 277
+   matched P/L: real $648.85 vs sim $780.57 (median |diff| $0.220)
+
+real	0m49.738s
+user	0m46.482s
+sys	0m1.592s

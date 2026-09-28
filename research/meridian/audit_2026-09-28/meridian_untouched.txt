@@ -1,0 +1,12 @@
+msim V102 untouched 2014-07-01->2022-07-04: n=5101 win%=20.4 %PF=0.807 net%=-107.6 exits {'SL': 3036, 'REVERSAL': 1897, 'FRIDAY': 168} stats {'crosses': 8325, 'blk_conf': 3003, 'blk_sr': 111, 'blk_filter': 0, 'blk_spread': 110, 'blk_reverse_bar': 1897, 'blk_stale_ticket': 3034, 'blk_session': 56, 'lost_reversal': 4}
+  zero spread: n=4988 %PF=1.018
+   2014-06..2016-07: n=1351 %PF=0.719
+   2016-07..2018-07: n=1216 %PF=0.748
+   2018-07..2020-07: n=1227 %PF=0.875
+   2020-07..2022-07: n=1307 %PF=0.887
+  [real spread] random null (400, mean n=5008 vs 5101): median=0.763 p95=0.831 -> real 0.807 at 87.8th pct, p=0.1225
+  [zero spread] random null (400, mean n=4864 vs 4988): median=1.013 p95=1.089 -> real 1.018 at 53.2th pct, p=0.4675
+
+real	8m3.181s
+user	16m30.211s
+sys	0m5.476s

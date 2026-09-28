@@ -1,0 +1,10 @@
+
+IN-SAMPLE 2022-07..2026-09 (Gold M15): hs_sim n=395 win%=49.4 %PF(net, spread)=1.570 net%=59.0 | zero-spread n=397 %PF=1.570
+   2022-07..2024-07: n=186 %PF=1.488
+   2024-07..2027: n=209 %PF=1.618
+  random-timing null (same brackets/direction, same fill+spread convention, 300 draws): median=1.064 p95=1.297 -> REAL at 100.0th pct, p=0.000
+  K=1:p=0.000 K=27:p=0.000 K=50:p=0.000
+
+real	0m24.931s
+user	0m20.081s
+sys	0m0.864s

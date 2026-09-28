@@ -1,0 +1,19 @@
+replay_fast == replay_bracket_at on 3000 random brackets
+
+H&S stacked combo (v1.08: retest 0.50xATR/30 bars, break_tol 0.35, runner trail 0.5xATR)
+======================================================================================================================================================
+IS - 2022-07 -> 2026-09 M15 (resampled real M5), the window H&S was built on:
+  ORIGINAL find_breakouts_full (lookahead)     breakouts= 998 n= 456 win%= 52.0 %PF=2.308 | rand med=1.092 p95=1.320 -> 100.0th pct (p=0.000) | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000 K=100:p=0.000
+  CAUSAL, EA-faithful detection                breakouts=1122 n= 448 win%= 50.9 %PF=2.206 | rand med=1.090 p95=1.325 -> 100.0th pct (p=0.000) | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000 K=100:p=0.000
+
+OOS - native M15 2014-06-13 -> 2022-07-03 (real M15 bars only):
+  ORIGINAL find_breakouts_full (lookahead)     breakouts=1970 n= 902 win%= 45.7 %PF=1.696 | rand med=1.089 p95=1.258 -> 100.0th pct (p=0.000) | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000 K=100:p=0.000
+  CAUSAL, EA-faithful detection                breakouts=2150 n= 884 win%= 44.3 %PF=1.628 | rand med=1.086 p95=1.252 -> 100.0th pct (p=0.000) | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000 K=100:p=0.000
+
+For reference - hs_m15_oos_test.py's own slice (2001 -> 2022-07, incl. ~3,100 daily + ~4,000 hourly bars pre-2014-06):
+  ORIGINAL find_breakouts_full (lookahead)     breakouts=2072 n= 945 win%= 46.0 %PF=1.877 | rand med=1.095 p95=1.258 -> 100.0th pct (p=0.000) | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000 K=100:p=0.000
+  CAUSAL, EA-faithful detection                breakouts=2263 n= 926 win%= 44.9 %PF=1.858 | rand med=1.098 p95=1.265 -> 100.0th pct (p=0.000) | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000 K=100:p=0.000
+
+real	2m41.098s
+user	2m26.347s
+sys	0m0.452s

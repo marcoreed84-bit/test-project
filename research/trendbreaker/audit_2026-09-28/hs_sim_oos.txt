@@ -1,0 +1,12 @@
+
+UNTOUCHED 2014-06..2022-07 (Gold M15): hs_sim n=841 win%=43.4 %PF(net, spread)=1.131 net%=24.6 | zero-spread n=843 %PF=1.191
+   2014..2016-07: n=197 %PF=0.810
+   2016-07..2018-07: n=223 %PF=1.355
+   2018-07..2020-07: n=240 %PF=1.113
+   2020-07..2022-07: n=181 %PF=1.355
+  random-timing null (same brackets/direction, same fill+spread convention, 300 draws): median=1.054 p95=1.216 -> REAL at 81.7th pct, p=0.183
+  K=1:p=0.175 K=27:p=0.998 K=50:p=1.000
+
+real	1m7.327s
+user	0m42.508s
+sys	0m0.279s

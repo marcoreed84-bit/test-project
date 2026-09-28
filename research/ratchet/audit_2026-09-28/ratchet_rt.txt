@@ -1,0 +1,19 @@
+REAL Ratchet v3.30 shipped defaults (2026-01-01 -> 2026-09-21): n=373  win%=56.3  net=773.12  %PF=1.623
+
+Calibrated p_fire=0.00854
+Running 300 random-entry/coin-flip-direction baselines (same exit machinery)...
+  random-entry trade counts: mean=372 (target 373)
+  random-entry %PF distribution: median=0.883  p95=1.210
+
+  REAL %PF=1.623 sits at the 100.0th percentile (one-sided p=0.000)
+
+Multiple-testing correction (best-of-K; K estimated from this dir's own 14 dedicated
+Ratchet research files - candidates.py, features.py, momentum_test.py, robust_keep.py etc.):
+  K=   1: best-of-K median=0.877  p95=1.209  p=0.000  [SURVIVES]
+  K=  14: best-of-K median=1.229  p95=1.462  p=0.000  [SURVIVES]
+  K=  30: best-of-K median=1.294  p95=1.564  p=0.000  [SURVIVES]
+  K=  50: best-of-K median=1.325  p95=1.564  p=0.000  [SURVIVES]
+
+real	1m42.518s
+user	1m37.793s
+sys	0m1.417s

@@ -1,0 +1,9 @@
+
+Aurelius M5 IN-SAMPLE 2022-07..2026-09 (load_m5)
+  REAL n=1056 win%=28.4 %PF=1.424 net%=55.9 median hold=20.0 bars, <=1-bar trades 5%
+  repo coin-flip null (60 draws): median %PF=0.812, <=1-bar trades 81%  -> real pct 100.0
+  ALIGNED random-timing null (200 draws, mean n=1025): median=1.102 p95=1.229, <=1-bar 5% -> REAL at 100.0th pct, p=0.000
+
+real	1m57.972s
+user	3m43.246s
+sys	0m0.696s

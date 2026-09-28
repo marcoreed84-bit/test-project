@@ -1,0 +1,10 @@
+UNTOUCHED 2014-07..2022-07 ZERO spread: REAL n=3930 %PF=1.016 | coin-flip null (160, mean n=4021) median=1.011 p95=1.118 -> 51.9th pct p=0.481
+UNTOUCHED 2020-07..2022-07 real spread: REAL n=1109 %PF=0.570 | coin-flip null (160, mean n=1117) median=0.642 p95=0.784 -> 17.5th pct p=0.825
+UNTOUCHED 2014-07..2022-07 real spread: REAL n=3808 %PF=0.542 | ALIGNED null (160, mean n=3779) median=0.576 p95=0.638 -> 20.6th pct p=0.794
+BUILD window 2022-07..2025-12 real spread (pre-2026): REAL n=1762 %PF=1.045 | coin-flip null (160, mean n=1780) median=0.769 p95=0.896 -> 100.0th pct p=0.000
+BUILD window 2022-07..2025-12 real spread (pre-2026): REAL n=1762 %PF=1.045 | ALIGNED null (160, mean n=1745) median=0.850 p95=0.967 -> 100.0th pct p=0.000
+2026 window real spread: REAL n=373 %PF=1.623 | ALIGNED null (160, mean n=362) median=1.049 p95=1.409 -> 98.1th pct p=0.019
+
+real	9m34.722s
+user	19m25.709s
+sys	0m3.529s

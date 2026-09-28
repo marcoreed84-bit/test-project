@@ -1,0 +1,8 @@
+untouched M15 2014-06-13 01:30:00 -> 2022-07-01 23:45:00, causal breakouts=2150, RETEST_TOL=0.75
+  mode A: n=884 win%=44.3 %PF=1.628 | null median=1.078 p95=1.246 -> 100.0th pct | K=1:p=0.000 K=27:p=0.000 K=50:p=0.000
+  mode B: n=909 win%=42.8 %PF=1.070 | null median=1.106 p95=1.268 -> 32.0th pct | K=1:p=0.683 K=27:p=1.000 K=50:p=1.000
+  mode C: n=910 win%=42.6 %PF=1.011 | null median=1.043 p95=1.198 -> 36.0th pct | K=1:p=0.631 K=27:p=1.000 K=50:p=1.000
+
+real	0m30.326s
+user	0m21.807s
+sys	0m0.145s

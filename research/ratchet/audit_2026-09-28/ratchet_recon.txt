@@ -1,0 +1,14 @@
+Ratchet SHIPPED (momentum=False, wick=True, trail_runner_atr=6.0) - untouched 2014-07-01 -> 2022-07-04
+Execution noise measured from real 2026 bar-matches: entry offset mean -0.0042 ATR (sd 0.1149), SL slippage mean -0.0258 ATR (max -0.0000, i.e. never favorable)
+
+Deterministic (noise-free, matches the original 18ed3c2 check): n=3808 win%=39.4 %PF=0.542 net%=-91.3
+
+Monte Carlo with REAL measured execution noise (48 seeds, ATR-scaled): n=3771.0  %PF mean=0.523 (sd 0.011, 5-95% 0.504..0.539)  net%=-95.6 (sd 2.8)
+
+random-timing null, SAME noisy execution model (200 draws): median=0.489  p95=0.561
+REAL (noise-adjusted mean) %PF=0.523 -> 79.5th percentile; p(K=1)=0.2050
+Averaged per-seed p-value (each noisy real draw vs the random pool): 0.2146
+
+real	13m7.106s
+user	12m34.130s
+sys	0m4.487s

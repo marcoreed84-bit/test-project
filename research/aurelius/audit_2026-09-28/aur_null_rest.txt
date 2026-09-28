@@ -1,0 +1,19 @@
+
+Aurelius M5 UNTOUCHED 2014-06..2022-07
+  REAL n=2057 win%=21.8 %PF=0.973 net%=-6.1 median hold=16.0 bars, <=1-bar trades 10%
+  repo coin-flip null (60 draws): median %PF=0.488, <=1-bar trades 83%  -> real pct 100.0
+  ALIGNED random-timing null (200 draws, mean n=2003): median=0.844 p95=0.923, <=1-bar 8% -> REAL at 100.0th pct, p=0.000
+
+Aurelius M15 IN-SAMPLE (resampled load_m5)
+  REAL n=485 win%=37.5 %PF=1.855 net%=80.5 median hold=24.0 bars, <=1-bar trades 8%
+  repo coin-flip null (60 draws): median %PF=1.022, <=1-bar trades 74%  -> real pct 100.0
+  ALIGNED random-timing null (200 draws, mean n=479): median=1.217 p95=1.440, <=1-bar 5% -> REAL at 100.0th pct, p=0.000
+
+Aurelius M15 UNTOUCHED 2014-06..2022-07 (native M15)
+  REAL n=1064 win%=26.7 %PF=1.003 net%=0.6 median hold=19.0 bars, <=1-bar trades 8%
+  repo coin-flip null (60 draws): median %PF=0.673, <=1-bar trades 76%  -> real pct 100.0
+  ALIGNED random-timing null (200 draws, mean n=1053): median=0.917 p95=1.041, <=1-bar 6% -> REAL at 88.0th pct, p=0.120
+
+real	5m11.098s
+user	9m46.092s
+sys	0m4.319s

@@ -1,0 +1,12 @@
+Ratchet v3.30 (sim.SHIPPED, frozen) - untouched 2014-07-01 -> 2022-07-04
+  real spread : n=3808  win%=39.4  %PF=0.542  net%=-91.3
+  zero spread : n=3930  %PF=1.016  net%=2.2   (gross signal edge)
+  random timing, same exits + same real spread (200 draws): median=0.508  p95=0.568  -> REAL at 84.5th pct (p=0.155)
+    2014-06..2016-07: n= 901 %PF=0.609 (spread/ATR 0.54)
+    2016-07..2018-07: n= 911 %PF=0.442 (spread/ATR 0.64)
+    2018-07..2020-07: n= 887 %PF=0.513 (spread/ATR 0.45)
+    2020-07..2022-07: n=1109 %PF=0.570 (spread/ATR 0.27)
+
+real	8m20.094s
+user	7m58.112s
+sys	0m3.910s
