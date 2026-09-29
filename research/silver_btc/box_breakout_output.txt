@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Box breakout, port of SupportResistance.mq5 (PERIOD, OVERLOOK, TARGET_R)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (40, 20, 2.0): IS n=  615  IS %PF=1.115  win%=43.7
+   (40, 10, 2.0): IS n=  720  IS %PF=1.113  win%=44.2
+   (40, 10, 1.5): IS n=  752  IS %PF=1.097  win%=45.6
+   (40, 5, 2.0): IS n=  774  IS %PF=1.080  win%=44.1
+   (40, 20, 1.5): IS n=  634  IS %PF=1.062  win%=45.1
+   (40, 10, 1.0): IS n=  809  IS %PF=1.042  win%=50.9
+   (40, 20, 1.0): IS n=  680  IS %PF=1.025  win%=51.0
+   (20, 10, 2.0): IS n=  870  IS %PF=1.025  win%=39.3
+FROZEN WINNER (IS only): (40, 20, 2.0)  IS n=615  IS %PF=1.115  win%=43.7
+OOS (untouched): n=569  win%=41.8  %PF=1.024  sum%=6.6
+random-timing OOS null (1000 draws, p_fire=0.00860, mean n=586): median=0.997  p95=1.185
+REAL OOS %PF=1.024 -> 60.3th percentile; p(K=1)=0.3970 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.221) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Box breakout, port of SupportResistance.mq5 (PERIOD, OVERLOOK, TARGET_R)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (40, 5, 2.0): IS n=  774  IS %PF=0.891  win%=40.6
+   (40, 10, 2.0): IS n=  750  IS %PF=0.849  win%=39.1
+   (40, 20, 2.0): IS n=  625  IS %PF=0.828  win%=39.8
+   (40, 5, 1.5): IS n=  811  IS %PF=0.826  win%=41.8
+   (40, 20, 1.5): IS n=  641  IS %PF=0.824  win%=42.4
+   (40, 10, 1.5): IS n=  785  IS %PF=0.803  win%=41.3
+   (40, 20, 1.0): IS n=  684  IS %PF=0.800  win%=47.5
+   (10, 20, 2.0): IS n=  442  IS %PF=0.799  win%=38.5
+FROZEN WINNER (IS only): (40, 5, 2.0)  IS n=774  IS %PF=0.891  win%=40.6
+OOS (untouched): n=691  win%=39.9  %PF=0.874  sum%=-92.4
+random-timing OOS null (1000 draws, p_fire=0.01434, mean n=716): median=0.882  p95=1.052
+REAL OOS %PF=0.874 -> 46.7th percentile; p(K=1)=0.5330 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.073) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Box breakout, port of SupportResistance.mq5 (PERIOD, OVERLOOK, TARGET_R)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   (40, 5, 2.0): IS n=  440  IS %PF=0.842  win%=39.1
+   (10, 20, 2.0): IS n=  211  IS %PF=0.837  win%=35.5
+   (40, 20, 2.0): IS n=  353  IS %PF=0.818  win%=39.4
+   (20, 20, 1.5): IS n=  337  IS %PF=0.811  win%=41.2
+   (10, 5, 2.0): IS n=  626  IS %PF=0.807  win%=35.5
+   (40, 5, 1.5): IS n=  456  IS %PF=0.792  win%=41.2
+   (40, 10, 1.0): IS n=  470  IS %PF=0.791  win%=46.6
+   (10, 5, 1.0): IS n=  743  IS %PF=0.786  win%=49.9
+FROZEN WINNER (IS only): (40, 5, 2.0)  IS n=440  IS %PF=0.842  win%=39.1
+OOS (untouched): n=483  win%=44.3  %PF=1.077  sum%=40.6
+random-timing OOS null (1000 draws, p_fire=0.01511, mean n=500): median=0.934  p95=1.126
+REAL OOS %PF=1.077 -> 88.9th percentile; p(K=1)=0.1110 [borderline]; p(K=27)=0.9572 (best-of-K median 1.167) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': (40, 20, 2.0), 'is_n': 615, 'is_pf': np.float64(1.1148272938033574), 'oos_n': 569, 'oos_pf': np.float64(1.0244506280529628), 'oos_win': np.float64(41.82776801405975), 'pctile': np.float64(60.3), 'p1': 0.397, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': (40, 5, 2.0), 'is_n': 774, 'is_pf': np.float64(0.8907235110451334), 'oos_n': 691, 'oos_pf': np.float64(0.874426171750616), 'oos_win': np.float64(39.94211287988423), 'pctile': np.float64(46.7), 'p1': 0.533, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': (40, 5, 2.0), 'is_n': 440, 'is_pf': np.float64(0.8423148409483784), 'oos_n': 483, 'oos_pf': np.float64(1.0767638970835278), 'oos_win': np.float64(44.3064182194617), 'pctile': np.float64(88.9), 'p1': 0.111, 'pK': 0.9572, 'verdict': 'DOES NOT SURVIVE'}
