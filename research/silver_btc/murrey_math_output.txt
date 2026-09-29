@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Murrey Math levels (CALC_PERIOD, WHICH_LEVELS, MODE)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (64, 'major_pivot', 'fade'): IS n=  777  IS %PF=0.834  win%=42.7
+   (128, 'major', 'fade'): IS n=  162  IS %PF=0.822  win%=43.8
+   (128, 'major_pivot', 'fade'): IS n=  499  IS %PF=0.794  win%=41.5
+   (128, 'all_eighths', 'fade'): IS n= 1227  IS %PF=0.786  win%=42.6
+   (32, 'major_pivot', 'fade'): IS n= 1138  IS %PF=0.761  win%=42.3
+   (64, 'all_eighths', 'fade'): IS n= 1870  IS %PF=0.760  win%=42.4
+   (32, 'all_eighths', 'fade'): IS n= 2718  IS %PF=0.719  win%=41.0
+   (64, 'major', 'fade'): IS n=  262  IS %PF=0.703  win%=39.7
+FROZEN WINNER (IS only): (64, 'major_pivot', 'fade')  IS n=777  IS %PF=0.834  win%=42.7
+OOS (untouched): n=630  win%=34.3  %PF=0.655  sum%=-23.3
+random-timing OOS null (1000 draws, p_fire=0.00485, mean n=638): median=0.853  p95=1.000
+REAL OOS %PF=0.655 -> 0.1th percentile; p(K=1)=0.9990 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 1.011) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Murrey Math levels (CALC_PERIOD, WHICH_LEVELS, MODE)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (64, 'all_eighths', 'fade'): IS n= 1836  IS %PF=0.138  win%=22.5
+   (128, 'all_eighths', 'break'): IS n=15983  IS %PF=0.136  win%=22.4
+   (32, 'all_eighths', 'break'): IS n=21199  IS %PF=0.136  win%=21.9
+   (64, 'all_eighths', 'break'): IS n=19015  IS %PF=0.134  win%=22.3
+   (64, 'major_pivot', 'break'): IS n=11342  IS %PF=0.133  win%=22.6
+   (128, 'major_pivot', 'break'): IS n= 8184  IS %PF=0.130  win%=23.0
+   (32, 'major_pivot', 'break'): IS n=14725  IS %PF=0.128  win%=21.5
+   (64, 'major', 'break'): IS n= 4787  IS %PF=0.128  win%=22.9
+FROZEN WINNER (IS only): (64, 'all_eighths', 'fade')  IS n=1836  IS %PF=0.138  win%=22.5
+OOS (untouched): n=1467  win%=38.0  %PF=0.499  sum%=-186.1
+random-timing OOS null (1000 draws, p_fire=0.01170, mean n=1476): median=0.498  p95=0.559
+REAL OOS %PF=0.499 -> 51.5th percentile; p(K=1)=0.4850 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 0.564) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Murrey Math levels (CALC_PERIOD, WHICH_LEVELS, MODE)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=18 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+18/18 combos had IS n>=100. Top 8 by IS %PF:
+   (128, 'major', 'fade'): IS n=  100  IS %PF=0.850  win%=50.0
+   (128, 'major_pivot', 'fade'): IS n=  283  IS %PF=0.613  win%=41.3
+   (64, 'major', 'fade'): IS n=  148  IS %PF=0.597  win%=41.2
+   (64, 'major_pivot', 'break'): IS n= 6584  IS %PF=0.581  win%=39.8
+   (128, 'major', 'break'): IS n= 1848  IS %PF=0.580  win%=38.3
+   (128, 'major_pivot', 'break'): IS n= 4770  IS %PF=0.578  win%=39.6
+   (32, 'major', 'fade'): IS n=  245  IS %PF=0.567  win%=41.6
+   (64, 'major', 'break'): IS n= 2740  IS %PF=0.559  win%=38.8
+FROZEN WINNER (IS only): (128, 'major', 'fade')  IS n=100  IS %PF=0.850  win%=50.0
+OOS (untouched): n=109  win%=38.5  %PF=0.555  sum%=-12.2
+random-timing OOS null (1000 draws, p_fire=0.00115, mean n=109): median=0.630  p95=0.917
+REAL OOS %PF=0.555 -> 28.2th percentile; p(K=1)=0.7180 [DOES NOT SURVIVE]; p(K=18)=1.0000 (best-of-K median 0.943) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 18, 'cfg': (64, 'major_pivot', 'fade'), 'is_n': 777, 'is_pf': np.float64(0.83376832098998), 'oos_n': 630, 'oos_pf': np.float64(0.6545498980818448), 'oos_win': np.float64(34.285714285714285), 'pctile': np.float64(0.1), 'p1': 0.999, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 18, 'cfg': (64, 'all_eighths', 'fade'), 'is_n': 1836, 'is_pf': np.float64(0.1380637494436583), 'oos_n': 1467, 'oos_pf': np.float64(0.49937214549990144), 'oos_win': np.float64(38.036809815950924), 'pctile': np.float64(51.5), 'p1': 0.485, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 18, 'cfg': (128, 'major', 'fade'), 'is_n': 100, 'is_pf': np.float64(0.8498556159323085), 'oos_n': 109, 'oos_pf': np.float64(0.5554594290941847), 'oos_win': np.float64(38.53211009174312), 'pctile': np.float64(28.199999999999996), 'p1': 0.718, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
