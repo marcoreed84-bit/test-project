@@ -1,0 +1,71 @@
+
+==========================================================================================
+GOLD M15/H4 -- Fractal S/R breakout, port of the uploaded .mq5 pair (LEVEL_SRC, STOP_ATR_MULT, TARGET_R)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+  m15: 15519 up-breaks, 14948 down-breaks (full history)
+  h4: 3067 up-breaks, 2976 down-breaks (full history)
+  both_confirm: 4248 up-breaks, 3222 down-breaks (full history)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   ('h4', 1.5, 2.0): IS n= 1915  IS %PF=0.920  win%=36.2
+   ('h4', 1.5, 1.5): IS n= 1985  IS %PF=0.895  win%=43.0
+   ('both_confirm', 1.5, 2.0): IS n= 2260  IS %PF=0.847  win%=33.8
+   ('both_confirm', 1.5, 1.5): IS n= 2459  IS %PF=0.806  win%=40.1
+   ('h4', 1.5, 1.0): IS n= 2093  IS %PF=0.801  win%=51.6
+   ('h4', 1.0, 2.0): IS n= 2344  IS %PF=0.795  win%=34.9
+   ('m15', 1.5, 2.0): IS n= 6602  IS %PF=0.779  win%=32.8
+   ('both_confirm', 1.5, 1.0): IS n= 2697  IS %PF=0.775  win%=50.5
+FROZEN WINNER (IS only): ('h4', 1.5, 2.0)  IS n=1915  IS %PF=0.920  win%=36.2
+OOS (untouched): n=1763  win%=33.4  %PF=0.920  sum%=-24.1
+random-timing OOS null (1000 draws, p_fire=0.01665, mean n=1794): median=0.919  p95=1.013
+REAL OOS %PF=0.920 -> 50.6th percentile; p(K=1)=0.4940 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 1.030) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15/H4 -- Fractal S/R breakout, port of the uploaded .mq5 pair (LEVEL_SRC, STOP_ATR_MULT, TARGET_R)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+  m15: 15002 up-breaks, 14430 down-breaks (full history)
+  h4: 3070 up-breaks, 2761 down-breaks (full history)
+  both_confirm: 3767 up-breaks, 3007 down-breaks (full history)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   ('both_confirm', 1.5, 2.0): IS n= 2183  IS %PF=0.372  win%=32.5
+   ('h4', 1.5, 2.0): IS n= 2027  IS %PF=0.350  win%=32.7
+   ('both_confirm', 1.5, 1.5): IS n= 2358  IS %PF=0.313  win%=36.7
+   ('m15', 1.5, 2.0): IS n= 6657  IS %PF=0.313  win%=30.9
+   ('h4', 1.5, 1.5): IS n= 2101  IS %PF=0.287  win%=36.6
+   ('m15', 1.5, 1.5): IS n= 7702  IS %PF=0.254  win%=33.6
+   ('both_confirm', 1.0, 2.0): IS n= 2728  IS %PF=0.243  win%=28.6
+   ('h4', 1.0, 2.0): IS n= 2458  IS %PF=0.207  win%=27.4
+FROZEN WINNER (IS only): ('both_confirm', 1.5, 2.0)  IS n=2183  IS %PF=0.372  win%=32.5
+OOS (untouched): n=2055  win%=32.5  %PF=0.689  sum%=-260.0
+random-timing OOS null (1000 draws, p_fire=0.02023, mean n=2085): median=0.667  p95=0.731
+REAL OOS %PF=0.689 -> 71.6th percentile; p(K=1)=0.2840 [DOES NOT SURVIVE]; p(K=27)=1.0000 (best-of-K median 0.744) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15/H4 -- Fractal S/R breakout, port of the uploaded .mq5 pair (LEVEL_SRC, STOP_ATR_MULT, TARGET_R)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+  m15: 14356 up-breaks, 13662 down-breaks (full history)
+  h4: 2622 up-breaks, 2267 down-breaks (full history)
+  both_confirm: 3320 up-breaks, 2654 down-breaks (full history)
+GRID K=27 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+27/27 combos had IS n>=100. Top 8 by IS %PF:
+   ('h4', 1.5, 2.0): IS n= 1126  IS %PF=0.788  win%=35.3
+   ('h4', 1.5, 1.5): IS n= 1166  IS %PF=0.769  win%=42.5
+   ('both_confirm', 1.5, 2.0): IS n= 1227  IS %PF=0.734  win%=33.3
+   ('h4', 1.5, 1.0): IS n= 1223  IS %PF=0.704  win%=50.9
+   ('m15', 1.5, 2.0): IS n= 3833  IS %PF=0.696  win%=33.7
+   ('both_confirm', 1.5, 1.5): IS n= 1317  IS %PF=0.681  win%=39.6
+   ('h4', 1.0, 2.0): IS n= 1349  IS %PF=0.681  win%=35.0
+   ('both_confirm', 1.5, 1.0): IS n= 1429  IS %PF=0.654  win%=50.0
+FROZEN WINNER (IS only): ('h4', 1.5, 2.0)  IS n=1126  IS %PF=0.788  win%=35.3
+OOS (untouched): n=1220  win%=34.1  %PF=0.820  sum%=-87.7
+random-timing OOS null (1000 draws, p_fire=0.01643, mean n=1247): median=0.768  p95=0.857
+REAL OOS %PF=0.820 -> 82.6th percentile; p(K=1)=0.1740 [DOES NOT SURVIVE]; p(K=27)=0.9936 (best-of-K median 0.883) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 27, 'cfg': ('h4', 1.5, 2.0), 'is_n': 1915, 'is_pf': np.float64(0.920089556291627), 'oos_n': 1763, 'oos_pf': np.float64(0.9198354107275588), 'oos_win': np.float64(33.40896199659671), 'pctile': np.float64(50.6), 'p1': 0.494, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 27, 'cfg': ('both_confirm', 1.5, 2.0), 'is_n': 2183, 'is_pf': np.float64(0.37163042252704565), 'oos_n': 2055, 'oos_pf': np.float64(0.6888057039078588), 'oos_win': np.float64(32.50608272506083), 'pctile': np.float64(71.6), 'p1': 0.284, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 27, 'cfg': ('h4', 1.5, 2.0), 'is_n': 1126, 'is_pf': np.float64(0.7878938870204558), 'oos_n': 1220, 'oos_pf': np.float64(0.8198485564482594), 'oos_win': np.float64(34.0983606557377), 'pctile': np.float64(82.6), 'p1': 0.174, 'pK': 0.9936, 'verdict': 'DOES NOT SURVIVE'}
