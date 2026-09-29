@@ -1,0 +1,62 @@
+
+==========================================================================================
+GOLD M15 -- Session-to-session reaction (SESSION_PAIR, STOP_ATR_MULT, MIN_MOVE_ATR)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100. Top 8 by IS %PF:
+   ('London', 'NewYork') stop=0.5 min_move=0.0: IS n= 1676  IS %PF=1.026  win%=42.3
+   ('London', 'NewYork') stop=0.5 min_move=0.5: IS n= 1578  IS %PF=1.024  win%=42.2
+   ('London', 'NewYork') stop=1.0 min_move=0.0: IS n= 1676  IS %PF=1.020  win%=46.1
+   ('London', 'NewYork') stop=1.0 min_move=0.5: IS n= 1578  IS %PF=1.013  win%=45.9
+   ('London', 'NewYork') stop=1.5 min_move=0.0: IS n= 1676  IS %PF=0.997  win%=46.4
+   ('London', 'NewYork') stop=1.5 min_move=0.5: IS n= 1578  IS %PF=0.983  win%=46.1
+   ('Asian', 'London') stop=1.0 min_move=0.0: IS n= 1599  IS %PF=0.778  win%=44.3
+   ('Asian', 'London') stop=0.5 min_move=0.5: IS n= 1504  IS %PF=0.777  win%=40.6
+FROZEN WINNER (IS only): ('London', 'NewYork') stop=0.5 min_move=0.0  IS n=1676  IS %PF=1.026  win%=42.3
+OOS (untouched): n=1479  win%=42.7  %PF=0.988  sum%=-4.8
+random-timing OOS null (1000 draws, p_fire=0.02057, mean n=1511): median=0.980  p95=1.098
+REAL OOS %PF=0.988 -> 53.9th percentile; p(K=1)=0.4610 [DOES NOT SURVIVE]; p(K=12)=0.9990 (best-of-K median 1.090) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15 -- Session-to-session reaction (SESSION_PAIR, STOP_ATR_MULT, MIN_MOVE_ATR)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100. Top 8 by IS %PF:
+   ('London', 'NewYork') stop=1.0 min_move=0.5: IS n= 1549  IS %PF=0.636  win%=37.4
+   ('London', 'NewYork') stop=1.0 min_move=0.0: IS n= 1646  IS %PF=0.635  win%=37.4
+   ('London', 'NewYork') stop=1.5 min_move=0.5: IS n= 1549  IS %PF=0.627  win%=37.6
+   ('London', 'NewYork') stop=1.5 min_move=0.0: IS n= 1646  IS %PF=0.627  win%=37.5
+   ('London', 'NewYork') stop=0.5 min_move=0.0: IS n= 1646  IS %PF=0.577  win%=34.4
+   ('London', 'NewYork') stop=0.5 min_move=0.5: IS n= 1549  IS %PF=0.572  win%=34.3
+   ('Asian', 'London') stop=1.5 min_move=0.5: IS n= 1447  IS %PF=0.312  win%=27.4
+   ('Asian', 'London') stop=1.0 min_move=0.5: IS n= 1447  IS %PF=0.309  win%=27.4
+FROZEN WINNER (IS only): ('London', 'NewYork') stop=1.0 min_move=0.5  IS n=1549  IS %PF=0.636  win%=37.4
+OOS (untouched): n=1425  win%=43.6  %PF=0.868  sum%=-112.6
+random-timing OOS null (1000 draws, p_fire=0.02683, mean n=1467): median=0.830  p95=0.938
+REAL OOS %PF=0.868 -> 71.9th percentile; p(K=1)=0.2810 [DOES NOT SURVIVE]; p(K=12)=0.9756 (best-of-K median 0.936) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15 -- Session-to-session reaction (SESSION_PAIR, STOP_ATR_MULT, MIN_MOVE_ATR)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+12/12 combos had IS n>=100. Top 8 by IS %PF:
+   ('London', 'NewYork') stop=1.0 min_move=0.0: IS n=  978  IS %PF=0.752  win%=42.0
+   ('London', 'NewYork') stop=1.0 min_move=0.5: IS n=  848  IS %PF=0.744  win%=42.1
+   ('London', 'NewYork') stop=1.5 min_move=0.0: IS n=  978  IS %PF=0.740  win%=42.6
+   ('London', 'NewYork') stop=0.5 min_move=0.0: IS n=  978  IS %PF=0.738  win%=37.5
+   ('London', 'NewYork') stop=0.5 min_move=0.5: IS n=  848  IS %PF=0.731  win%=37.1
+   ('London', 'NewYork') stop=1.5 min_move=0.5: IS n=  848  IS %PF=0.718  win%=42.6
+   ('Asian', 'London') stop=1.5 min_move=0.5: IS n=  829  IS %PF=0.664  win%=37.0
+   ('Asian', 'London') stop=1.5 min_move=0.0: IS n=  978  IS %PF=0.651  win%=35.6
+FROZEN WINNER (IS only): ('London', 'NewYork') stop=1.0 min_move=0.0  IS n=978  IS %PF=0.752  win%=42.0
+OOS (untouched): n=1000  win%=45.7  %PF=0.897  sum%=-64.7
+random-timing OOS null (1000 draws, p_fire=0.03016, mean n=1021): median=0.903  p95=1.041
+REAL OOS %PF=0.897 -> 46.4th percentile; p(K=1)=0.5360 [DOES NOT SURVIVE]; p(K=12)=0.9998 (best-of-K median 1.034) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 12, 'cfg': ((1, 2), 0.5, 0.0), 'is_n': 1676, 'is_pf': np.float64(1.025583247209631), 'oos_n': 1479, 'oos_pf': np.float64(0.9875179843227713), 'oos_win': np.float64(42.66396213657877), 'pctile': np.float64(53.900000000000006), 'p1': 0.461, 'pK': 0.999, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 12, 'cfg': ((1, 2), 1.0, 0.5), 'is_n': 1549, 'is_pf': np.float64(0.6355640841096891), 'oos_n': 1425, 'oos_pf': np.float64(0.868090188868718), 'oos_win': np.float64(43.64912280701754), 'pctile': np.float64(71.89999999999999), 'p1': 0.281, 'pK': 0.9756, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 12, 'cfg': ((1, 2), 1.0, 0.0), 'is_n': 978, 'is_pf': np.float64(0.7519503348279213), 'oos_n': 1000, 'oos_pf': np.float64(0.8968228170795183), 'oos_win': np.float64(45.7), 'pctile': np.float64(46.400000000000006), 'p1': 0.536, 'pK': 0.9998, 'verdict': 'DOES NOT SURVIVE'}
