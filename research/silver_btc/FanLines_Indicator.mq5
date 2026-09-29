@@ -7,10 +7,13 @@
 //| not a proven signal generator).                                     |
 //|                                                                      |
 //| WHAT IT DOES                                                        |
-//| - Detects every confirmed N-bar fractal swing high/low (InpPivotK   |
-//|   bars strictly higher/lower on each side - same rule as the        |
-//|   Python backtest's common.pivots()) and marks each one with a      |
-//|   small arrow, if InpMarkSwings is true.                            |
+//| - Detects N-bar fractal swing highs/lows (InpPivotK bars strictly   |
+//|   higher/lower on each side - same rule as the Python backtest's    |
+//|   common.pivots()), then keeps only the MAJOR ones: a fractal only  |
+//|   counts if it's at least InpMinSwingATR x ATR away from the last   |
+//|   confirmed opposite swing (set InpMinSwingATR=0 to see every raw   |
+//|   fractal instead, including the noise). Marks each surviving swing |
+//|   with a small arrow, if InpMarkSwings is true.                     |
 //| - From the most recent swing LOW, draws a line to EVERY later swing |
 //|   HIGH since that low (an "up-fan") - the anchor resets to a fresh  |
 //|   point whenever an even lower swing low confirms. Mirror: from the |
@@ -50,12 +53,17 @@
 #property indicator_plots   0
 
 input int    InpPivotK         = 10;    // swing size, bars each side (same axis as PIVOT_K in the backtest)
-input int    InpAtrPeriod      = 14;    // ATR period for the optional gap/steepness filters
+input double InpMinSwingATR    = 1.0;   // a fractal only counts as a MAJOR swing if it's this many ATR
+                                         // away from the last confirmed opposite swing (0 = every raw
+                                         // fractal, noisy - this is the "not the noise" filter)
+input int    InpAtrPeriod      = 14;    // ATR period for InpMinSwingATR and the gap/steepness filters
 input double InpMinGapATR      = 0.0;   // hide a line-pair whose gap is < this many ATR (0 = show all)
 input double InpMaxGapATR      = 0.0;   // hide a line-pair whose gap is > this many ATR (0 = no cap)
 input double InpMinSlopeATR    = 0.0;   // only highlight the outer line if slope/bar >= this many ATR (0 = no filter)
 input int    InpMaxBarsBack    = 5000;  // how far back to detect swings / build fans
-input bool   InpMarkSwings     = true;  // draw small arrows at every confirmed swing high/low
+input bool   InpMarkSwings     = true;  // draw small arrows at every confirmed MAJOR swing high/low
+input bool   InpDebugLog       = true;  // print pivot/line counts to the Experts log each new bar -
+                                         // turn this OFF once you've confirmed lines are drawing
 input color  InpUpFanColor     = clrDeepSkyBlue;
 input color  InpDownFanColor   = clrOrangeRed;
 input color  InpOuterLineColor = clrYellow;   // the line nearest price right now - "in play"
@@ -140,8 +148,16 @@ void DrawFan(FanLine &lines[], int count, string tag, color col, bool byLargestS
       string name = PFX + tag + "_" + IntegerToString((long)lines[k].pivot_time);
       if(ObjectFind(0, name) >= 0)
          ObjectDelete(0, name);
-      ObjectCreate(0, name, OBJ_TREND, 0, lines[k].anchor_time, lines[k].anchor_price,
-                   lines[k].pivot_time, lines[k].pivot_price);
+      bool ok = ObjectCreate(0, name, OBJ_TREND, 0, lines[k].anchor_time, lines[k].anchor_price,
+                              lines[k].pivot_time, lines[k].pivot_price);
+      if(!ok)
+        {
+         if(InpDebugLog)
+            PrintFormat("FanLines: ObjectCreate FAILED for %s (err=%d) anchor=%s@%.5f pivot=%s@%.5f",
+                        name, GetLastError(), TimeToString(lines[k].anchor_time), lines[k].anchor_price,
+                        TimeToString(lines[k].pivot_time), lines[k].pivot_price);
+         continue;
+        }
       ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
       ObjectSetInteger(0, name, OBJPROP_COLOR, (isOuter ? InpOuterLineColor : col));
       ObjectSetInteger(0, name, OBJPROP_WIDTH, (isOuter ? 2 : 1));
@@ -186,7 +202,16 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       isLow[z]  = false;
      }
 
-   //--- fractal pivot detection, confirmation-time, no lookahead - same rule as common.pivots()
+   //--- fractal pivot detection, confirmation-time, no lookahead - same rule as common.pivots(),
+   //--- PLUS a prominence/significance filter (the user's "not the noise" ask): a raw fractal only
+   //--- counts as a real swing if it has moved at least InpMinSwingATR x ATR away from the last
+   //--- CONFIRMED swing of the opposite type - the same idea a classic ZigZag's Deviation parameter
+   //--- uses, just expressed in ATR (so it scales sensibly across instruments/timeframes instead of
+   //--- a fixed point/pip count). Set InpMinSwingATR=0 to fall back to every raw fractal (the old,
+   //--- noisier behavior).
+   double lastMajorHigh = 0, lastMajorLow = 0;
+   bool   haveMajorHigh = false, haveMajorLow = false;
+   int    nMajorHigh = 0, nMajorLow = 0;
    for(int j = InpPivotK; j < rates_total - InpPivotK; j++)
      {
       bool okh = true, okl = true;
@@ -200,8 +225,17 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          if(high[m] > high[j]) okh = false;
          if(low[m]  < low[j])  okl = false;
         }
+
+      double a = atrBuf[j];
+      if(okl && InpMinSwingATR > 0 && a > 0 && haveMajorHigh && (lastMajorHigh - low[j]) < InpMinSwingATR * a)
+         okl = false;
+      if(okh && InpMinSwingATR > 0 && a > 0 && haveMajorLow && (high[j] - lastMajorLow) < InpMinSwingATR * a)
+         okh = false;
+
       isHigh[j] = okh;
       isLow[j]  = okl;
+      if(okh) { lastMajorHigh = high[j]; haveMajorHigh = true; nMajorHigh++; }
+      if(okl) { lastMajorLow  = low[j];  haveMajorLow  = true; nMajorLow++;  }
 
       if(InpMarkSwings && j >= start)
         {
@@ -225,6 +259,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
            }
         }
      }
+   if(InpDebugLog)
+      PrintFormat("FanLines: rates_total=%d start=%d end=%d majorHighs=%d majorLows=%d",
+                  rates_total, start, end, nMajorHigh, nMajorLow);
 
    //--- up-fan (anchor = swing low) / down-fan (anchor = swing high), forward pass - mirrors
    //--- fan_line_search.py's build_fan_signals(): same-origin lines never need re-sorting by
@@ -236,7 +273,11 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    ArrayResize(upLines, 0);
    ArrayResize(dnLines, 0);
 
-   for(int i = start; i < end; i++)
+   // NOTE: this loop runs all the way to rates_total-1 (the current bar), not just `end` - a pivot
+   // can only be CONFIRMED up to `end` (isHigh/isLow are false past that by construction above), but
+   // an already-active line must still be checked for a break on every bar including the most recent
+   // one, or the fan would look "active" for InpPivotK+1 bars after it actually broke.
+   for(int i = start; i < rates_total; i++)
      {
       if(isLow[i] && (upAnchorBar < 0 || low[i] < upAnchorPrice))
         {
@@ -297,6 +338,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
      }
 
    //--- only the CURRENTLY ACTIVE (unbroken) lines get drawn - broken ones were already dropped above
+   if(InpDebugLog)
+      PrintFormat("FanLines: active upLines=%d dnLines=%d (drawing now)", upCount, dnCount);
    DrawFan(upLines, upCount, "Up", InpUpFanColor, true,  atrBuf[rates_total - 1], time[rates_total - 1]);
    DrawFan(dnLines, dnCount, "Dn", InpDownFanColor, false, atrBuf[rates_total - 1], time[rates_total - 1]);
 
