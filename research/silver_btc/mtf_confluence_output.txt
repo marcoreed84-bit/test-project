@@ -1,0 +1,71 @@
+
+==========================================================================================
+GOLD M15/D1/H4 -- MTF confluence (M15_PIVOT_K, REQUIRE_CONFLUENCE, MODE, TARGET_R)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+built 1153 D1/H4 zones (reused from zone_sr_search.py)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+  M15_PIVOT_K=5: 37113 M15 levels, 34743 (93.6%) inside an HTF zone
+  M15_PIVOT_K=10: 19408 M15 levels, 18178 (93.7%) inside an HTF zone
+16/16 combos had IS n>=100. Top 8 by IS %PF:
+   (10, False, 'fade', 2.5): IS n= 3167  IS %PF=0.776  win%=29.2
+   (5, False, 'fade', 2.5): IS n= 2046  IS %PF=0.758  win%=28.3
+   (10, True, 'fade', 2.5): IS n= 3147  IS %PF=0.756  win%=29.0
+   (5, True, 'fade', 2.5): IS n= 2031  IS %PF=0.752  win%=28.4
+   (5, False, 'break', 2.5): IS n= 4237  IS %PF=0.738  win%=27.8
+   (5, True, 'break', 2.5): IS n= 4213  IS %PF=0.736  win%=27.7
+   (5, False, 'fade', 1.5): IS n= 2266  IS %PF=0.734  win%=39.5
+   (10, False, 'break', 2.5): IS n= 6552  IS %PF=0.730  win%=28.0
+FROZEN WINNER (IS only): (10, False, 'fade', 2.5)  IS n=3167  IS %PF=0.776  win%=29.2
+OOS (untouched): n=3425  win%=27.3  %PF=0.857  sum%=-60.2
+random-timing OOS null (1000 draws, p_fire=0.03381, mean n=3478): median=0.884  p95=0.948
+REAL OOS %PF=0.857 -> 22.5th percentile; p(K=1)=0.7750 [DOES NOT SURVIVE]; p(K=16)=1.0000 (best-of-K median 0.951) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15/D1/H4 -- MTF confluence (M15_PIVOT_K, REQUIRE_CONFLUENCE, MODE, TARGET_R)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+built 577 D1/H4 zones (reused from zone_sr_search.py)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+  M15_PIVOT_K=5: 36176 M15 levels, 33481 (92.6%) inside an HTF zone
+  M15_PIVOT_K=10: 19234 M15 levels, 17807 (92.6%) inside an HTF zone
+16/16 combos had IS n>=100. Top 8 by IS %PF:
+   (5, False, 'fade', 2.5): IS n= 1465  IS %PF=0.283  win%=24.0
+   (5, False, 'break', 2.5): IS n= 3281  IS %PF=0.257  win%=23.2
+   (10, False, 'fade', 2.5): IS n= 2424  IS %PF=0.240  win%=25.8
+   (5, True, 'fade', 2.5): IS n= 1399  IS %PF=0.232  win%=23.6
+   (5, True, 'break', 2.5): IS n= 3050  IS %PF=0.232  win%=24.5
+   (10, True, 'break', 2.5): IS n= 4953  IS %PF=0.219  win%=24.1
+   (10, False, 'break', 2.5): IS n= 5337  IS %PF=0.215  win%=23.6
+   (10, True, 'fade', 2.5): IS n= 2266  IS %PF=0.206  win%=24.8
+FROZEN WINNER (IS only): (5, False, 'fade', 2.5)  IS n=1465  IS %PF=0.283  win%=24.0
+OOS (untouched): n=1894  win%=28.6  %PF=0.658  sum%=-203.0
+random-timing OOS null (1000 draws, p_fire=0.01656, mean n=1941): median=0.578  p95=0.645
+REAL OOS %PF=0.658 -> 98.0th percentile; p(K=1)=0.0200 [SURVIVES]; p(K=16)=0.2676 (best-of-K median 0.647) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15/D1/H4 -- MTF confluence (M15_PIVOT_K, REQUIRE_CONFLUENCE, MODE, TARGET_R)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+built 544 D1/H4 zones (reused from zone_sr_search.py)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+  M15_PIVOT_K=5: 34954 M15 levels, 32359 (92.6%) inside an HTF zone
+  M15_PIVOT_K=10: 18559 M15 levels, 17210 (92.7%) inside an HTF zone
+16/16 combos had IS n>=100. Top 8 by IS %PF:
+   (5, False, 'break', 2.5): IS n= 3660  IS %PF=0.653  win%=29.8
+   (5, True, 'fade', 2.5): IS n= 1803  IS %PF=0.623  win%=28.6
+   (5, True, 'break', 2.5): IS n= 3644  IS %PF=0.601  win%=29.2
+   (10, False, 'break', 2.5): IS n= 5587  IS %PF=0.596  win%=27.7
+   (10, True, 'break', 2.5): IS n= 5357  IS %PF=0.589  win%=27.7
+   (10, True, 'fade', 2.5): IS n= 2659  IS %PF=0.525  win%=27.0
+   (5, False, 'break', 1.5): IS n= 4570  IS %PF=0.518  win%=38.2
+   (5, True, 'fade', 1.5): IS n= 1995  IS %PF=0.517  win%=37.7
+FROZEN WINNER (IS only): (5, False, 'break', 2.5)  IS n=3660  IS %PF=0.653  win%=29.8
+OOS (untouched): n=3251  win%=28.1  %PF=0.700  sum%=-267.5
+random-timing OOS null (1000 draws, p_fire=0.05108, mean n=3337): median=0.705  p95=0.757
+REAL OOS %PF=0.700 -> 43.7th percentile; p(K=1)=0.5630 [DOES NOT SURVIVE]; p(K=16)=1.0000 (best-of-K median 0.760) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 16, 'cfg': (10, False, 'fade', 2.5), 'is_n': 3167, 'is_pf': np.float64(0.7764157303711274), 'oos_n': 3425, 'oos_pf': np.float64(0.8569319175353476), 'oos_win': np.float64(27.27007299270073), 'pctile': np.float64(22.5), 'p1': 0.775, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 16, 'cfg': (5, False, 'fade', 2.5), 'is_n': 1465, 'is_pf': np.float64(0.2831627377383536), 'oos_n': 1894, 'oos_pf': np.float64(0.6582438398342695), 'oos_win': np.float64(28.563885955649422), 'pctile': np.float64(98.0), 'p1': 0.02, 'pK': 0.2676, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 16, 'cfg': (5, False, 'break', 2.5), 'is_n': 3660, 'is_pf': np.float64(0.6534995733331682), 'oos_n': 3251, 'oos_pf': np.float64(0.6999812853734456), 'oos_win': np.float64(28.114426330359887), 'pctile': np.float64(43.7), 'p1': 0.563, 'pK': 1.0, 'verdict': 'DOES NOT SURVIVE'}
