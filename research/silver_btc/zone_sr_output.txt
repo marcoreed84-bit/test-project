@@ -1,0 +1,65 @@
+
+==========================================================================================
+GOLD M15/D1/H4 -- Zone S/R (MIN_TOUCHES, STRATEGY, CONFLUENCE, TARGET_R)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+built 1153 D1/H4-refined zones (>= 1.0x daily-ATR prominence)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+16/16 combos had IS n>=100. Top 8 by IS %PF:
+   (2, 'break_retest', True, 1.5): IS n=  413  IS %PF=1.077  win%=47.5
+   (3, 'break_retest', True, 1.5): IS n=  413  IS %PF=1.077  win%=47.5
+   (2, 'break_retest', True, 2.5): IS n=  384  IS %PF=1.062  win%=45.8
+   (3, 'break_retest', True, 2.5): IS n=  384  IS %PF=1.062  win%=45.8
+   (2, 'break_retest', False, 1.5): IS n=  430  IS %PF=1.057  win%=45.1
+   (3, 'break_retest', False, 1.5): IS n=  430  IS %PF=1.057  win%=45.1
+   (2, 'break_retest', False, 2.5): IS n=  402  IS %PF=1.006  win%=44.8
+   (3, 'break_retest', False, 2.5): IS n=  402  IS %PF=1.006  win%=44.8
+FROZEN WINNER (IS only): (2, 'break_retest', True, 1.5)  IS n=413  IS %PF=1.077  win%=47.5
+OOS (untouched): n=364  win%=47.8  %PF=1.131  sum%=31.9
+random-timing OOS null (1000 draws, p_fire=0.00835, mean n=357): median=0.998  p95=1.237
+REAL OOS %PF=1.131 -> 83.3th percentile; p(K=1)=0.1670 [DOES NOT SURVIVE]; p(K=16)=0.9524 (best-of-K median 1.254) [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER M15/D1/H4 -- Zone S/R (MIN_TOUCHES, STRATEGY, CONFLUENCE, TARGET_R)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+built 577 D1/H4-refined zones (>= 1.0x daily-ATR prominence)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+16/16 combos had IS n>=100. Top 8 by IS %PF:
+   (2, 'break_retest', False, 2.5): IS n=  398  IS %PF=0.889  win%=44.2
+   (3, 'break_retest', False, 2.5): IS n=  398  IS %PF=0.889  win%=44.2
+   (2, 'break_retest', False, 1.5): IS n=  433  IS %PF=0.885  win%=44.3
+   (3, 'break_retest', False, 1.5): IS n=  433  IS %PF=0.885  win%=44.3
+   (2, 'break_retest', True, 1.5): IS n=  358  IS %PF=0.742  win%=40.5
+   (3, 'break_retest', True, 1.5): IS n=  358  IS %PF=0.742  win%=40.5
+   (2, 'break_retest', True, 2.5): IS n=  334  IS %PF=0.622  win%=35.3
+   (3, 'break_retest', True, 2.5): IS n=  334  IS %PF=0.622  win%=35.3
+FROZEN WINNER (IS only): (2, 'break_retest', False, 2.5)  IS n=398  IS %PF=0.889  win%=44.2
+OOS (untouched): n=345  win%=44.3  %PF=0.995  sum%=-2.7
+random-timing OOS null (1000 draws, p_fire=0.00921, mean n=336): median=0.946  p95=1.211
+REAL OOS %PF=0.995 -> 63.8th percentile; p(K=1)=0.3620 [DOES NOT SURVIVE]; p(K=16)=0.9998 (best-of-K median 1.221) [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD M15/D1/H4 -- Zone S/R (MIN_TOUCHES, STRATEGY, CONFLUENCE, TARGET_R)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+built 544 D1/H4-refined zones (>= 1.0x daily-ATR prominence)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+16/16 combos had IS n>=100. Top 8 by IS %PF:
+   (2, 'break_retest', False, 2.5): IS n=  219  IS %PF=1.135  win%=45.2
+   (3, 'break_retest', False, 2.5): IS n=  219  IS %PF=1.135  win%=45.2
+   (2, 'break_retest', False, 1.5): IS n=  233  IS %PF=1.121  win%=45.5
+   (3, 'break_retest', False, 1.5): IS n=  233  IS %PF=1.121  win%=45.5
+   (2, 'break_retest', True, 2.5): IS n=  221  IS %PF=1.066  win%=43.4
+   (3, 'break_retest', True, 2.5): IS n=  221  IS %PF=1.066  win%=43.4
+   (2, 'break_retest', True, 1.5): IS n=  234  IS %PF=1.034  win%=43.6
+   (3, 'break_retest', True, 1.5): IS n=  234  IS %PF=1.034  win%=43.6
+FROZEN WINNER (IS only): (2, 'break_retest', False, 2.5)  IS n=219  IS %PF=1.135  win%=45.2
+OOS (untouched): n=235  win%=46.8  %PF=1.081  sum%=32.7
+random-timing OOS null (1000 draws, p_fire=0.00883, mean n=229): median=0.968  p95=1.285
+REAL OOS %PF=1.081 -> 72.8th percentile; p(K=1)=0.2720 [DOES NOT SURVIVE]; p(K=16)=0.9934 (best-of-K median 1.306) [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 16, 'cfg': (2, 'break_retest', True, 1.5), 'is_n': 413, 'is_pf': np.float64(1.0773872272762475), 'oos_n': 364, 'oos_pf': np.float64(1.1314004172289713), 'oos_win': np.float64(47.8021978021978), 'pctile': np.float64(83.3), 'p1': 0.167, 'pK': 0.9524, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 16, 'cfg': (2, 'break_retest', False, 2.5), 'is_n': 398, 'is_pf': np.float64(0.8885425470873749), 'oos_n': 345, 'oos_pf': np.float64(0.9949867728496115), 'oos_win': np.float64(44.34782608695652), 'pctile': np.float64(63.800000000000004), 'p1': 0.362, 'pK': 0.9998, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 16, 'cfg': (2, 'break_retest', False, 2.5), 'is_n': 219, 'is_pf': np.float64(1.1346474681312133), 'oos_n': 235, 'oos_pf': np.float64(1.0808171129677626), 'oos_win': np.float64(46.808510638297875), 'pctile': np.float64(72.8), 'p1': 0.272, 'pK': 0.9934, 'verdict': 'DOES NOT SURVIVE'}
