@@ -292,7 +292,8 @@ struct HSPattern
    double   target;
    double   stop;
    double   atrAtBrk;             // ATR captured at the breakout confirmation bar - shared by InpPullbackTolATR and InpRunnerTrailATR, matching the Python research's own "captured once, not recomputed per bar" convention
-   bool     traded;
+   bool     traded;               // true once this pattern is done being tracked, for ANY reason - a real fill OR a skip. See executed below for which one.
+   bool     executed;             // true only if a real order was actually sent AND accepted - false for every skip reason (already in a position, spread too wide, retest window expired, invalid target/stop, RSI block, or a rejected order). traded && !executed = skipped, never a real trade.
    int      run;                  // pending-only: consecutive closes beyond the neckline seen so far
   };
 
@@ -531,6 +532,7 @@ int FindHSPatterns(const MqlRates &r[], const double &atr[], const int n,
       P.neckSlopePerSec = (dtSec != 0) ? (P.p_t2 - P.p_t1) / (double)dtSec : 0.0;
       P.brk_i = -1;
       P.traded = false;
+      P.executed = false;
       P.run = 0;
       ArrayResize(out, nOut + 1, 32);
       out[nOut++] = P;
@@ -725,22 +727,22 @@ void CheckForEntry()
          if(brkShift < 0) continue;
          confirmShift = brkShift;
          long ageBars = (long)brkShift - 1;
-         if(ageBars > InpPullbackWindowBars) { g_patterns[i].traded = true; continue; }   // missed - matches the Python research's own "missed" bucket, skip entirely
+         if(ageBars > InpPullbackWindowBars) { SkipPattern(i); continue; }   // missed - matches the Python research's own "missed" bucket, skip entirely
          double nl = NecklineAtTime(P, t1);
          double tol = InpPullbackTolATR * P.atrAtBrk;
          trigger = P.top ? (h1 >= nl - tol) : (l1 <= nl + tol);
         }
       if(!trigger) continue;
-      if(!canOpen) { g_patterns[i].traded = true; continue; }   // see the note above CheckForEntry()
+      if(!canOpen) { SkipPattern(i); continue; }   // see the note above CheckForEntry()
 
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       bool isBuy = !P.top;
       double entry = isBuy ? ask : bid;
-      if(isBuy && P.target <= entry) { g_patterns[i].traded = true; continue; }
-      if(!isBuy && P.target >= entry) { g_patterns[i].traded = true; continue; }
-      if(isBuy && P.stop >= entry) { g_patterns[i].traded = true; continue; }
-      if(!isBuy && P.stop <= entry) { g_patterns[i].traded = true; continue; }
-      if(!RSIFilterOk(isBuy, confirmShift)) { g_patterns[i].traded = true; continue; }   // InpUseRSIFilter - see its own input comment; confirmShift tracks P.brk_t's own bar, not always shift=1 under InpUsePullbackEntry
+      if(isBuy && P.target <= entry) { SkipPattern(i); continue; }
+      if(!isBuy && P.target >= entry) { SkipPattern(i); continue; }
+      if(isBuy && P.stop >= entry) { SkipPattern(i); continue; }
+      if(!isBuy && P.stop <= entry) { SkipPattern(i); continue; }
+      if(!RSIFilterOk(isBuy, confirmShift)) { SkipPattern(i); continue; }   // InpUseRSIFilter - see its own input comment; confirmShift tracks P.brk_t's own bar, not always shift=1 under InpUsePullbackEntry
 
       trade.SetExpertMagicNumber(InpMagic);
       trade.SetDeviationInPoints(InpSlippage);
@@ -749,7 +751,8 @@ void CheckForEntry()
       double tp = InpUseRunner ? 0.0 : P.target;   // InpUseRunner replaces the fixed broker-side TP with ManageRunner()'s trailing stop - see its own input comment
       bool ok = isBuy ? trade.Buy(InpLots, _Symbol, entry, P.stop, tp, cmt)
                        : trade.Sell(InpLots, _Symbol, entry, P.stop, tp, cmt);
-      g_patterns[i].traded = true;   // one shot per pattern either way - don't retry a rejected order every tick
+      g_patterns[i].traded = true;     // one shot per pattern either way - don't retry a rejected order every tick
+      g_patterns[i].executed = ok;     // a rejected order (ok=false) is a skip, not a real trade - its drawing clears below like any other skip
       if(ok)
         {
          SyncPosition();
@@ -757,7 +760,10 @@ void CheckForEntry()
          if(InpUseRunner) ArmRunner(P, isBuy);
         }
       else
+        {
          PrintFormat("HeadShoulders_EA: entry FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+         if(!g_skipCosmeticDraws) RemovePatternDrawing(g_patterns[i]);
+        }
       return;
      }
   }
@@ -1012,6 +1018,34 @@ void DrawPattern(const HSPattern &P)
   }
 color InpColNoStop() { return(C'255,120,120'); }
 //+------------------------------------------------------------------+
+//| Removes a confirmed pattern's drawing by its stable object-name       |
+//| prefix (same construction as DrawPattern's own `base`) - used the     |
+//| moment a pattern resolves WITHOUT a real trade, so a skipped/expired   |
+//| pattern's lines disappear immediately instead of lingering on the       |
+//| chart looking identical to one that actually traded (the exact           |
+//| confusion this was built to fix - a confirmed pattern the panel            |
+//| counted as "traded" that never placed a real order).                         |
+//+------------------------------------------------------------------+
+void RemovePatternDrawing(const HSPattern &P)
+  {
+   string base = g_pz + "p_" + TimeToString(P.t_head, TIME_DATE|TIME_MINUTES) + (P.top ? "T" : "I") + "_";
+   ObjectsDeleteAll(0, base);
+  }
+//+------------------------------------------------------------------+
+//| Marks a pattern resolved WITHOUT a real trade (any skip reason:       |
+//| already in a position, spread too wide, retest window expired,        |
+//| invalid target/stop, RSI block, or a rejected order) and removes        |
+//| its chart drawing right away. traded=true alone used to mean both         |
+//| "really traded" and "gave up on it" - this keeps that flag's existing      |
+//| meaning (resolved, don't revisit) but records which one separately.          |
+//+------------------------------------------------------------------+
+void SkipPattern(int idx)
+  {
+   g_patterns[idx].traded = true;
+   g_patterns[idx].executed = false;
+   if(!g_skipCosmeticDraws) RemovePatternDrawing(g_patterns[idx]);
+  }
+//+------------------------------------------------------------------+
 //| Un-confirmed shape - InpDrawPending. Same shoulders/head markers    |
 //| and neckline as a confirmed pattern, but no target/stop (there is     |
 //| none yet) and in InpColPending, so a shape mid-formation reads          |
@@ -1041,6 +1075,7 @@ void RefreshDrawings()
    for(int i = 0; i < ArraySize(g_patterns); i++)
      {
       if(g_patterns[i].t_s2 < cutoff) continue;
+      if(g_patterns[i].traded && !g_patterns[i].executed) continue;   // skipped, not traded - SkipPattern() already removed its drawing; never redraw it
       DrawPattern(g_patterns[i]);
      }
 
@@ -1261,17 +1296,19 @@ void DrawPanel()
    PRow("a2", x, ty, w, "position", g_ticket != 0 ? "OPEN" : "flat", g_ticket != 0 ? 1 : -1); ty += rh + 6;   // GAP 2
 
    int nPat = ArraySize(g_patterns);
-   int nConfirmed = 0, nTraded = 0;
+   int nConfirmed = 0, nExecuted = 0, nSkipped = 0;
    datetime lastBrk = 0; int lastIdx = -1;
    for(int i = 0; i < nPat; i++)
      {
       if(g_patterns[i].brk_i < 0) continue;
       nConfirmed++;
-      if(g_patterns[i].traded) nTraded++;
+      if(g_patterns[i].traded)
+        { if(g_patterns[i].executed) nExecuted++; else nSkipped++; }
       if(g_patterns[i].brk_t >= lastBrk) { lastBrk = g_patterns[i].brk_t; lastIdx = i; }
      }
    PSection("s2", x, ty, w, rh, "PATTERNS"); ty += rh + 6;                                        // GAP 3
-   PRow("b0", x, ty, w, "confirmed / traded", IntegerToString(nConfirmed) + " / " + IntegerToString(nTraded), -1); ty += rh;
+   PRow("b0", x, ty, w, "confirmed", IntegerToString(nConfirmed), -1); ty += rh;
+   PRow("b0b", x, ty, w, "traded / skipped", IntegerToString(nExecuted) + " / " + IntegerToString(nSkipped), -1); ty += rh;
    string lastTxt = "none yet"; int lastState = -1;
    if(lastIdx >= 0)
      {
