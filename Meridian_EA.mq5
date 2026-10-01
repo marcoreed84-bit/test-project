@@ -751,8 +751,44 @@
 //|  same level even without its own separate real test. REJECTED. Stays false. See       |
 //|  Aurelius_EA.mq5 v1.52's header, research/aurelius/giveback_event_driven_test.py.      |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.08: InpUsePartialScaleOut added (default OFF - needs a real    |
+//|  MT5 Strategy Tester run before being trusted like the shipped      |
+//|  defaults, same discipline as InpUseGivebackExit above). Closes      |
+//|  InpPartialFraction (default half) of the position at InpPartialTP-   |
+//|  Atr xATR (default 2.5, i.e. 1:1 with the safety stop); the remainder  |
+//|  keeps its ORIGINAL stop (not moved to breakeven) and exits normally    |
+//|  (reversal/SL/Friday), exactly like unmodified Meridian.                 |
+//|                                                                            |
+//|  Origin: user asked to test a partial scale-out as an alternative to      |
+//|  the rejected fixed-TP and trailing-stop ideas. Tested via msim.py's       |
+//|  faithful simulator (real M5 Gold data/spread) on the real, MT5-report-     |
+//|  validated 2023-2026 window, walk-forward IS(2023-01..2025-06)/OOS(2025-     |
+//|  06..2026-09-21). NOT a strict improvement - explicitly a profit-for-         |
+//|  drawdown trade-off, confirmed on genuinely untouched OOS data:                |
+//|    hold-to-reversal (shipped):     OOS PF 1.527, net $2793.3, maxDD $299.4      |
+//|    partial scale-out (this):       OOS PF 1.394, net $1619.6, maxDD $223.6       |
+//|  i.e. roughly -42% net profit for -25% max drawdown. A full fixed-TP (no         |
+//|  partial, same money all capped at the target) tested clearly worse on           |
+//|  both axes (OOS PF 1.199, net $1011.1) - letting half the position still          |
+//|  ride to reversal captures materially more of the tail than capping it all.        |
+//|  Moving the remainder's stop to breakeven after the partial was ALSO tested         |
+//|  and found worse, not better, at every TP distance tried (lower net AND often        |
+//|  higher drawdown - Meridian's edge depends on riding through retracements that         |
+//|  a breakeven stop cuts off prematurely) - NOT implemented here for that reason.          |
+//|  InpPartialTPAtr=2.5 was the best in-sample setting of six tested (1.0/1.5/2.0/           |
+//|  2.5/3.5/5.0xATR). Enable only if a smoother equity curve matters more to you              |
+//|  than maximum return - otherwise leave at the shipped default (false).                      |
+//|                                                                                                |
+//|  PRACTICAL NOTE: a true half-close needs the broker's minimum volume step to                   |
+//|  allow it (e.g. InpLots=0.02 with a 0.01 step, so half=0.01 is a valid size) -                   |
+//|  at the shipped InpLots=0.01 with a typical 0.01 step, half (0.005) does not                      |
+//|  round to a valid size and the EA will silently skip the partial, trading                          |
+//|  exactly like the feature is off. See this file's accompanying chat notes for                       |
+//|  the exact Strategy Tester settings to test this properly.                                            |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.07"
+#property version   "1.08"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -776,6 +812,11 @@ input bool   InpUseGivebackExit    = false;   // REJECTED (2026-09-25): the Pyth
 input double InpGivebackMinPeak    = 5.0;     // Floating profit (price units, i.e. $ per 0.01 lot) the trade must reach before a giveback can even be checked - below this it's ordinary noise, never cut.
 input double InpGivebackPeakCutoff = 20.0;    // If the peak reached was AT OR ABOVE this, do NOT cut on giveback - real data shows these trades recover into a real winner far more often (66% win%) than average, not less.
 input double InpGivebackThreshold  = 1.0;     // Floating profit (price units) at/below which counts as "given back to near-breakeven".
+
+input group "=== Partial scale-out (v1.08 candidate) ==="
+input bool   InpUsePartialScaleOut = false;   // See header: research-validated profit-for-drawdown trade-off (OOS net -42%, maxDD -25%), not a strict improvement. Needs a real MT5 test before trusting like the shipped defaults.
+input double InpPartialTPAtr       = 2.5;     // xATR distance for the partial target - best of six tested (1.0/1.5/2.0/2.5/3.5/5.0) in the real-data research grid.
+input double InpPartialFraction    = 0.5;     // Fraction of the position closed at the partial target. The remainder keeps the ORIGINAL safety stop - NOT moved to breakeven (tested separately, found worse - see header).
 
 input group "=== Risk ==="
 input double InpLots            = 0.01;
@@ -874,6 +915,12 @@ int      g_posDir  = 0;      // +1 long, -1 short, 0 flat
 //--- MT5, never reused, so a simple != is a safe "new position" test)
 ulong    g_gbTicket  = 0;
 double   g_gbPeakFav = 0.0;   // best floating profit (price units) seen so far this trade
+
+//--- InpUsePartialScaleOut tracking - same ticket-keyed reset pattern as
+//--- the giveback tracking above
+ulong    g_partialTicket = 0;
+bool     g_partialDone   = false;   // whether the partial close has already been taken for g_partialTicket
+double   g_partialTP     = 0.0;     // this trade's partial-target price, set once at entry (CheckForEntry)
 
 //--- cross-EA signal (see InpPublishPosition) - no M5/M15 variant suffix
 //--- needed, unlike Aurelius's writer-side name: Meridian has no timeframe
@@ -1204,6 +1251,7 @@ void CheckForEntry()
 
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = isBuy ? px - InpSafetyStopATR * atr : px + InpSafetyStopATR * atr;
+   double partialTP = isBuy ? px + InpPartialTPAtr * atr : px - InpPartialTPAtr * atr;
    double lots = LotSize();
 
    trade.SetExpertMagicNumber(InpMagic);
@@ -1213,7 +1261,16 @@ void CheckForEntry()
    bool ok = isBuy ? trade.Buy(lots, _Symbol, px, sl, 0.0, InpTradeComment)
                     : trade.Sell(lots, _Symbol, px, sl, 0.0, InpTradeComment);
    if(ok)
+     {
       SyncPositionState();
+      //--- InpUsePartialScaleOut (v1.08 candidate) - recorded unconditionally
+      //--- (cheap) so flipping the input on mid-run still has a valid target
+      //--- for the next trade; the OnTick() check itself still gates on the
+      //--- input being on.
+      g_partialTicket = g_ticket;
+      g_partialDone   = false;
+      g_partialTP     = partialTP;
+     }
    else
       PrintFormat("Meridian EA: entry FAILED, retcode %d (%s)",
                   trade.ResultRetcode(), trade.ResultRetcodeDescription());
@@ -2302,6 +2359,43 @@ void OnTick()
       if(fav > g_gbPeakFav) g_gbPeakFav = fav;
       if(g_gbPeakFav >= InpGivebackMinPeak && g_gbPeakFav < InpGivebackPeakCutoff && fav <= InpGivebackThreshold)
          CloseCurrentPosition("GIVEBACK");
+     }
+
+   //--- tick-level partial scale-out (InpUsePartialScaleOut, v1.08 candidate -
+   //--- see header). Same every-tick reasoning as the giveback exit above:
+   //--- real ticks read the target at least as early as the Python research's
+   //--- per-bar high/low, never later. Closes InpPartialFraction once price
+   //--- reaches g_partialTP (set at entry, CheckForEntry); the remainder keeps
+   //--- its original stop and is left alone here - ManageOpenPosition()'s
+   //--- normal reversal/SL/Friday handling still applies to it unchanged.
+   if(InpUsePartialScaleOut && g_ticket != 0 && !g_partialDone && g_partialTicket == g_ticket
+      && PositionSelectByTicket(g_ticket))
+     {
+      double cur = (g_posDir > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      bool   hit = (g_posDir > 0) ? (cur >= g_partialTP) : (cur <= g_partialTP);
+      if(hit)
+        {
+         double fullVol = PositionGetDouble(POSITION_VOLUME);
+         double step    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+         double minVol  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+         double half    = fullVol * InpPartialFraction;
+         if(step > 0.0) half = MathRound(half / step) * step;
+         //--- if the broker's min lot step won't allow a valid partial at
+         //--- this position size (e.g. 0.01 lot / 0.01 step -> half=0.005
+         //--- rounds to 0.0 or to the full position), skip rather than send
+         //--- a degenerate order - the trade just rides to the normal exit,
+         //--- same as the feature being off. See header's PRACTICAL NOTE.
+         if(half >= minVol && half < fullVol)
+           {
+            if(trade.PositionClosePartial(g_ticket, half))
+               g_partialDone = true;
+            else
+               PrintFormat("Meridian EA: partial close FAILED for ticket %I64u, retcode %d (%s)",
+                           g_ticket, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+           }
+         else
+            g_partialDone = true;   // can't be done at this size - stop re-checking every tick
+        }
      }
 
    if(!IsNewBar()) return;
