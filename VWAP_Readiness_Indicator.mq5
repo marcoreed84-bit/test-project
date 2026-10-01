@@ -54,7 +54,7 @@
 //|  claimed signal.                                                                   |
 //+------------------------------------------------------------------+
 #property copyright "VWAP_Readiness"
-#property version   "1.01"
+#property version   "1.02"
 #property description "Standalone VWAP + volume/spread/trend readiness panel (no trade execution)"
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -320,44 +320,76 @@ bool DifferentSession(const int shiftOld, const int shiftNew)
    return(a.day != b.day || a.mon != b.mon || a.year != b.year);
   }
 //+------------------------------------------------------------------+
-//| Draws the newest closed bar's VWAP/band segment only, each new    |
-//| bar - a live panel doesn't need to re-walk full history the way   |
-//| ScalpSignal_Indicator's historical markup does.                   |
+//| Draws one bar's VWAP/band segment, shiftOld->shiftNew (both real   |
+//| shifts, not hardcoded) - used both for the live one-new-bar update  |
+//| and for the backfill walk below.                                    |
+//+------------------------------------------------------------------+
+void DrawVwapSegment(const int shiftOld, const int shiftNew)
+  {
+   datetime tOld = iTime(_Symbol, PERIOD_CURRENT, shiftOld);
+   datetime tNew = iTime(_Symbol, PERIOD_CURRENT, shiftNew);
+   if(tOld == 0 || tNew == 0) return;
+   if(InpShowVWAP)
+     {
+      double vA = SessionVWAP(shiftOld), vB = SessionVWAP(shiftNew);
+      if(vA > 0.0 && vB > 0.0) DrawSeg("vwap", tOld, vA, tNew, vB, InpColVWAP);
+     }
+   if(InpShowVWAPBands)
+     {
+      if(InpShowBand1) DrawBandPair(1, shiftOld, shiftNew, InpVWAPBandK1, InpColBand1);
+      if(InpShowBand2) DrawBandPair(2, shiftOld, shiftNew, InpVWAPBandK2, InpColBand2);
+      if(InpShowBand3) DrawBandPair(3, shiftOld, shiftNew, InpVWAPBandK3, InpColBand3);
+     }
+  }
+//+------------------------------------------------------------------+
+//| Draws one band level's upper+lower segment pair at real shifts.    |
+//| levelTag keeps each level's chart objects independent so band1/2/3  |
+//| don't overwrite each other (same per-bar-segment idiom as           |
+//| DrawSeg() above). PREVIOUSLY (v1.00/v1.01) this always read shift   |
+//| 2/1 regardless of which bar times were passed in - harmless while   |
+//| only ever called for the newest bar, but wrong for backfilling      |
+//| older bars, so fixed alongside the backfill below.                  |
+//+------------------------------------------------------------------+
+void DrawBandPair(const int levelTag, const int shiftOld, const int shiftNew,
+                   const double k, const color col)
+  {
+   datetime tOld = iTime(_Symbol, PERIOD_CURRENT, shiftOld);
+   datetime tNew = iTime(_Symbol, PERIOD_CURRENT, shiftNew);
+   if(tOld == 0 || tNew == 0) return;
+   double uA, lA, uB, lB;
+   if(!SessionVWAPBand(shiftOld, k, uA, lA) || !SessionVWAPBand(shiftNew, k, uB, lB)) return;
+   string tagU = "vwapU" + IntegerToString(levelTag);
+   string tagL = "vwapL" + IntegerToString(levelTag);
+   DrawSeg(tagU, tOld, uA, tNew, uB, col);
+   DrawSeg(tagL, tOld, lA, tNew, lB, col);
+  }
+//+------------------------------------------------------------------+
+//| v1.01 bug fix: v1.00 only ever drew the newest closed bar's         |
+//| segment, so the line only grew forward from whenever the indicator   |
+//| was attached - attach mid-session and the earlier part of today's     |
+//| VWAP never appeared, looking like an "incomplete" line. Now backfills  |
+//| the WHOLE current session (VWAP is session-anchored anyway, so there's  |
+//| no real data before today's start regardless) the first time it runs,   |
+//| then falls back to the cheap one-new-bar-per-call update after that.     |
 //+------------------------------------------------------------------+
 void UpdateVwapLine()
   {
    datetime bt1 = iTime(_Symbol, PERIOD_CURRENT, 1);
-   if(bt1 == 0 || bt1 == g_lastVwapBarTime) return;
+   if(bt1 == 0) return;
+   if(g_lastVwapBarTime == 0)
+     {
+      int maxBars = Bars(_Symbol, PERIOD_CURRENT);
+      int s = 2;
+      while(s < maxBars && !DifferentSession(s, 1)) s++;   // walk to today's session start
+      for(int shift = s - 1; shift >= 2; shift--)
+         DrawVwapSegment(shift, shift - 1);
+      g_lastVwapBarTime = bt1;
+      return;
+     }
+   if(bt1 == g_lastVwapBarTime) return;
    g_lastVwapBarTime = bt1;
-   datetime bt2 = iTime(_Symbol, PERIOD_CURRENT, 2);
-   if(bt2 == 0 || DifferentSession(2, 1)) return;
-
-   if(InpShowVWAP)
-     {
-      double vA = SessionVWAP(2), vB = SessionVWAP(1);
-      if(vA > 0.0 && vB > 0.0) DrawSeg("vwap", bt2, vA, bt1, vB, InpColVWAP);
-     }
-   if(InpShowVWAPBands)
-     {
-      if(InpShowBand1) DrawBandPair(1, bt2, bt1, InpVWAPBandK1, InpColBand1);
-      if(InpShowBand2) DrawBandPair(2, bt2, bt1, InpVWAPBandK2, InpColBand2);
-      if(InpShowBand3) DrawBandPair(3, bt2, bt1, InpVWAPBandK3, InpColBand3);
-     }
-  }
-//+------------------------------------------------------------------+
-//| Draws one band level's upper+lower segment pair. levelTag keeps   |
-//| each level's chart objects independent so band1/2/3 don't overwrite |
-//| each other (same per-bar-segment idiom as DrawSeg() above).        |
-//+------------------------------------------------------------------+
-void DrawBandPair(const int levelTag, const datetime bt2, const datetime bt1,
-                   const double k, const color col)
-  {
-   double uA, lA, uB, lB;
-   if(!SessionVWAPBand(2, k, uA, lA) || !SessionVWAPBand(1, k, uB, lB)) return;
-   string tagU = "vwapU" + IntegerToString(levelTag);
-   string tagL = "vwapL" + IntegerToString(levelTag);
-   DrawSeg(tagU, bt2, uA, bt1, uB, col);
-   DrawSeg(tagL, bt2, lA, bt1, lB, col);
+   if(DifferentSession(2, 1)) return;
+   DrawVwapSegment(2, 1);
   }
 //+------------------------------------------------------------------+
 //| Panel primitives - identical to ScalpSignal_Indicator.mq5's own   |

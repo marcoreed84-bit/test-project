@@ -22,7 +22,7 @@
 //|  other indicator.                                                           |
 //+------------------------------------------------------------------+
 #property copyright "MTF_Stochastic"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 #property indicator_separate_window
 #property indicator_buffers 2
@@ -46,6 +46,13 @@ input int             InpDPeriod     = 3;
 input int             InpSlowing     = 3;
 input ENUM_MA_METHOD  InpMAMethod    = MODE_SMA;
 input ENUM_STO_PRICE  InpPriceField  = STO_LOWHIGH;
+input bool             InpSmooth      = false;   // Cosmetic only: linearly interpolate between HTF values
+                                                  // instead of a flat step. The real %K/%D genuinely only
+                                                  // moves once per InpTimeframe bar - a smooth line here is
+                                                  // visual comfort, not real data, so this defaults OFF.
+input int              InpMaxHtfBars  = 3000;    // Cap on how much HTF history is pulled per tick (plenty
+                                                  // for any realistic chart view - keeps this cheap on a
+                                                  // symbol/timeframe with very long history).
 
 double g_kBuf[];
 double g_dBuf[];
@@ -84,7 +91,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    double htfK[], htfD[];
    ArraySetAsSeries(htfK, true);
    ArraySetAsSeries(htfD, true);
-   int htfBars = Bars(_Symbol, InpTimeframe);
+   int htfBars = MathMin(Bars(_Symbol, InpTimeframe), InpMaxHtfBars);
    if(htfBars < 2) return(0);
    if(CopyBuffer(g_handle, 0, 0, htfBars, htfK) <= 0) return(0);
    if(CopyBuffer(g_handle, 1, 0, htfBars, htfD) <= 0) return(0);
@@ -106,8 +113,26 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       // current-chart bar's own series position the same way so both
       // buffers line up with MT5's bottom-up indicator buffer convention.
       int seriesPos = rates_total - 1 - i;
-      g_kBuf[seriesPos] = htfK[htfShift];
-      g_dBuf[seriesPos] = htfD[htfShift];
+      if(!InpSmooth || htfShift + 1 >= htfBars)
+        {
+         g_kBuf[seriesPos] = htfK[htfShift];
+         g_dBuf[seriesPos] = htfD[htfShift];
+        }
+      else
+        {
+         // InpSmooth: glide from the PREVIOUS HTF value (htfShift+1, the
+         // bar just before this one) toward the CURRENT HTF bar's value
+         // (htfShift), by how far time[i] sits through the current HTF
+         // bar's own span - cosmetic only, see the input's own comment.
+         datetime htfOpenNow = iTime(_Symbol, InpTimeframe, htfShift);
+         int periodSec = PeriodSeconds(InpTimeframe);
+         double frac = 0.0;
+         if(htfOpenNow != 0 && periodSec > 0)
+            frac = (double)(time[i] - htfOpenNow) / (double)periodSec;
+         frac = MathMax(0.0, MathMin(1.0, frac));
+         g_kBuf[seriesPos] = htfK[htfShift + 1] + frac * (htfK[htfShift] - htfK[htfShift + 1]);
+         g_dBuf[seriesPos] = htfD[htfShift + 1] + frac * (htfD[htfShift] - htfD[htfShift + 1]);
+        }
      }
 
    return(rates_total);
