@@ -54,7 +54,7 @@
 //|  claimed signal.                                                                   |
 //+------------------------------------------------------------------+
 #property copyright "VWAP_Readiness"
-#property version   "1.02"
+#property version   "1.03"
 #property description "Standalone VWAP + volume/spread/trend readiness panel (no trade execution)"
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -77,6 +77,7 @@ input color    InpColBand2       = C'140,90,0';
 input bool     InpShowBand3      = false;        // +/- InpVWAPBandK3 x stdev (outermost)
 input double   InpVWAPBandK3     = 3.0;
 input color    InpColBand3       = C'120,0,120';
+input bool     InpShowLineLabels = true;         // Caption each drawn line at the chart's live edge (same idiom as Meridian_EA.mq5's MA/VWAP labels)
 
 //--- Volume readiness ----------------------------------------------------
 input int      InpVolAvgBars     = 100;          // Bars used for the volume average (Aurelius_EA.mq5's own real default)
@@ -121,6 +122,7 @@ input color    InpWaterCol    = C'46,38,24';
 
 string   g_pp = "VWRP_";   // panel objects
 string   g_pm = "VWRM_";   // VWAP/band chart-line segments
+string   g_pl = "VWRL_";   // VWAP/band end-of-line labels
 string   g_pw = "VWRW_";   // watermark
 int      g_panelMinW = 0;
 bool     g_panelReclaim = true;
@@ -134,6 +136,7 @@ int      hATR     = INVALID_HANDLE;
 int      hHTFMa[3] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE};
 int      hHTFAtr[3] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE};
 datetime g_lastVwapBarTime = 0;
+datetime g_lastCacheBarTime = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -175,83 +178,83 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_pp);
    ObjectsDeleteAll(0, g_pm);
    ObjectsDeleteAll(0, g_pw);
+   ObjectsDeleteAll(0, g_pl);
    Comment("");
   }
 //+------------------------------------------------------------------+
-//| Session VWAP - same real construction as ScalpSignal_Indicator's  |
-//| SessionVWAP(shift), ported from Aurelius_EA.mq5's own function.   |
+//| v1.03 BUG FIX: v1.00-v1.02's SessionVWAP()/SessionVWAPBand() each |
+//| re-walked history from scratch on every call, capped at a         |
+//| hardcoded 400 bars (CopyTime(..., shift, 400, ...)). Harmless on   |
+//| a slow timeframe, but on M1 (up to ~1440 bars/day) that cap is hit  |
+//| well before the session's actual start once more than ~6.7 hours    |
+//| have elapsed - the loop just ran out of copied bars and silently     |
+//| returned a "last 400 bars" average instead of a true SESSION VWAP,    |
+//| which is why it diverged from VWAP_Bands.mq5 (no such cap, and the     |
+//| one found to be correct). Fixed by computing the real cumulative        |
+//| VWAP/stdev for TODAY's bars in one pass (same proven construction as     |
+//| VWAP_Bands.mq5) into a cache, rebuilt once per new closed bar -           |
+//| SessionVWAP()/SessionVWAPBand() are now just cheap lookups into it.        |
 //+------------------------------------------------------------------+
-double SessionVWAP(const int shift)
+double g_cacheVwap[];
+double g_cacheStdev[];
+int    g_cacheN = 0;   // g_cacheVwap[0..g_cacheN-1] valid; index 0 = shift 1
+
+void RebuildSessionVwapCache()
   {
-   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, shift);
-   if(barTime == 0) return(0.0);
-   MqlDateTime dt; TimeToStruct(barTime, dt);
-   dt.hour = 0; dt.min = 0; dt.sec = 0;
-   datetime dayStart = StructToTime(dt);
+   g_cacheN = 0;
+   int maxBars = Bars(_Symbol, PERIOD_CURRENT);
+   if(maxBars < 2) return;
+   int s = 2;
+   while(s < maxBars && !DifferentSession(s, 1)) s++;   // s = first shift OUTSIDE today
+   int todayBars = s - 1;                               // shifts 1..todayBars are today
+   if(todayBars < 1) return;
 
    datetime tArr[]; double hArr[], lArr[], cArr[]; long vArr[];
    ArraySetAsSeries(tArr, true); ArraySetAsSeries(hArr, true);
    ArraySetAsSeries(lArr, true); ArraySetAsSeries(cArr, true);
    ArraySetAsSeries(vArr, true);
-   int got = CopyTime(_Symbol, PERIOD_CURRENT, shift, 400, tArr);
-   if(got <= 0) return(0.0);
-   if(CopyHigh(_Symbol, PERIOD_CURRENT, shift, got, hArr) <= 0) return(0.0);
-   if(CopyLow(_Symbol, PERIOD_CURRENT, shift, got, lArr) <= 0) return(0.0);
-   if(CopyClose(_Symbol, PERIOD_CURRENT, shift, got, cArr) <= 0) return(0.0);
-   if(CopyTickVolume(_Symbol, PERIOD_CURRENT, shift, got, vArr) <= 0) return(0.0);
+   int got = CopyTime(_Symbol, PERIOD_CURRENT, 1, todayBars, tArr);
+   if(got <= 0) return;
+   if(CopyHigh(_Symbol, PERIOD_CURRENT, 1, got, hArr) <= 0) return;
+   if(CopyLow(_Symbol, PERIOD_CURRENT, 1, got, lArr) <= 0) return;
+   if(CopyClose(_Symbol, PERIOD_CURRENT, 1, got, cArr) <= 0) return;
+   if(CopyTickVolume(_Symbol, PERIOD_CURRENT, 1, got, vArr) <= 0) return;
 
-   double cumPV = 0.0, cumV = 0.0;
-   for(int s = 0; s < got; s++)
+   ArrayResize(g_cacheVwap, got);
+   ArrayResize(g_cacheStdev, got);
+   double cumPV = 0.0, cumV = 0.0, cumPPV = 0.0;
+   // arrays are series (index 0 = shift 1, most recent); walk OLDEST
+   // (index got-1) to NEWEST (index 0) to accumulate chronologically,
+   // exactly like VWAP_Bands.mq5's own forward day-reset loop.
+   for(int i = got - 1; i >= 0; i--)
      {
-      if(tArr[s] < dayStart) break;
-      double typical = (hArr[s] + lArr[s] + cArr[s]) / 3.0;
-      cumPV += typical * (double)vArr[s];
-      cumV  += (double)vArr[s];
+      double typical = (hArr[i] + lArr[i] + cArr[i]) / 3.0;
+      double vol = (double)vArr[i];
+      cumPV  += typical * vol;
+      cumV   += vol;
+      cumPPV += typical * typical * vol;
+      double vwap = (cumV > 0.0) ? cumPV / cumV : 0.0;
+      double variance = (cumV > 0.0) ? (cumPPV / cumV - vwap * vwap) : 0.0;
+      g_cacheVwap[i]  = vwap;
+      g_cacheStdev[i] = MathSqrt(MathMax(variance, 0.0));
      }
-   if(cumV <= 0.0) return(0.0);
-   return(cumPV / cumV);
+   g_cacheN = got;
   }
 //+------------------------------------------------------------------+
-//| VWAP outer bands - same real construction as ScalpSignal_         |
-//| Indicator's SessionVWAPBand(): VWAP +/- k * session-cumulative    |
-//| volume-weighted stdev of typical price from VWAP.                 |
+double SessionVWAP(const int shift)
+  {
+   int idx = shift - 1;
+   if(idx < 0 || idx >= g_cacheN || g_cacheVwap[idx] <= 0.0) return(0.0);
+   return(g_cacheVwap[idx]);
+  }
 //+------------------------------------------------------------------+
 bool SessionVWAPBand(const int shift, const double k, double &upper, double &lower)
   {
    upper = 0.0; lower = 0.0;
-   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, shift);
-   if(barTime == 0) return(false);
-   MqlDateTime dt; TimeToStruct(barTime, dt);
-   dt.hour = 0; dt.min = 0; dt.sec = 0;
-   datetime dayStart = StructToTime(dt);
-
-   datetime tArr[]; double hArr[], lArr[], cArr[]; long vArr[];
-   ArraySetAsSeries(tArr, true); ArraySetAsSeries(hArr, true);
-   ArraySetAsSeries(lArr, true); ArraySetAsSeries(cArr, true);
-   ArraySetAsSeries(vArr, true);
-   int got = CopyTime(_Symbol, PERIOD_CURRENT, shift, 400, tArr);
-   if(got <= 0) return(false);
-   if(CopyHigh(_Symbol, PERIOD_CURRENT, shift, got, hArr) <= 0) return(false);
-   if(CopyLow(_Symbol, PERIOD_CURRENT, shift, got, lArr) <= 0) return(false);
-   if(CopyClose(_Symbol, PERIOD_CURRENT, shift, got, cArr) <= 0) return(false);
-   if(CopyTickVolume(_Symbol, PERIOD_CURRENT, shift, got, vArr) <= 0) return(false);
-
-   double sumWX = 0.0, sumWX2 = 0.0, sumW = 0.0;
-   for(int s = 0; s < got; s++)
-     {
-      if(tArr[s] < dayStart) break;
-      double typical = (hArr[s] + lArr[s] + cArr[s]) / 3.0;
-      double w = (double)vArr[s];
-      sumWX  += typical * w;
-      sumWX2 += typical * typical * w;
-      sumW   += w;
-     }
-   if(sumW <= 0.0) return(false);
-   double vwap = sumWX / sumW;
-   double var  = sumWX2 / sumW - vwap * vwap;
-   double sd   = MathSqrt(MathMax(var, 0.0));
-   upper = vwap + k * sd;
-   lower = vwap - k * sd;
+   int idx = shift - 1;
+   if(idx < 0 || idx >= g_cacheN || g_cacheVwap[idx] <= 0.0) return(false);
+   upper = g_cacheVwap[idx] + k * g_cacheStdev[idx];
+   lower = g_cacheVwap[idx] - k * g_cacheStdev[idx];
    return(true);
   }
 //+------------------------------------------------------------------+
@@ -310,6 +313,76 @@ void DrawSeg(const string tag, const datetime tOld, const double vOld,
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+  }
+//+------------------------------------------------------------------+
+//| End-of-line captions - same OBJ_TEXT idiom as Meridian_EA.mq5's    |
+//| DrawChartLabel()/DeleteChartLabel(), so every drawn line says what   |
+//| it is at the chart's live edge instead of relying on color alone.     |
+//+------------------------------------------------------------------+
+bool DrawChartLabel(const string tag, const datetime t, const double price,
+                     const string text, const color col)
+  {
+   string nm = g_pl + tag;
+   if(text == "" || t <= 0 || price <= 0.0)
+     { if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm); return(false); }
+   bool created = false;
+   if(ObjectFind(0, nm) < 0)
+     { ObjectCreate(0, nm, OBJ_TEXT, 0, t, price); created = true; }
+   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, t);
+   ObjectSetDouble (0, nm, OBJPROP_PRICE, 0, price);
+   ObjectSetString (0, nm, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 8);
+   ObjectSetString (0, nm, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   return(created);
+  }
+void DeleteChartLabel(const string tag)
+  {
+   string nm = g_pl + tag;
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+  }
+//+------------------------------------------------------------------+
+//| Labels VWAP + each enabled band's upper/lower line at its latest   |
+//| (shift=1) value, anchored at the chart's live edge (TimeCurrent()) -  |
+//| called once per new bar and once per second from OnTimer() so the      |
+//| labels keep tracking the live edge as time passes between bar closes.   |
+//+------------------------------------------------------------------+
+void UpdateVwapLabels()
+  {
+   if(!InpShowLineLabels)
+     {
+      DeleteChartLabel("vwap");
+      for(int i = 1; i <= 3; i++) { DeleteChartLabel("bU"+IntegerToString(i)); DeleteChartLabel("bL"+IntegerToString(i)); }
+      return;
+     }
+   datetime tLive = TimeCurrent();
+   if(InpShowVWAP)
+     {
+      double vw = SessionVWAP(1);
+      if(vw > 0.0) DrawChartLabel("vwap", tLive, vw, "  VWAP " + DoubleToString(vw, _Digits), InpColVWAP);
+      else         DeleteChartLabel("vwap");
+     }
+   bool show[3] = {InpShowBand1, InpShowBand2, InpShowBand3};
+   double kArr[3] = {InpVWAPBandK1, InpVWAPBandK2, InpVWAPBandK3};
+   color colArr[3] = {InpColBand1, InpColBand2, InpColBand3};
+   for(int i = 0; i < 3; i++)
+     {
+      string tagU = "bU" + IntegerToString(i+1), tagL = "bL" + IntegerToString(i+1);
+      if(!InpShowVWAPBands || !show[i])
+        { DeleteChartLabel(tagU); DeleteChartLabel(tagL); continue; }
+      double u, l;
+      if(SessionVWAPBand(1, kArr[i], u, l))
+        {
+         DrawChartLabel(tagU, tLive, u, "  Band " + IntegerToString(i+1) + " " + DoubleToString(u, _Digits), colArr[i]);
+         DrawChartLabel(tagL, tLive, l, "  Band " + IntegerToString(i+1) + " " + DoubleToString(l, _Digits), colArr[i]);
+        }
+      else
+        { DeleteChartLabel(tagU); DeleteChartLabel(tagL); }
+     }
   }
 bool DifferentSession(const int shiftOld, const int shiftNew)
   {
@@ -617,7 +690,14 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                  const double &open[], const double &high[], const double &low[], const double &close[],
                  const long &tick_volume[], const long &volume[], const int &spread[])
   {
+   datetime bt1Now = iTime(_Symbol, PERIOD_CURRENT, 1);
+   if(bt1Now != 0 && bt1Now != g_lastCacheBarTime)
+     {
+      g_lastCacheBarTime = bt1Now;
+      RebuildSessionVwapCache();
+     }
    UpdateVwapLine();
+   UpdateVwapLabels();
    if(InpShowPanel && TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
@@ -629,10 +709,11 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   if(InpShowPanel && TimeCurrent() != g_lastPanelDraw)
+   if(TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
-      DrawPanel();
+      UpdateVwapLabels();   // keeps labels tracking the live edge between bar closes
+      if(InpShowPanel) DrawPanel();
       ChartRedraw(0);
      }
   }
