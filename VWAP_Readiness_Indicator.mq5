@@ -42,15 +42,19 @@
 //|  VWAP + outer bands: SessionVWAP()/SessionVWAPBand() are the SAME real |
 //|  constructions added to ScalpSignal_Indicator.mq5 this session (session- |
 //|  anchored VWAP, +/- k * volume-weighted stdev bands) - shown here as a     |
-//|  chart visual and as two panel rows (price vs VWAP, price vs the band),     |
-//|  purely informational. Real M1 testing this session found NO construction   |
-//|  built on this pattern (VWAP-band + stochastic reversal, wide or tight-      |
-//|  tuned) cleared a real edge - see ScalpSignal_Indicator.mq5's own header      |
-//|  RESEARCH NOTE for the numbers. Drawn here for the same reason: a              |
-//|  discretionary visual reference, never a claimed signal.                        |
+//|  chart visual and as two panel rows (price vs VWAP, price vs the bands),    |
+//|  purely informational. v1.01: now up to THREE independently-toggleable       |
+//|  band levels (InpShowBand1/2/3, default 1.0/2.0/3.0x stdev, band 3 off by     |
+//|  default), matching the convention most VWAP+bands indicators use (e.g.       |
+//|  TradingView's built-in VWAP) instead of the single fixed band v1.00 shipped.  |
+//|  Real M1 testing this session found NO construction built on this pattern      |
+//|  (VWAP-band + stochastic reversal, wide or tight-tuned) cleared a real edge -   |
+//|  see ScalpSignal_Indicator.mq5's own header RESEARCH NOTE for the numbers.       |
+//|  Drawn here for the same reason: a discretionary visual reference, never a        |
+//|  claimed signal.                                                                   |
 //+------------------------------------------------------------------+
 #property copyright "VWAP_Readiness"
-#property version   "1.00"
+#property version   "1.01"
 #property description "Standalone VWAP + volume/spread/trend readiness panel (no trade execution)"
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -60,9 +64,19 @@
 //--- VWAP visuals ------------------------------------------------------
 input bool     InpShowVWAP       = true;         // Draw the session VWAP line
 input color    InpColVWAP        = C'0,255,255';
-input bool     InpShowVWAPBands  = true;         // Draw VWAP's outer deviation bands (informational - see header)
-input double   InpVWAPBandK      = 2.0;          // Band width, x volume-weighted stdev from VWAP
-input color    InpColVWAPBand    = C'0,150,150';
+input bool     InpShowVWAPBands  = true;         // Master switch for all three band levels below
+//--- three deviation levels, same convention as TradingView's own VWAP+bands
+//--- indicator (1/2/3 standard deviations) - band 3 off by default since most
+//--- charts only need the inner two to stay readable; turn it on if you want it.
+input bool     InpShowBand1      = true;         // +/- InpVWAPBandK1 x stdev (innermost)
+input double   InpVWAPBandK1     = 1.0;
+input color    InpColBand1       = C'0,150,150';
+input bool     InpShowBand2      = true;         // +/- InpVWAPBandK2 x stdev
+input double   InpVWAPBandK2     = 2.0;
+input color    InpColBand2       = C'140,90,0';
+input bool     InpShowBand3      = false;        // +/- InpVWAPBandK3 x stdev (outermost)
+input double   InpVWAPBandK3     = 3.0;
+input color    InpColBand3       = C'120,0,120';
 
 //--- Volume readiness ----------------------------------------------------
 input int      InpVolAvgBars     = 100;          // Bars used for the volume average (Aurelius_EA.mq5's own real default)
@@ -292,13 +306,25 @@ void UpdateVwapLine()
      }
    if(InpShowVWAPBands)
      {
-      double uA, lA, uB, lB;
-      if(SessionVWAPBand(2, InpVWAPBandK, uA, lA) && SessionVWAPBand(1, InpVWAPBandK, uB, lB))
-        {
-         DrawSeg("vwapU", bt2, uA, bt1, uB, InpColVWAPBand);
-         DrawSeg("vwapL", bt2, lA, bt1, lB, InpColVWAPBand);
-        }
+      if(InpShowBand1) DrawBandPair(1, bt2, bt1, InpVWAPBandK1, InpColBand1);
+      if(InpShowBand2) DrawBandPair(2, bt2, bt1, InpVWAPBandK2, InpColBand2);
+      if(InpShowBand3) DrawBandPair(3, bt2, bt1, InpVWAPBandK3, InpColBand3);
      }
+  }
+//+------------------------------------------------------------------+
+//| Draws one band level's upper+lower segment pair. levelTag keeps   |
+//| each level's chart objects independent so band1/2/3 don't overwrite |
+//| each other (same per-bar-segment idiom as DrawSeg() above).        |
+//+------------------------------------------------------------------+
+void DrawBandPair(const int levelTag, const datetime bt2, const datetime bt1,
+                   const double k, const color col)
+  {
+   double uA, lA, uB, lB;
+   if(!SessionVWAPBand(2, k, uA, lA) || !SessionVWAPBand(1, k, uB, lB)) return;
+   string tagU = "vwapU" + IntegerToString(levelTag);
+   string tagL = "vwapL" + IntegerToString(levelTag);
+   DrawSeg(tagU, bt2, uA, bt1, uB, col);
+   DrawSeg(tagL, bt2, lA, bt1, lB, col);
   }
 //+------------------------------------------------------------------+
 //| Panel primitives - identical to ScalpSignal_Indicator.mq5's own   |
@@ -475,13 +501,29 @@ void DrawPanel()
    // --- VWAP (section + 2 rows) -----------------------------------------
    double vw1 = SessionVWAP(1);
    double c1 = iClose(_Symbol, PERIOD_CURRENT, 1);
-   double bU = 0.0, bL = 0.0; bool haveBand = InpShowVWAPBands && SessionVWAPBand(1, InpVWAPBandK, bU, bL);
 
    PSection("s2", x, ty, w, rh, "VWAP"); ty += rh + 6;                                             // GAP 4
    PRow("v1", x, ty, w, "price vs VWAP",
         vw1 <= 0.0 ? "n/a" : (c1 > vw1 ? "above" : "below"), -1); ty += rh;
-   PRow("v2", x, ty, w, "price vs VWAP band",
-        !haveBand ? "off" : (c1 > bU ? "above upper" : c1 < bL ? "below lower" : "inside"), -1); ty += rh + 6; // GAP 5
+   PRow("v2", x, ty, w, "price vs bands", VwapBandZoneText(c1), -1); ty += rh + 6; // GAP 5
+  }
+//+------------------------------------------------------------------+
+//| Reports which band zone price is in, checked outermost-enabled-   |
+//| level inward first so e.g. "beyond band 3" takes priority over    |
+//| "beyond band 1" when band 3 is also on.                           |
+//+------------------------------------------------------------------+
+string VwapBandZoneText(const double c1)
+  {
+   if(!InpShowVWAPBands) return("off");
+   double u, l;
+   if(InpShowBand3 && SessionVWAPBand(1, InpVWAPBandK3, u, l))
+     { if(c1 > u) return("above band 3"); if(c1 < l) return("below band 3"); }
+   if(InpShowBand2 && SessionVWAPBand(1, InpVWAPBandK2, u, l))
+     { if(c1 > u) return("above band 2"); if(c1 < l) return("below band 2"); }
+   if(InpShowBand1 && SessionVWAPBand(1, InpVWAPBandK1, u, l))
+     { if(c1 > u) return("above band 1"); if(c1 < l) return("below band 1"); }
+   if(InpShowBand1 || InpShowBand2 || InpShowBand3) return("inside");
+   return("off");
   }
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
