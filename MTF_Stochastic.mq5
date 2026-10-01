@@ -22,7 +22,7 @@
 //|  other indicator.                                                           |
 //+------------------------------------------------------------------+
 #property copyright "MTF_Stochastic"
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 #property indicator_separate_window
 #property indicator_buffers 2
@@ -53,6 +53,14 @@ input bool             InpSmooth      = false;   // Cosmetic only: linearly inte
 input int              InpMaxHtfBars  = 3000;    // Cap on how much HTF history is pulled per tick (plenty
                                                   // for any realistic chart view - keeps this cheap on a
                                                   // symbol/timeframe with very long history).
+input int              InpMaxLtfBars  = 5000;    // v1.02 fix: caps a FULL recompute (indicator attach, or
+                                                  // any history resync) to only the most recent bars on the
+                                                  // CHART itself - anything older is left blank. v1.00/v1.01
+                                                  // had no such cap and called the relatively expensive
+                                                  // iBarShift() once per bar across the chart's ENTIRE loaded
+                                                  // history on every full recompute (tens of thousands of
+                                                  // calls on a long-history M1 chart) - the real cause of the
+                                                  // freeze this fixes, not the stepped/smoothed visual.
 
 double g_kBuf[];
 double g_dBuf[];
@@ -99,10 +107,48 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    // chart arrays here are time-ascending (not series) by MQL5 convention
    // for OnCalculate - iterate forward, recompute from prev_calculated-1
    // so a mid-bar HTF update still repaints just the current forming bar.
-   int start = (prev_calculated > 1) ? prev_calculated - 1 : 0;
+   bool fullRecompute = (prev_calculated <= 1);
+   int start = fullRecompute ? 0 : prev_calculated - 1;
+
+   if(fullRecompute && rates_total - start > InpMaxLtfBars)
+     {
+      // v1.02 fix: a full recompute used to run iBarShift() once per bar
+      // across the ENTIRE chart history (tens of thousands of calls on a
+      // long-history M1 chart - the real freeze cause). Now bounded: blank
+      // out everything older than InpMaxLtfBars in one cheap pass, no
+      // per-bar searching, then only compute the recent window below.
+      int newStart = rates_total - InpMaxLtfBars;
+      for(int i = start; i < newStart; i++)
+        {
+         g_kBuf[rates_total - 1 - i] = EMPTY_VALUE;
+         g_dBuf[rates_total - 1 - i] = EMPTY_VALUE;
+        }
+      start = newStart;
+     }
+
+   // v1.02 fix: the full-recompute path (large bar count) now walks a
+   // single monotonic pointer through the HTF bars instead of calling the
+   // relatively expensive iBarShift() per LTF bar - O(bars + HTF bars)
+   // total instead of O(bars x search-cost-per-call). Starts at the OLDEST
+   // available HTF bar and only ever moves toward more recent, so it
+   // self-corrects even if an LTF bar predates all available HTF history
+   // (possible if InpMaxHtfBars is set low relative to InpMaxLtfBars) -
+   // no separate anchor call needed. The incremental path (1-2 new bars
+   // most ticks) still just calls iBarShift() directly - already cheap
+   // there, and simpler to keep provably correct.
+   int htfPtr = htfBars - 1;
+
    for(int i = start; i < rates_total; i++)
      {
-      int htfShift = iBarShift(_Symbol, InpTimeframe, time[i], false);
+      int htfShift;
+      if(fullRecompute)
+        {
+         while(htfPtr > 0 && iTime(_Symbol, InpTimeframe, htfPtr - 1) <= time[i]) htfPtr--;
+         htfShift = (iTime(_Symbol, InpTimeframe, htfPtr) <= time[i]) ? htfPtr : -1;
+        }
+      else
+         htfShift = iBarShift(_Symbol, InpTimeframe, time[i], false);
+
       if(htfShift < 0 || htfShift >= htfBars)
         {
          g_kBuf[rates_total - 1 - i] = EMPTY_VALUE;

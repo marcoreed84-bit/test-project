@@ -54,7 +54,7 @@
 //|  claimed signal.                                                                   |
 //+------------------------------------------------------------------+
 #property copyright "VWAP_Readiness"
-#property version   "1.03"
+#property version   "1.04"
 #property description "Standalone VWAP + volume/spread/trend readiness panel (no trade execution)"
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -78,6 +78,12 @@ input bool     InpShowBand3      = false;        // +/- InpVWAPBandK3 x stdev (o
 input double   InpVWAPBandK3     = 3.0;
 input color    InpColBand3       = C'120,0,120';
 input bool     InpShowLineLabels = true;         // Caption each drawn line at the chart's live edge (same idiom as Meridian_EA.mq5's MA/VWAP labels)
+input int      InpMaxBackfillBars = 500;         // v1.04 fix: caps the session backfill (see UpdateVwapLine()) to
+                                                  // this many most-recent bars instead of literally every bar since
+                                                  // session start. v1.03's uncapped backfill could create ~10,000
+                                                  // chart objects on attach on an M1 chart (1 VWAP segment + up to 3
+                                                  // band pairs x 2 lines, per bar, for a whole day) - the real cause
+                                                  // of a freeze on attach, not the stochastic indicator's steps.
 
 //--- Volume readiness ----------------------------------------------------
 input int      InpVolAvgBars     = 100;          // Bars used for the volume average (Aurelius_EA.mq5's own real default)
@@ -454,7 +460,8 @@ void UpdateVwapLine()
       int maxBars = Bars(_Symbol, PERIOD_CURRENT);
       int s = 2;
       while(s < maxBars && !DifferentSession(s, 1)) s++;   // walk to today's session start
-      for(int shift = s - 1; shift >= 2; shift--)
+      int oldestShift = MathMin(s - 1, InpMaxBackfillBars + 1);   // cap - see input's own comment
+      for(int shift = oldestShift; shift >= 2; shift--)
          DrawVwapSegment(shift, shift - 1);
       g_lastVwapBarTime = bt1;
       return;
