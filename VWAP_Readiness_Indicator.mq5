@@ -90,6 +90,13 @@ input int      InpTrendMAPeriod        = 21;     // EMA period used for the tren
 input int      InpTrendSlopeBars       = 10;     // Bars back the slope is measured over
 input double   InpTrendSlopeThresholdATR = 0.10; // Min |slope| (x ATR) to call it up/down rather than "flat"
 
+//--- Higher-timeframe trend (same EMA-slope-vs-ATR method as the chart's own
+//--- trend above, just run on other timeframes too - default ladder M5/M15/H1,
+//--- change any slot to whatever timeframes you actually trade off) ---------
+input bool            InpShowHTF1 = true;  input ENUM_TIMEFRAMES InpHTF1 = PERIOD_M5;
+input bool            InpShowHTF2 = true;  input ENUM_TIMEFRAMES InpHTF2 = PERIOD_M15;
+input bool            InpShowHTF3 = true;  input ENUM_TIMEFRAMES InpHTF3 = PERIOD_H1;
+
 //--- Panel -----------------------------------------------------------------
 input bool     InpShowPanel   = true;
 input int      InpPanelDrag   = 1;               // 0 = locked, 1 = draggable
@@ -121,6 +128,11 @@ int      g_panX = -1, g_panY = -1;
 datetime g_lastPanelDraw = 0;
 int      hTrendMA = INVALID_HANDLE;
 int      hATR     = INVALID_HANDLE;
+//--- higher-timeframe trend handles, parallel to InpHTF1/2/3 above - each
+//--- pair is only created if its InpShowHTFn is true (no point paying for
+//--- a handle nobody asked to see)
+int      hHTFMa[3] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE};
+int      hHTFAtr[3] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE};
 datetime g_lastVwapBarTime = 0;
 
 //+------------------------------------------------------------------+
@@ -133,6 +145,20 @@ int OnInit()
       Print("VWAP_Readiness_Indicator: failed to create an indicator handle. Error ", GetLastError());
       return(INIT_FAILED);
      }
+   bool htfShow[3] = {InpShowHTF1, InpShowHTF2, InpShowHTF3};
+   ENUM_TIMEFRAMES htfTf[3] = {InpHTF1, InpHTF2, InpHTF3};
+   for(int i = 0; i < 3; i++)
+     {
+      if(!htfShow[i]) continue;
+      hHTFMa[i]  = iMA(_Symbol, htfTf[i], InpTrendMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+      hHTFAtr[i] = iATR(_Symbol, htfTf[i], 14);
+      if(hHTFMa[i] == INVALID_HANDLE || hHTFAtr[i] == INVALID_HANDLE)
+        {
+         PrintFormat("VWAP_Readiness_Indicator: failed to create the HTF%d (%s) handle. Error %d",
+                     i + 1, EnumToString(htfTf[i]), GetLastError());
+         return(INIT_FAILED);
+        }
+     }
    IndicatorSetString(INDICATOR_SHORTNAME, "VWAP Readiness (" + _Symbol + " " + EnumToString((ENUM_TIMEFRAMES)_Period) + ")");
    EventSetTimer(1);
    return(INIT_SUCCEEDED);
@@ -141,6 +167,11 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   for(int i = 0; i < 3; i++)
+     {
+      if(hHTFMa[i] != INVALID_HANDLE) IndicatorRelease(hHTFMa[i]);
+      if(hHTFAtr[i] != INVALID_HANDLE) IndicatorRelease(hHTFAtr[i]);
+     }
    ObjectsDeleteAll(0, g_pp);
    ObjectsDeleteAll(0, g_pm);
    ObjectsDeleteAll(0, g_pw);
@@ -244,14 +275,15 @@ double VolumeRatioAt(const int shift, const int avgBars)
 //| InpTrendSlopeBars, ATR-normalised, thresholded to avoid noise     |
 //| flicker. Returns +1 up, -1 down, 0 flat/unavailable.              |
 //+------------------------------------------------------------------+
-int TrendDir(double &slopeOut)
+int TrendDirH(const int handleMA, const int handleATR, double &slopeOut)
   {
    slopeOut = 0.0;
+   if(handleMA == INVALID_HANDLE || handleATR == INVALID_HANDLE) return(0);
    double maNow[], maPast[], atrNow[];
    ArraySetAsSeries(maNow, true); ArraySetAsSeries(maPast, true); ArraySetAsSeries(atrNow, true);
-   if(CopyBuffer(hTrendMA, 0, 1, 1, maNow) < 1) return(0);
-   if(CopyBuffer(hTrendMA, 0, 1 + InpTrendSlopeBars, 1, maPast) < 1) return(0);
-   if(CopyBuffer(hATR, 0, 1, 1, atrNow) < 1) return(0);
+   if(CopyBuffer(handleMA, 0, 1, 1, maNow) < 1) return(0);
+   if(CopyBuffer(handleMA, 0, 1 + InpTrendSlopeBars, 1, maPast) < 1) return(0);
+   if(CopyBuffer(handleATR, 0, 1, 1, atrNow) < 1) return(0);
    if(atrNow[0] <= 0.0 || maNow[0] == EMPTY_VALUE || maPast[0] == EMPTY_VALUE) return(0);
    double slope = (maNow[0] - maPast[0]) / atrNow[0];
    slopeOut = slope;
@@ -259,6 +291,7 @@ int TrendDir(double &slopeOut)
    if(slope <= -InpTrendSlopeThresholdATR) return(-1);
    return(0);
   }
+int TrendDir(double &slopeOut) { return TrendDirH(hTrendMA, hATR, slopeOut); }
 //+------------------------------------------------------------------+
 //| Chart-line drawing for the VWAP/band segments - same OBJ_TREND    |
 //| per-bar idiom as ScalpSignal_Indicator.mq5's DrawMASegment().     |
@@ -443,7 +476,11 @@ void DrawPanel()
    int rh = InpPanelSize + 11;
    int hdr = rh + 14;
 
-   const int ROWS = 9, GAPS = 5;
+   // 9 rows/5 gaps fixed + up to 4 rows/2 gaps for the HIGHER TIMEFRAMES
+   // section (1 header row + up to 3 HTF rows, sized for the worst case so
+   // it never overflows if all three InpShowHTFn are on - see DrawPanel()'s
+   // own header comment, this must track the real ty+=/GAP count below)
+   const int ROWS = 13, GAPS = 7;
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
    int guard  = 0;
@@ -497,6 +534,24 @@ void DrawPanel()
    PRow("r3", x, ty, w, "short-term trend",
         trend > 0 ? "UP" : trend < 0 ? "DOWN" : "flat", trend > 0 ? 1 : trend < 0 ? 0 : -1); ty += rh;
    PRow("r4", x, ty, w, "OVERALL", overallOK ? "READY" : "WAIT", overallOK ? 1 : 0); ty += rh + 6; // GAP 3
+
+   // --- Higher-timeframe trend (section + up to 3 rows) -------------------
+   bool htfShowArr[3] = {InpShowHTF1, InpShowHTF2, InpShowHTF3};
+   ENUM_TIMEFRAMES htfTfArr[3] = {InpHTF1, InpHTF2, InpHTF3};
+   bool anyHtf = InpShowHTF1 || InpShowHTF2 || InpShowHTF3;
+   if(anyHtf)
+     {
+      PSection("sh", x, ty, w, rh, "HIGHER TIMEFRAMES"); ty += rh + 6;
+      for(int i = 0; i < 3; i++)
+        {
+         if(!htfShowArr[i]) continue;
+         double hSlope; int hTrend = TrendDirH(hHTFMa[i], hHTFAtr[i], hSlope);
+         PRow("ht" + IntegerToString(i), x, ty, w, EnumToString(htfTfArr[i]),
+              hTrend > 0 ? "UP" : hTrend < 0 ? "DOWN" : "flat", hTrend > 0 ? 1 : hTrend < 0 ? 0 : -1);
+         ty += rh;
+        }
+      ty += 6;
+     }
 
    // --- VWAP (section + 2 rows) -----------------------------------------
    double vw1 = SessionVWAP(1);
