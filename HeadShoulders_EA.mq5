@@ -212,10 +212,48 @@
 //|  unaffected (its trigger is an exact P.brk_t==t1 equality with no later re-check possible, so a               |
 //|  skip is still the only correct outcome there). Every OTHER rejection reason still permanently                |
 //|  skips the pattern exactly as before.                                                                         |
+//|                                                                                                                |
+//|  v1.11: real-money hardening pass from an Opus audit of v1.10 (findings numbered as in that audit). No pattern-  |
+//|  detection math, no input default, no stop/target/runner RULE changed; every change is about orders actually      |
+//|  reaching the market, or state surviving real terminal life. (1/2/9) UNIFIED TRANSIENT-ENTRY RETRY: v1.10's        |
+//|  MARKET_CLOSED fix never worked as built - "re-check on the next tick" was really NEXT BAR (CheckForEntry() only     |
+//|  runs inside IsNewBar()), i.e. on D1 24h later at the same 01:00 session boundary that rejected it, and it needed a   |
+//|  second retest bar. Now AttemptEntry() is the one place an entry is sent; a block or rejection that can clear by       |
+//|  itself (spread > InpMaxSpreadPoints - finding #2, folded into the same path rather than a separate one; outside the     |
+//|  trade session/trade mode; terminal disconnected/AutoTrading off; retcodes 10004/10016*/10018/10020/10021/10024/10027)    |
+//|  leaves the pattern untraded with retry state, and RetryTransientEntries() re-attempts on EVERY tick (and the timer),       |
+//|  at most one send per HS_RETRY_SEND_GAP_SEC=10s across all patterns, until filled, a permanent reason appears, or the        |
+//|  retry expires: new input InpEntryRetryMinutes (60; 0 = off = every failure skips) after the first block, and in immediate-   |
+//|  entry mode also the moment the trigger bar closes (that trigger is valid on one bar only); pullback mode stays bounded by     |
+//|  InpPullbackWindowBars. On expiry the pattern is skipped - Python takes the FIRST retest or nothing, so this replaces v1.10's     |
+//|  open-ended "try a later retest bar" handling. (*10016 only after the EA's own side/stops-level pre-check passed, so a stop that  |
+//|  is invalid by the pattern's own numbers is never retried.) Fills are now judged by retcode DONE/DONE_PARTIAL, not CTrade's bool    |
+//|  (true whenever the server merely answered). Every permanent skip now Journals its reason (SkipPattern() logged nothing before -     |
+//|  exactly what hid the D1 zero-trade problem); deferrals/expiries/fills-after-retry are logged too, throttled. (6) AMBIGUOUS FILL:       |
+//|  timeout 10012 / no connection 10031 / placed-not-filled 10008 / no answer are NOT re-sent blind (double-position risk) - all sends      |
+//|  hold >= HS_INFLIGHT_HOLD_SEC=60s and while an own order is live; an own position or entry deal appearing within HS_INFLIGHT_ADOPT_SEC     |
+//|  =1h is ADOPTED (pattern executed, ArmRunner() - otherwise a tp=0.0 runner position would run unmanaged). Best-effort, limits disclosed     |
+//|  at ResolveInflight(); a second own position triggers a loud hourly warning, never an auto-close. (3) MULTI-INSTANCE GUARD: a second chart  |
+//|  with the same symbol+InpMagic refuses to start (they adopted each other's positions and fought over one runner stop) - keyed symbol+magic,  |
+//|  NOT +period, so a live v1.10 position/runner state is not orphaned by attaching v1.11. (4) RUNNER FALLBACK: price already through the       |
+//|  wanted trail -> close at market (a modify there is invalid by definition, and the research runner's stop has been hit); otherwise clamped to    |
+//|  stops/freeze level with a one-tick floor, rounded away from price; a refused or clamped trail is re-tried every 10s on ticks instead of next     |
+//|  bar (a full day on D1); failures Journal "runner PositionModify FAILED" with prices/levels. Peak/reached-target persisted as they move. (5) The     |
+//|  first Recompute() after any (re)start ignores InpRecomputeEveryBars (was up to 4 days blind on D1). (7) DUPLICATE PATTERN - verified, not          |
+//|  guessed: AlreadyKnown() needed s1+head+s2 all equal, but AddSwing() merging a later higher high into the right shoulder (or the sliding window        |
+//|  moving s1) re-queued the same head as a new pattern - 144/2632 confirmed GOLD M15 heads, 152/2686 SILVER M15, 11/242 GOLD H4 in the EA-faithful      |
+//|  hs_sim.py replica; now keyed head+direction (replica trade impact ~1%: GOLD M15 1143->1132 trades, %PF 1.283->1.291; SILVER M15 1092->1088, 1.089->   |
+//|  1.099). (8) InpLots must sit on the broker's volume grid and InpATRPeriod >= 1, else the EA refuses to start (no silent clamping - clamping up would    |
+//|  raise real exposure); fixed-lot by design, risk-relative sizing deliberately out of scope. Also: NormPrice() on every entry price/SL/TP;                 |
+//|  CurrentATR() returns -1 on a short history read (AdvancePending() skips the bar) instead of a silent _Point ATR; a chart symbol/timeframe switch          |
+//|  (OnDeinit+OnInit with globals kept) discards the old chart's pattern/runner RAM state; runner state re-saved once a late-visible position's ticket is       |
+//|  known; an immediate-mode pattern whose one trigger bar passed unvisited is now skipped (was left untraded forever).                                          |
+//|  NOT YET REAL-MT5-CONFIRMED, and hs_sim.py NO LONGER REPLICATES this file exactly - it has no transient failures, skips (not retries) on wide spread,          |
+//|  dedups on the old key, and has no intrabar runner close. Update it and re-run the bar-match before trusting any new verdict built on v1.11 trades.         |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.10"
-#property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, MARKET_CLOSED retry fix in v1.10"
+#property version   "1.11"
+#property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
 CTrade trade;
@@ -256,6 +294,7 @@ input double InpLots             = 0.01;
 input int    InpMagic            = 20260925;
 input int    InpMaxSpreadPoints  = 60;     // Max spread to allow entry, points
 input int    InpSlippage         = 30;
+input int    InpEntryRetryMinutes = 60;    // Transient-failure entry retry, minutes (0 = off)
 
 input group "=== Chart visuals ==="
 input bool   InpDrawPatterns     = true;
@@ -322,6 +361,16 @@ struct HSPattern
    bool     traded;               // true once this pattern is done being tracked, for ANY reason - a real fill OR a skip. See executed below for which one.
    bool     executed;             // true only if a real order was actually sent AND accepted - false for every skip reason (already in a position, spread too wide, retest window expired, invalid target/stop, RSI block, or a rejected order). traded && !executed = skipped, never a real trade.
    int      run;                  // pending-only: consecutive closes beyond the neckline seen so far
+   //--- v1.11 transient-entry retry state (see AttemptEntry()/RetryTransientEntries()) - retryUntil == 0 = no retry pending.
+   //--- Every append to g_pending/g_patterns assigns a WHOLE element (Recompute(): g_pending[k] = found[i], built from a
+   //--- ZeroMemory()'d P in FindHSPatterns(); AdvancePending(): g_patterns[k] = P, a copy of that pending entry, whose
+   //--- retry fields nothing ever writes) - so a newly confirmed pattern always starts with these at 0. This does NOT
+   //--- rely on ArrayResize() zero-filling new struct elements (MQL5 doesn't promise that); verified at both sites.
+   datetime retryBar;             // open time of the bar (shift 0) the retry was first scheduled on - immediate-entry mode expires the retry the moment this bar rolls over (its trigger is P.brk_t == the just-closed bar, valid on ONE bar only); pullback mode may run on into later bars (its own trigger is bar-spanning), bounded by retryUntil and InpPullbackWindowBars
+   datetime retryUntil;           // hard stop for the retry: first block + InpEntryRetryMinutes (immediate mode: also capped at the end of retryBar)
+   int      retryWhy;             // HS_WHY_* code of the most recent transient block (Journal only)
+   uint     retryRetcode;         // last server retcode behind retryWhy (HS_WHY_RETCODE / HS_WHY_INFLIGHT), else 0
+   int      retryCount;           // order SENDS so far for this pattern - only used for Journal throttling/summaries
   };
 
 datetime g_lastBarTime = 0;
@@ -349,6 +398,38 @@ bool     g_runnerIsBuy = false;
 double   g_runnerStop = 0.0;
 bool     g_runnerJustArmed = false;   // ManageRunner() skips exactly one call right after ArmRunner() - see that flag's own comment
 
+//--- v1.11 unified transient-entry retry (findings #1/#2/#9 - see AttemptEntry()) and ambiguous-fill
+//--- tracking (finding #6 - see AdoptInflightFill()). Result/reason codes are plain #defines, not an
+//--- enum, so HSPattern stays a plain struct that ZeroMemory() resets cleanly.
+#define HS_ENTRY_FILLED        0   // order accepted (or a position was found after an ambiguous result)
+#define HS_ENTRY_SKIPPED       1   // permanent - SkipPattern() already called
+#define HS_ENTRY_RETRY         2   // transient - pattern left untraded, retry state set
+#define HS_WHY_NONE            0
+#define HS_WHY_SPREAD          1   // spread > InpMaxSpreadPoints (session-open spikes - finding #2)
+#define HS_WHY_SESSION         2   // outside the symbol's trade session / trade mode disallows this side
+#define HS_WHY_AUTOTRADE       3   // terminal disconnected, or AutoTrading off at terminal/EA level
+#define HS_WHY_INFLIGHT        4   // an earlier ambiguous order may still fill - never send a second one blind
+#define HS_WHY_RETCODE         5   // server answered with a transient retcode (IsTransientRetcode())
+#define HS_WHY_THROTTLE        6   // another entry was sent < HS_RETRY_SEND_GAP_SEC ago (global send gate) - not a failure, just "not yet"
+#define HS_RETRY_SEND_GAP_SEC  10  // min seconds between two entry SENDS, any pattern (avoids 10024 too-many-requests); also the runner's re-try gap
+#define HS_INFLIGHT_HOLD_SEC   60  // after an ambiguous result, no new send for this long while we look for the fill
+#define HS_INFLIGHT_ADOPT_SEC  3600 // a position appearing up to this long after an ambiguous result is adopted (runner armed)
+datetime g_lastEntrySend = 0;
+int      g_inflightIdx   = -1;     // g_patterns index of the order whose result was ambiguous (g_patterns is append-only, so the index is stable), -1 = none
+bool     g_inflightIsBuy = false;
+datetime g_inflightTime  = 0;
+bool     g_anyRetry      = false;  // true while at least one pattern MAY have a retry pending - lets RetryTransientEntries() skip its g_patterns scan on (almost) every tick
+bool     g_forceRecompute = true;  // v1.11 finding #5 - the first Recompute() after OnInit() ignores the InpRecomputeEveryBars throttle
+datetime g_runnerLastTry = 0;      // v1.11 finding #4 - last runner modify/close REQUEST sent (tick-level re-try gate)
+datetime g_fillUnseenUntil = 0;    // v1.11 - a DONE fill whose position isn't in PositionsTotal() yet counts as "position open" until this time (or until SyncPosition() sees it) - see AttemptEntry()
+
+//--- v1.11 multi-instance guard (finding #3) - see AcquireInstanceLock()
+string   g_lockName = "";
+//--- v1.11 chart symbol/timeframe change detection (low-priority finding) - MT5 does NOT reset an EA's
+//--- globals on a chart symbol/period change (OnDeinit+OnInit run, globals survive), see OnInit()
+string   g_stateSymbol = "";
+ENUM_TIMEFRAMES g_statePeriod = PERIOD_CURRENT;
+
 //--- wallpaper/watermark/theme - same family idiom as Aurelius_EA.mq5 etc. (see PBackground()/PTheme()/PWatermark())
 string   g_pw = "HSW_";   // kept out of the panel wipe (g_pz), matching Aurelius's own g_pw convention
 bool     g_bgOK = false;
@@ -361,6 +442,92 @@ void PWatermark();
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   //--- v1.11 input validation (low-priority finding + finding #8). InpATRPeriod
+   //--- is a divisor in BuildATR()/CurrentATR() and a CopyRates count - 0 or
+   //--- negative would divide by zero / request nothing. InpLots is sent as-is
+   //--- on every order: a value off the broker's own min/max/step grid makes
+   //--- EVERY order fail with "invalid volume" (a permanent reject, so every
+   //--- confirmed pattern would be silently skipped) - refuse to start instead,
+   //--- loudly, rather than clamp (clamping UP to the minimum would silently
+   //--- increase real-money exposure past what the user typed).
+   if(InpATRPeriod <= 0)
+     {
+      PrintFormat("HeadShoulders_EA: InpATRPeriod=%d is invalid (must be >= 1) - EA NOT started.", InpATRPeriod);
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   double vMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double vMax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double vStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   bool lotsOk = (InpLots > 0.0) && (vMin <= 0.0 || InpLots >= vMin - 1e-9) && (vMax <= 0.0 || InpLots <= vMax + 1e-9);
+   if(lotsOk && vStep > 0.0)
+     {
+      double k = InpLots / vStep;
+      if(MathAbs(k - MathRound(k)) > 1e-6) lotsOk = false;
+     }
+   if(!lotsOk)
+     {
+      string msg = StringFormat("HeadShoulders_EA: InpLots=%.4f is not tradeable on %s (broker min %.4f / max %.4f / step %.4f) - EA NOT started.",
+                                InpLots, _Symbol, vMin, vMax, vStep);
+      Print(msg);
+      if(!MQLInfoInteger(MQL_TESTER)) Alert(msg);
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   //--- informational only: the SAME InpLots is a very different real exposure
+   //--- per symbol (GOLD contract 100 vs SILVER 5000 at this broker) - printed so
+   //--- the Journal shows what 1 trade actually means here. InpLots stays a fixed
+   //--- lot by design; equity/risk-relative sizing is a possible FUTURE change
+   //--- the user has not asked for, deliberately not implemented in v1.11.
+   double cs = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   PrintFormat("HeadShoulders_EA: %s %s, InpLots=%.2f x contract %.0f = %.2f units per trade, magic %d.",
+               _Symbol, EnumToString((ENUM_TIMEFRAMES)_Period), InpLots, cs, InpLots * cs, InpMagic);
+
+   //--- v1.11 multi-instance guard (finding #3) - see AcquireInstanceLock()'s
+   //--- own comment. Must run before the runner restore below, which would
+   //--- otherwise adopt another chart's position/runner state as its own.
+   if(!AcquireInstanceLock()) return(INIT_FAILED);
+
+   //--- v1.11 chart symbol/timeframe change (low-priority finding): MT5 runs
+   //--- OnDeinit()+OnInit() on a chart period/symbol switch but does NOT
+   //--- reset this program's globals - g_patterns/g_pending (with ATR captured
+   //--- on the OLD timeframe and pullback windows counted in OLD bars) and the
+   //--- RAM runner state would silently carry over. Reset them (and their
+   //--- drawings) instead; patterns are rediscovered by the first Recompute().
+   if(g_stateSymbol != "" && (g_stateSymbol != _Symbol || g_statePeriod != (ENUM_TIMEFRAMES)_Period))
+     {
+      PrintFormat("HeadShoulders_EA: chart changed %s %s -> %s %s - discarding in-memory pattern/entry state from the old chart.",
+                  g_stateSymbol, EnumToString(g_statePeriod), _Symbol, EnumToString((ENUM_TIMEFRAMES)_Period));
+      ArrayResize(g_patterns, 0);
+      ArrayResize(g_pending, 0);
+      g_lastBarTime = 0;
+      g_barCounter = 0;
+      g_inflightIdx = -1;
+      g_anyRetry = false;
+      g_fillUnseenUntil = 0;
+      ObjectsDeleteAll(0, g_pz + "p_");
+      ObjectsDeleteAll(0, g_pz + "pend_");
+      if(g_stateSymbol != _Symbol)
+        {
+         ObjectsDeleteAll(0, g_pz + "en_");    // real-fill arrows are time-anchored, still correct on a TF-only change -
+         ObjectsDeleteAll(0, g_pz + "ent_");   // but not on a different symbol's price scale
+         //--- old symbol's position/runner belong to the old symbol - drop the RAM
+         //--- copy only (NOT RunnerClearState(), whose GV keys are now the NEW symbol's)
+         g_ticket = 0;
+         g_runnerArmed = false;
+         g_runnerJustArmed = false;
+        }
+     }
+   g_stateSymbol = _Symbol;
+   g_statePeriod = (ENUM_TIMEFRAMES)_Period;
+   //--- v1.11 finding #5: the first Recompute() after ANY (re)start runs on the
+   //--- first new bar regardless of InpRecomputeEveryBars - see OnTick().
+   g_forceRecompute = true;
+
+   //--- set once here too (not only right before an entry) so a runner close
+   //--- or modify issued after a restart - before any new entry has run -
+   //--- still carries this EA's magic (SyncPosition()'s stats lookup keys on it)
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetDeviationInPoints(InpSlippage);
+
    //--- PERFORMANCE FIX (see header v1.05, and Fulcrum_EA.mq5/Aurelius_EA.mq5/
    //--- etc.'s own identical fix) - a non-visual Strategy Tester run draws
    //--- NONE of the pattern markers/lines or the panel, since nobody can see
@@ -407,13 +574,91 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
+   ReleaseInstanceLock();   // v1.11 - always; a chart/param change re-acquires it in the following OnInit()
+   if(g_rsiHandle != INVALID_HANDLE) { IndicatorRelease(g_rsiHandle); g_rsiHandle = INVALID_HANDLE; }
    if(reason != REASON_CHARTCHANGE && reason != REASON_PARAMETERS)
      {
       ObjectsDeleteAll(0, g_pz);
       ObjectsDeleteAll(0, g_pw);   // wallpaper/watermark - v1.07 gap fix, was never cleaned up
      }
    Comment("");
+  }
+//+------------------------------------------------------------------+
+//| v1.11 multi-instance guard (finding #3). The user runs this EA on     |
+//| GOLD and SILVER across several timeframes at once on ONE account.      |
+//| Position ownership (FindOwnPosition()) and the runner's saved state     |
+//| (RunnerGVPrefix()) are keyed by symbol+magic only - so two charts on     |
+//| the SAME symbol with the SAME InpMagic (e.g. GOLD H1 + GOLD D1 both on    |
+//| the default 20260925) would (a) adopt each other's open position via       |
+//| SyncPosition(), each then skipping its own triggers as "already in a        |
+//| position" for a trade that isn't its own, and (b) after a restart both       |
+//| load the SAME saved runner state and trail the same position's stop with      |
+//| their own peak/target. GOLD vs SILVER never collide (symbol differs).          |
+//| Fix chosen: a per-terminal-session lock keyed by symbol+magic (the actual       |
+//| collision domain - NOT symbol+magic+period, which would let exactly the          |
+//| GOLD H1/GOLD D1 same-magic pair through). A second chart with the same            |
+//| symbol+magic refuses to start, loudly, telling the user to give it its own         |
+//| InpMagic. Deliberately NOT done: deriving the magic/GV keys from the period         |
+//| automatically - that would orphan a live v1.10 position (opened under the            |
+//| plain InpMagic) and its saved runner state the moment v1.11 is attached.              |
+//| GlobalVariableTemp() = not written to disk, so a terminal crash can't leave a          |
+//| stale lock behind; a lock whose chart no longer runs this EA is treated as stale        |
+//| anyway. The chart id lives in the GV NAME, not its value - chart ids are ~1e17,          |
+//| beyond a double's exact-integer range. Not applied in the Strategy Tester.                |
+//+------------------------------------------------------------------+
+string InstanceLockPrefix() { return("HSEA_LK_" + _Symbol + "_" + (string)InpMagic + "_"); }
+bool ChartRunsThisEA(const long chartId)
+  {
+   for(long c = ChartFirst(); c >= 0; c = ChartNext(c))
+      if(c == chartId)
+         return(ChartSymbol(c) == _Symbol && ChartGetString(c, CHART_EXPERT_NAME) == MQLInfoString(MQL_PROGRAM_NAME));
+   return(false);
+  }
+bool AcquireInstanceLock()
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return(true);
+   string prefix = InstanceLockPrefix();
+   long me = ChartID();
+   for(int g = GlobalVariablesTotal() - 1; g >= 0; g--)
+     {
+      string nm = GlobalVariableName(g);
+      if(StringFind(nm, prefix) != 0) continue;
+      long holder = StringToInteger(StringSubstr(nm, StringLen(prefix)));
+      if(holder == me) continue;
+      if(ChartRunsThisEA(holder))
+        {
+         string msg = StringFormat("HeadShoulders_EA NOT started on %s %s: chart %I64d already runs this EA on %s with the SAME InpMagic %d. "
+                                   "Two instances on one symbol+magic adopt each other's positions and fight over the same runner stop - "
+                                   "give every chart of the same symbol its own InpMagic (e.g. per timeframe).",
+                                   _Symbol, EnumToString((ENUM_TIMEFRAMES)_Period), holder, _Symbol, InpMagic);
+         Print(msg);
+         Alert(msg);
+         return(false);
+        }
+      GlobalVariableDel(nm);   // stale - that chart is gone or no longer runs this EA
+     }
+   g_lockName = prefix + (string)me;
+   GlobalVariableTemp(g_lockName);
+   GlobalVariableSet(g_lockName, (double)TimeLocal());
+   return(true);
+  }
+void ReleaseInstanceLock()
+  {
+   if(g_lockName == "") return;
+   GlobalVariableDel(g_lockName);
+   g_lockName = "";
+  }
+//+------------------------------------------------------------------+
+//| Price normalization (v1.11, low-priority finding) - every price that  |
+//| goes into a trade request is rounded to the symbol's own tick size,   |
+//| then to _Digits. Raw ATR arithmetic (stop = shoulder + k x ATR) gives  |
+//| prices like 2351.4873219 that some servers reject as invalid price.     |
+//+------------------------------------------------------------------+
+double NormPrice(const double px)
+  {
+   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double v = (ts > 0.0) ? MathRound(px / ts) * ts : px;
+   return(NormalizeDouble(v, _Digits));
   }
 //+------------------------------------------------------------------+
 //| InpUseRSIFilter gate - true means "not blocked" (filter off, or RSI   |
@@ -571,16 +816,33 @@ double NecklineAtTime(const HSPattern &P, const datetime t)
    return(P.p_t1 + P.neckSlopePerSec * (double)((long)t - (long)P.t_t1));
   }
 //+------------------------------------------------------------------+
-//| Same pattern (by its 5 anchor bar times) already recorded, either   |
-//| confirmed or still pending?                                         |
+//| Same pattern already recorded, either confirmed or still pending?   |
+//| v1.11 (finding #7, VERIFIED before fixing): keyed on head bar time + |
+//| direction only. Up to v1.10 this required s1+head+s2 to ALL match -   |
+//| but AddSwing() merges a later, more extreme same-type pivot INTO the   |
+//| last swing (no opposite leg >= InpSwingMinATR x ATR in between), so a   |
+//| higher high after the right shoulder moves t_s2 to that later bar, and  |
+//| the sliding InpLookbackBars window can likewise move t_s1. Each moved    |
+//| variant passed the old check and was queued as a SECOND pattern for the  |
+//| same head (same neckline, different stop). Measured with the EA-faithful  |
+//| replica research/trendbreaker/hs_sim.py, instrumented (2026-10-02):        |
+//| GOLD M15 2014-06-13+ 144 of 2632 confirmed heads confirmed 2+ times,        |
+//| SILVER M15 152/2686, GOLD H4 11/242 - often on DIFFERENT bars, i.e. a        |
+//| second entry chance on one setup. Variants also share DrawPattern()'s         |
+//| object names (keyed on t_head), so skipping one deleted the drawing of the     |
+//| one that actually traded. Trade impact of this fix in the same replica:         |
+//| GOLD M15 1143 -> 1132 trades (%PF 1.283 -> 1.291), SILVER M15 1092 -> 1088        |
+//| (%PF 1.089 -> 1.099) - ~1% of trades, PF unchanged-to-slightly-better. The        |
+//| FIRST-discovered variant is kept. NOTE: hs_sim.py itself still dedups on the      |
+//| old 4-tuple and must get the same one-line change before the next bar-match.       |
 //+------------------------------------------------------------------+
 bool AlreadyKnown(const HSPattern &P)
   {
    for(int i = 0; i < ArraySize(g_patterns); i++)
-      if(g_patterns[i].t_s1 == P.t_s1 && g_patterns[i].t_head == P.t_head && g_patterns[i].t_s2 == P.t_s2 && g_patterns[i].top == P.top)
+      if(g_patterns[i].t_head == P.t_head && g_patterns[i].top == P.top)
          return(true);
    for(int i = 0; i < ArraySize(g_pending); i++)
-      if(g_pending[i].t_s1 == P.t_s1 && g_pending[i].t_head == P.t_head && g_pending[i].t_s2 == P.t_s2 && g_pending[i].top == P.top)
+      if(g_pending[i].t_head == P.t_head && g_pending[i].top == P.top)
          return(true);
    return(false);
   }
@@ -588,12 +850,18 @@ bool AlreadyKnown(const HSPattern &P)
 //| Cheap ATR at the latest CLOSED bar (shift=1) - InpATRPeriod bars   |
 //| only, not the full InpLookbackBars history, since this runs every   |
 //| new bar for every pending candidate.                                 |
+//| v1.11 (low-priority finding): returns -1.0 on a failed/short           |
+//| CopyRates instead of silently returning _Point. A near-zero ATR there   |
+//| made InpBreakTolATR x ATR ~0, so ANY close a hair past the neckline      |
+//| counted toward confirmation, and the captured atrAtBrk (stop buffer,      |
+//| retest tolerance, runner trail) would be degenerate for that pattern's     |
+//| whole life. The caller now skips the bar instead.                           |
 //+------------------------------------------------------------------+
 double CurrentATR()
   {
    MqlRates r[]; ArraySetAsSeries(r, true);
    int got = CopyRates(_Symbol, PERIOD_CURRENT, 1, InpATRPeriod + 1, r);
-   if(got < 2) return(_Point);
+   if(got < InpATRPeriod + 1) return(-1.0);
    double sum = 0.0; int cnt = 0;
    for(int i = 0; i < got - 1; i++)
      {
@@ -607,17 +875,20 @@ double CurrentATR()
 //+------------------------------------------------------------------+
 //| Finds NEW pattern shapes (full swing rescan - O(swings), not O(n)   |
 //| per bar) and queues them as pending. Called once per new bar.        |
+//| v1.11: returns false only when history wasn't readable (too few bars  |
+//| - typical right after a terminal start), so OnTick() keeps the forced  |
+//| first scan (finding #5) pending until one actually succeeds.            |
 //+------------------------------------------------------------------+
-void Recompute()
+bool Recompute()
   {
    MqlRates r[]; ArraySetAsSeries(r, false);
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 0, InpLookbackBars, r);
-   if(n <= 4 * InpPivotStrength + InpATRPeriod + 20) return;
+   if(n <= 4 * InpPivotStrength + InpATRPeriod + 20) return(false);
 
    double atr[]; BuildATR(r, n, atr);
    int zIdx[], zType[]; double zPx[];
    int zc = FindSwings(r, atr, n, zIdx, zType, zPx);
-   if(zc < 5) return;
+   if(zc < 5) return(true);
 
    HSPattern found[];
    int nf = FindHSPatterns(r, atr, n, zIdx, zType, zPx, zc, found);
@@ -628,6 +899,7 @@ void Recompute()
       ArrayResize(g_pending, k + 1, 32);
       g_pending[k] = found[i];
      }
+   return(true);
   }
 //+------------------------------------------------------------------+
 //| Advances every pending candidate by exactly the ONE newest closed   |
@@ -644,6 +916,15 @@ void AdvancePending()
    double c1 = iClose(_Symbol, PERIOD_CURRENT, 1);
    if(t1 == 0) return;
    double atrNow = CurrentATR();
+   if(atrNow <= 0.0)
+     {
+      //--- v1.11: history not readable this bar - skip it rather than run on a
+      //--- degenerate ATR (see CurrentATR()). Known side effect, disclosed: this
+      //--- one bar is neither counted toward nor resets a candidate's consecutive-
+      //--- close run - far less harmful than a spurious confirmation.
+      PrintFormat("HeadShoulders_EA: CurrentATR() read failed at %s - pending-pattern advance skipped this bar.", TimeToString(t1));
+      return;
+     }
    int periodSec = PeriodSeconds(PERIOD_CURRENT);
 
    for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
@@ -695,50 +976,50 @@ void AdvancePending()
   }
 //+------------------------------------------------------------------+
 //| Entry. Two trigger modes:                                           |
-//|  - InpUsePullbackEntry OFF (default): only acts on a pattern the       |
-//|    EXACT bar its breakout is confirmed (P.brk_t == the just-closed      |
-//|    bar) - unchanged from v1.02.                                          |
-//|  - InpUsePullbackEntry ON: does NOT act on the confirmation bar itself;   |
-//|    instead waits for the FIRST later bar (within InpPullbackWindowBars)    |
-//|    whose high/low comes back to within InpPullbackTolATR x ATR of the       |
-//|    neckline (a real throwback) - matches eval_pullback_entry() in            |
-//|    research/trendbreaker/hs_next_round_test.py exactly, including that        |
-//|    a retest that never comes within the window is skipped entirely, not        |
-//|    a fallback market entry.                                                      |
+//|  - InpUsePullbackEntry OFF: only acts on a pattern the EXACT bar its    |
+//|    breakout is confirmed (P.brk_t == the just-closed bar) - unchanged    |
+//|    from v1.02.                                                            |
+//|  - InpUsePullbackEntry ON (default since v1.08): does NOT act on the       |
+//|    confirmation bar itself; instead waits for the FIRST later bar (within   |
+//|    InpPullbackWindowBars) whose high/low comes back to within               |
+//|    InpPullbackTolATR x ATR of the neckline (a real throwback) - matches      |
+//|    eval_pullback_entry() in research/trendbreaker/hs_next_round_test.py       |
+//|    exactly, including that a retest that never comes within the window is     |
+//|    skipped entirely, not a fallback market entry.                               |
 //| A pattern that was already confirmed/decided is drawn/kept for history but        |
 //| never traded late either way. InpMaxHorizonMult bounds how long an                 |
 //| UNCONFIRMED candidate is still considered live (AdvancePending()'s own               |
 //| expiry) - it does not apply here, since this only ever sees confirmed ones.           |
+//|                                                                                        |
+//| v1.11: CheckForEntry() now only DETECTS a fresh trigger - still once per new bar,      |
+//| still on the bar that just closed, exactly as before - and hands it to AttemptEntry()   |
+//| (the one place an entry order is ever sent). A pattern already in a transient retry       |
+//| (retryUntil != 0) is skipped here: RetryTransientEntries() owns it, on every tick,          |
+//| including its expiry. See AttemptEntry() for why the retry had to move off the bar.         |
 //+------------------------------------------------------------------+
 void CheckForEntry()
   {
-   long spr = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   bool spreadOk = (InpMaxSpreadPoints <= 0 || spr <= InpMaxSpreadPoints);
-   //--- NOTE: g_ticket!=0 no longer short-circuits the whole function (Opus
-   //--- review finding, fixed pre-first-MT5-run) - a pattern whose trigger
-   //--- condition fires a valid bar while a position is already open must be
-   //--- marked traded=true (skipped for good) right then, exactly like
-   //--- Python's last_exit_bar gating in research/trendbreaker/
-   //--- hs_next_round_test.py. Previously it was silently left untraded and
-   //--- could still fire on a LATER bar once flat again (InpUsePullbackEntry
-   //--- mode only, since its trigger window spans many bars) - a real
-   //--- divergence from the single-position-sequenced methodology this whole
-   //--- project adopted after the giveback-exit mistake.
-   bool canOpen = (g_ticket == 0) && spreadOk;
-
    datetime t1 = iTime(_Symbol, PERIOD_CURRENT, 1);
    double h1 = iHigh(_Symbol, PERIOD_CURRENT, 1);
    double l1 = iLow(_Symbol, PERIOD_CURRENT, 1);
+   if(t1 == 0) return;
 
    for(int i = ArraySize(g_patterns) - 1; i >= 0; i--)
      {
+      if(g_patterns[i].traded) continue;
+      if(g_patterns[i].retryUntil != 0) continue;   // retry in progress - RetryTransientEntries()'s job
       HSPattern P = g_patterns[i];
-      if(P.traded) continue;
 
       bool trigger;
       int  confirmShift = 1;   // immediate-entry mode: the confirm bar IS shift=1 whenever this can fire
       if(!InpUsePullbackEntry)
         {
+         //--- v1.11: an untraded pattern whose ONE trigger bar has already passed
+         //--- can never fire again (e.g. an earlier-index pattern filled and
+         //--- returned on that bar, so this one was never visited - the Python
+         //--- research marks it skipped via its single-position gate). Up to
+         //--- v1.10 it stayed traded=false forever, uncounted and still drawn.
+         if(P.brk_t < t1) { SkipPattern(i, "immediate-entry bar passed without an attempt (another pattern took that bar)"); continue; }
          trigger = (P.brk_t == t1);   // only act the bar immediately after confirmation
         }
       else
@@ -754,72 +1035,412 @@ void CheckForEntry()
          if(brkShift < 0) continue;
          confirmShift = brkShift;
          long ageBars = (long)brkShift - 1;
-         if(ageBars > InpPullbackWindowBars) { SkipPattern(i); continue; }   // missed - matches the Python research's own "missed" bucket, skip entirely
+         if(ageBars > InpPullbackWindowBars)   // missed - matches the Python research's own "missed" bucket, skip entirely
+           { SkipPattern(i, StringFormat("no neckline retest within InpPullbackWindowBars=%d bars", InpPullbackWindowBars)); continue; }
          double nl = NecklineAtTime(P, t1);
          double tol = InpPullbackTolATR * P.atrAtBrk;
          trigger = P.top ? (h1 >= nl - tol) : (l1 <= nl + tol);
         }
       if(!trigger) continue;
-      if(!canOpen) { SkipPattern(i); continue; }   // see the note above CheckForEntry()
-
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      bool isBuy = !P.top;
-      double entry = isBuy ? ask : bid;
-      if(isBuy && P.target <= entry) { SkipPattern(i); continue; }
-      if(!isBuy && P.target >= entry) { SkipPattern(i); continue; }
-      if(isBuy && P.stop >= entry) { SkipPattern(i); continue; }
-      if(!isBuy && P.stop <= entry) { SkipPattern(i); continue; }
-      if(!RSIFilterOk(isBuy, confirmShift)) { SkipPattern(i); continue; }   // InpUseRSIFilter - see its own input comment; confirmShift tracks P.brk_t's own bar, not always shift=1 under InpUsePullbackEntry
-
-      trade.SetExpertMagicNumber(InpMagic);
-      trade.SetDeviationInPoints(InpSlippage);
-      trade.SetTypeFillingBySymbol(_Symbol);
-      string cmt = P.top ? "H&S top" : "Inverse H&S";
-      double tp = InpUseRunner ? 0.0 : P.target;   // InpUseRunner replaces the fixed broker-side TP with ManageRunner()'s trailing stop - see its own input comment
-      bool ok = isBuy ? trade.Buy(InpLots, _Symbol, entry, P.stop, tp, cmt)
-                       : trade.Sell(InpLots, _Symbol, entry, P.stop, tp, cmt);
-      if(ok)
-        {
-         g_patterns[i].traded = true;
-         g_patterns[i].executed = true;
-         SyncPosition();
-         if(!g_skipCosmeticDraws) DrawEntryArrow(P, entry);
-         if(InpUseRunner) ArmRunner(P, isBuy);
-         return;
-        }
-      uint retcode = trade.ResultRetcode();
-      PrintFormat("HeadShoulders_EA: entry FAILED, retcode %d (%s)", retcode, trade.ResultRetcodeDescription());
-      if(retcode == TRADE_RETCODE_MARKET_CLOSED && InpUsePullbackEntry)
-        {
-         //--- real GOLD account evidence (2026-10-02 Journal, D1, 2023-01-01
-         //--- onward): a pullback-retest trigger can land right at a session
-         //--- boundary (both real failures timestamped 01:00:0X server time,
-         //--- the top of a new trading day) and get rejected even though the
-         //--- pattern/retest itself is genuinely valid - unlike every other
-         //--- rejection reason here (bad stops, no money), MARKET_CLOSED is
-         //--- TRANSIENT: the same retest condition will very likely still be
-         //--- true once the session reopens a few minutes/hours later. Do
-         //--- NOT mark traded=true - leave the pattern exactly as it was so
-         //--- CheckForEntry() re-checks it on the next tick, already bounded
-         //--- by the existing ageBars > InpPullbackWindowBars expiry above -
-         //--- no new unbounded-retry risk. This is exactly why D1 could show
-         //--- zero real trades across 2+ years despite the measured-move
-         //--- pattern firing correctly: with so few D1 opportunities to
-         //--- begin with (confirmed: 8 real GOLD candidates 2023-2026 per
-         //--- independent Python replication), losing even one to a closed-
-         //--- market instant the position would have filled fine shortly
-         //--- after threw away a real trade, not a bad one. Immediate-entry
-         //--- mode (InpUsePullbackEntry=false) is excluded here on purpose -
-         //--- its trigger is an exact P.brk_t==t1 equality with no later
-         //--- re-check, so there is no bar on which a retry could land;
-         //--- skipping it outright (as before) is still correct there.
-         return;
-        }
-      g_patterns[i].traded = true;
-      g_patterns[i].executed = false;
-      if(!g_skipCosmeticDraws) RemovePatternDrawing(g_patterns[i]);
-      return;
+      if(AttemptEntry(i, confirmShift) == HS_ENTRY_FILLED) return;   // single position - nothing else can open this bar
      }
+  }
+//+------------------------------------------------------------------+
+//| v1.11 unified transient-entry retry (findings #1/#2/#9).               |
+//| WHY: v1.10's MARKET_CLOSED fix left the pattern untraded so that        |
+//| "CheckForEntry() re-checks it on the next tick" - but CheckForEntry()     |
+//| only ever runs inside OnTick()'s IsNewBar() block, so the re-check was     |
+//| really NEXT BAR. On the user's live GOLD D1 that is 24h later at the SAME   |
+//| time of day as the original rejection (01:00:0X, the session boundary) -    |
+//| very likely the same rejection again - and it also required a SECOND retest  |
+//| bar; immediate-entry mode and every other transient cause (requote, price     |
+//| off, spread spike at the session open - finding #2) still skipped for good.    |
+//| NOW: every cause that can clear by itself within minutes leaves the pattern     |
+//| untraded with retry state set (ScheduleRetry()) and RetryTransientEntries()      |
+//| re-attempts on EVERY tick, throttled to one send per HS_RETRY_SEND_GAP_SEC        |
+//| (any pattern), until it fills, a permanent reason appears, or the retry           |
+//| expires: InpEntryRetryMinutes after the first block, or - immediate-entry mode     |
+//| only - the moment the trigger bar rolls over (its trigger is valid on ONE bar);     |
+//| pullback mode is additionally bounded by InpPullbackWindowBars. On expiry the        |
+//| pattern is SKIPPED (logged) - the Python research takes the FIRST retest or never,    |
+//| so a later, different retest bar is deliberately NOT a new chance (this replaces       |
+//| v1.10's open-ended "leave it for a later bar" MARKET_CLOSED handling).                  |
+//| Spread (finding #2) is just another transient reason through the same machinery.         |
+//| Ambiguous results (finding #6 - timeout/no connection/placed-not-filled) are NOT           |
+//| resent blind: see ResolveInflight().                                                        |
+//| Returns HS_ENTRY_FILLED / HS_ENTRY_SKIPPED (permanent, logged) / HS_ENTRY_RETRY.             |
+//| Check order: permanent reasons the research also has first, then transient ones              |
+//| (nothing sent), then price/stop validity on the LIVE quote (permanent), then the send.        |
+//+------------------------------------------------------------------+
+int AttemptEntry(const int i, const int confirmShift)
+  {
+   HSPattern P = g_patterns[i];
+   bool isBuy = !P.top;
+   datetime now = TimeCurrent();
+
+   //--- permanent: single-position rule (Opus review finding, fixed pre-first-
+   //--- MT5-run): a trigger that fires while a position is open is marked done
+   //--- right then, exactly like Python's last_exit_bar gating in
+   //--- research/trendbreaker/hs_next_round_test.py - never traded later.
+   //--- g_fillUnseenUntil: MT5 can report DONE before the new position shows up in
+   //--- PositionsTotal(). With retries now on EVERY tick (not once a bar, as up to
+   //--- v1.10), another pattern could otherwise send a second order in that gap.
+   if(g_ticket != 0 || now < g_fillUnseenUntil) return(SkipPattern(i, "a position is already open (single-position rule)"));
+   //--- InpUseRSIFilter - see its own input comment; confirmShift tracks P.brk_t's own bar
+   if(!RSIFilterOk(isBuy, confirmShift)) return(SkipPattern(i, "RSI filter blocked it"));
+
+   //--- transient: nothing is sent
+   if(g_inflightIdx >= 0 && ((long)now - (long)g_inflightTime < HS_INFLIGHT_HOLD_SEC || HasOwnLiveOrder()))
+      return(ScheduleRetry(i, HS_WHY_INFLIGHT, 0));
+   if(!TradingEnabledNow()) return(ScheduleRetry(i, HS_WHY_AUTOTRADE, 0));
+   if(!SessionTradableNow(isBuy)) return(ScheduleRetry(i, HS_WHY_SESSION, 0));
+   long spr = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(InpMaxSpreadPoints > 0 && spr > InpMaxSpreadPoints) return(ScheduleRetry(i, HS_WHY_SPREAD, 0));
+   if(g_lastEntrySend != 0 && (long)now - (long)g_lastEntrySend < HS_RETRY_SEND_GAP_SEC)
+      return(ScheduleRetry(i, HS_WHY_THROTTLE, 0));
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(ask <= 0.0 || bid <= 0.0) return(ScheduleRetry(i, HS_WHY_SESSION, 0));   // no live quote
+
+   //--- permanent: the pattern's own target/stop vs the LIVE price (rechecked on
+   //--- every attempt - a retry never sends an order that is invalid by now)
+   double entry = NormPrice(isBuy ? ask : bid);
+   double stp = NormPrice(P.stop);
+   double tgt = NormPrice(P.target);
+   if(isBuy ? (tgt <= entry) : (tgt >= entry))
+      return(SkipPattern(i, StringFormat("price %s already at/past target %s", DoubleToString(entry, _Digits), DoubleToString(tgt, _Digits))));
+   if(isBuy ? (stp >= entry) : (stp <= entry))
+      return(SkipPattern(i, StringFormat("price %s already at/past stop %s", DoubleToString(entry, _Digits), DoubleToString(stp, _Digits))));
+   //--- broker minimum stop distance (SL/TP trigger on bid for a buy, ask for a sell).
+   //--- Checked HERE so that a 10016 the server still returns afterwards can only
+   //--- mean the price moved/gapped between this read and execution - which is why
+   //--- IsTransientRetcode() may treat 10016 as transient without ever retrying a
+   //--- stop that is invalid because of the pattern's own numbers.
+   double stopsLvl = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+   double ref = isBuy ? bid : ask;
+   if(stopsLvl > 0.0 && (MathAbs(ref - stp) < stopsLvl || (!InpUseRunner && MathAbs(tgt - ref) < stopsLvl)))
+      return(SkipPattern(i, StringFormat("stop %s / target %s inside the broker's stops level (%s) of price %s",
+                                         DoubleToString(stp, _Digits), DoubleToString(tgt, _Digits),
+                                         DoubleToString(stopsLvl, _Digits), DoubleToString(ref, _Digits))));
+
+   //--- send
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetDeviationInPoints(InpSlippage);
+   trade.SetTypeFillingBySymbol(_Symbol);
+   string cmt = P.top ? "H&S top" : "Inverse H&S";
+   double tp = InpUseRunner ? 0.0 : tgt;   // InpUseRunner replaces the fixed broker-side TP with ManageRunner()'s trailing stop - see its own input comment
+   g_lastEntrySend = now;
+   g_patterns[i].retryCount++;
+   int sends = g_patterns[i].retryCount;
+   //--- outcome judged by retcode only (below) - CTrade's bool is true whenever the
+   //--- server answered at all, and false on paths where the order may still exist
+   if(isBuy) trade.Buy(InpLots, _Symbol, entry, stp, tp, cmt);
+   else      trade.Sell(InpLots, _Symbol, entry, stp, tp, cmt);
+   uint rc = trade.ResultRetcode();
+   if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_DONE_PARTIAL)
+     {
+      //--- (v1.10 tested only CTrade's bool, which is true whenever the server
+      //--- ANSWERED - not necessarily with a fill; the retcode is what counts)
+      ClearRetry(i);
+      g_patterns[i].traded = true;
+      g_patterns[i].executed = true;
+      g_inflightIdx = -1;   // a confirmed fill supersedes any unresolved earlier send - see ResolveInflight()'s limitation note
+      g_lastEntrySend = 0;  // the send gate exists to space out FAILED sends - never delay the next pattern after a fill
+      SyncPosition();
+      if(g_ticket == 0) g_fillUnseenUntil = (datetime)((long)now + HS_INFLIGHT_HOLD_SEC);   // filled but not visible yet - see the single-position check above
+      double px = (trade.ResultPrice() > 0.0) ? trade.ResultPrice() : entry;
+      if(sends > 1)
+         PrintFormat("HeadShoulders_EA: %s entry FILLED at %s on send #%d (after transient retries).", cmt, DoubleToString(px, _Digits), sends);
+      if(!g_skipCosmeticDraws) DrawEntryArrow(P, px);
+      if(InpUseRunner) ArmRunner(P, isBuy);
+      return(HS_ENTRY_FILLED);
+     }
+   if(rc == TRADE_RETCODE_PLACED || IsAmbiguousRetcode(rc))
+     {
+      //--- finding #6: the order may still fill (or may already have) - a blind
+      //--- re-send here risks a DOUBLE position. Hold every new send, watch for
+      //--- the fill and adopt it (ResolveInflight()/AdoptInflightFill()).
+      g_inflightIdx = i;
+      g_inflightIsBuy = isBuy;
+      g_inflightTime = now;
+      PrintFormat("HeadShoulders_EA: %s entry result AMBIGUOUS, retcode %u (%s) - NOT re-sending for >= %d s; watching for the position (adopting it, runner armed, if it appears within %d s).",
+                  cmt, rc, trade.ResultRetcodeDescription(), HS_INFLIGHT_HOLD_SEC, HS_INFLIGHT_ADOPT_SEC);
+      return(ScheduleRetry(i, HS_WHY_INFLIGHT, rc));
+     }
+   if(IsTransientRetcode(rc))
+     {
+      if(sends <= 3 || sends % 10 == 0)
+         PrintFormat("HeadShoulders_EA: %s entry FAILED, retcode %u (%s) - transient, send #%d; will retry.", cmt, rc, trade.ResultRetcodeDescription(), sends);
+      return(ScheduleRetry(i, HS_WHY_RETCODE, rc));
+     }
+   return(SkipPattern(i, StringFormat("entry FAILED, retcode %u (%s) - not a transient reason (send #%d)", rc, trade.ResultRetcodeDescription(), sends)));
+  }
+//+------------------------------------------------------------------+
+//| Server answers that a retry can reasonably outlive within minutes.  |
+//| Deliberately NOT here: 10019 no money, 10014 invalid volume, 10013   |
+//| invalid request, 10006 reject, 10017/10026 trade disabled (account/   |
+//| symbol configuration, not minutes) - those skip permanently, as      |
+//| before. 10016 invalid stops is here ONLY because AttemptEntry()        |
+//| pre-checks side + SYMBOL_TRADE_STOPS_LEVEL first (see the note there).  |
+//| 10012 timeout / 10031 no connection are NOT here: the order may have     |
+//| reached the server - see IsAmbiguousRetcode().                            |
+//+------------------------------------------------------------------+
+bool IsTransientRetcode(const uint rc)
+  {
+   switch(rc)
+     {
+      case TRADE_RETCODE_REQUOTE:              // 10004
+      case TRADE_RETCODE_INVALID_STOPS:        // 10016 - price moved/gapped after our own pre-check passed
+      case TRADE_RETCODE_MARKET_CLOSED:        // 10018 - the real v1.10 GOLD D1 case (01:00:0X server time)
+      case TRADE_RETCODE_PRICE_CHANGED:        // 10020
+      case TRADE_RETCODE_PRICE_OFF:            // 10021
+      case TRADE_RETCODE_TOO_MANY_REQUESTS:    // 10024
+      case TRADE_RETCODE_CLIENT_DISABLES_AT:   // 10027 - AutoTrading switched off in the terminal (same as HS_WHY_AUTOTRADE)
+         return(true);
+     }
+   return(false);
+  }
+bool IsAmbiguousRetcode(const uint rc)
+  {
+   //--- 0 = no server answer recorded at all - treated as "may have been sent"
+   return(rc == 0 || rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_CONNECTION);
+  }
+string WhyText(const int why, const uint rc)
+  {
+   switch(why)
+     {
+      case HS_WHY_SPREAD:    return(StringFormat("spread above InpMaxSpreadPoints=%d", InpMaxSpreadPoints));
+      case HS_WHY_SESSION:   return("outside the symbol's trade session / trade mode, or no live quote");
+      case HS_WHY_AUTOTRADE: return("terminal disconnected or AutoTrading disabled");
+      case HS_WHY_INFLIGHT:  return(rc != 0 ? StringFormat("earlier order unresolved (retcode %u)", rc) : "earlier order still unresolved");
+      case HS_WHY_RETCODE:   return(StringFormat("server retcode %u", rc));
+      case HS_WHY_THROTTLE:  return("send gap after another entry send");
+     }
+   return("none");
+  }
+//+------------------------------------------------------------------+
+//| Transient pre-checks (live only - the Strategy Tester models its own  |
+//| sessions/connection and has no AutoTrading button).                   |
+//+------------------------------------------------------------------+
+bool TradingEnabledNow()
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return(true);
+   return(TerminalInfoInteger(TERMINAL_CONNECTED) != 0 && TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) != 0 &&
+          MQLInfoInteger(MQL_TRADE_ALLOWED) != 0 && AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) != 0 &&
+          AccountInfoInteger(ACCOUNT_TRADE_EXPERT) != 0);
+  }
+//--- trade mode + today's trade-session table. A day with NO session rows is
+//--- not blocked (broker data missing - let the server decide), so this can
+//--- only ever save a request the server/terminal would reject anyway.
+bool SessionTradableNow(const bool isBuy)
+  {
+   long tm = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
+   if(tm == SYMBOL_TRADE_MODE_DISABLED || tm == SYMBOL_TRADE_MODE_CLOSEONLY) return(false);
+   if(tm == SYMBOL_TRADE_MODE_LONGONLY && !isBuy) return(false);
+   if(tm == SYMBOL_TRADE_MODE_SHORTONLY && isBuy) return(false);
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   long sec = (long)dt.hour * 3600 + (long)dt.min * 60 + (long)dt.sec;
+   datetime from, to;
+   bool any = false;
+   for(uint s = 0; s < 16; s++)
+     {
+      if(!SymbolInfoSessionTrade(_Symbol, (ENUM_DAY_OF_WEEK)dt.day_of_week, s, from, to)) break;
+      any = true;
+      if(sec >= (long)from && sec < (long)to) return(true);   // from/to are seconds into the day (to may be 86400 = 24:00)
+     }
+   return(!any);
+  }
+bool HasOwnLiveOrder()
+  {
+   for(int k = OrdersTotal() - 1; k >= 0; k--)
+     {
+      ulong tk = OrderGetTicket(k);
+      if(tk == 0) continue;
+      if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == (long)InpMagic) return(true);
+     }
+   return(false);
+  }
+//--- an entry (DEAL_ENTRY_IN) deal of ours at/after `since` - catches an
+//--- ambiguous order that filled AND was already closed again between checks
+bool OwnEntryDealSince(const datetime since)
+  {
+   if(!HistorySelect(since, TimeCurrent() + 3600)) return(false);
+   for(int k = HistoryDealsTotal() - 1; k >= 0; k--)
+     {
+      ulong d = HistoryDealGetTicket(k);
+      if(d == 0) continue;
+      if(HistoryDealGetInteger(d, DEAL_MAGIC) != (long)InpMagic) continue;
+      if(HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol) continue;
+      if((long)HistoryDealGetInteger(d, DEAL_ENTRY) != DEAL_ENTRY_IN) continue;
+      if((datetime)HistoryDealGetInteger(d, DEAL_TIME) >= since) return(true);
+     }
+   return(false);
+  }
+//+------------------------------------------------------------------+
+//| Retry bookkeeping                                                    |
+//+------------------------------------------------------------------+
+void ClearRetry(const int i)
+  {
+   g_patterns[i].retryBar = 0;
+   g_patterns[i].retryUntil = 0;
+   g_patterns[i].retryWhy = HS_WHY_NONE;
+   g_patterns[i].retryRetcode = 0;
+   g_patterns[i].retryCount = 0;
+  }
+int ScheduleRetry(const int i, const int why, const uint rc)
+  {
+   if(InpEntryRetryMinutes <= 0)
+      return(SkipPattern(i, "transient block (" + WhyText(why, rc) + ") and InpEntryRetryMinutes=0 (retry off)"));
+   bool first = (g_patterns[i].retryUntil == 0);
+   if(first)
+     {
+      datetime now = TimeCurrent();
+      datetime bar0 = iTime(_Symbol, PERIOD_CURRENT, 0);
+      datetime until = (datetime)((long)now + (long)InpEntryRetryMinutes * 60);
+      if(!InpUsePullbackEntry)
+        {
+         datetime barEnd = (datetime)((long)bar0 + PeriodSeconds(PERIOD_CURRENT));
+         if(barEnd < until) until = barEnd;
+        }
+      g_patterns[i].retryBar = bar0;
+      g_patterns[i].retryUntil = until;
+     }
+   //--- the send gate is "not yet", not a cause - keep the real reason for the Journal
+   if(why != HS_WHY_THROTTLE || g_patterns[i].retryWhy == HS_WHY_NONE)
+     {
+      g_patterns[i].retryWhy = why;
+      g_patterns[i].retryRetcode = rc;
+     }
+   g_anyRetry = true;
+   if(first)
+      PrintFormat("HeadShoulders_EA: %s entry (head %s, confirmed %s) DEFERRED - %s; retrying on ticks until %s.",
+                  g_patterns[i].top ? "H&S top" : "Inverse H&S", TimeToString(g_patterns[i].t_head), TimeToString(g_patterns[i].brk_t),
+                  WhyText(why, rc), TimeToString(g_patterns[i].retryUntil, TIME_DATE|TIME_SECONDS));
+   return(HS_ENTRY_RETRY);
+  }
+bool RetryExpired(const int i)
+  {
+   if(TimeCurrent() >= g_patterns[i].retryUntil) return(true);
+   if(!InpUsePullbackEntry)
+     {
+      datetime b0 = iTime(_Symbol, PERIOD_CURRENT, 0);
+      if(b0 != 0 && b0 != g_patterns[i].retryBar) return(true);
+     }
+   return(false);
+  }
+//+------------------------------------------------------------------+
+//| Tick-level retry - called on EVERY tick (and timer), NOT gated by     |
+//| IsNewBar(). Runs BEFORE OnTick()'s new-bar block, so an older pattern  |
+//| still owed its entry gets priority over a fresh trigger on that tick.   |
+//+------------------------------------------------------------------+
+void RetryTransientEntries()
+  {
+   if(!g_anyRetry) return;
+   bool any = false;
+   datetime t1 = iTime(_Symbol, PERIOD_CURRENT, 1);
+   for(int i = ArraySize(g_patterns) - 1; i >= 0; i--)
+     {
+      if(g_patterns[i].traded || g_patterns[i].retryUntil == 0) continue;
+      string last = WhyText(g_patterns[i].retryWhy, g_patterns[i].retryRetcode);
+      if(RetryExpired(i))
+        {
+         SkipPattern(i, StringFormat("transient-entry retry ran out (%s) - last block: %s, %d send(s)",
+                                     InpUsePullbackEntry ? "InpEntryRetryMinutes" : "trigger bar closed / InpEntryRetryMinutes",
+                                     last, g_patterns[i].retryCount));
+         continue;
+        }
+      int confirmShift = 1;
+      if(!InpUsePullbackEntry)
+        {
+         if(t1 != 0 && g_patterns[i].brk_t != t1)   // belt-and-braces with RetryExpired()'s bar check
+           { SkipPattern(i, "trigger bar passed during the transient-entry retry - last block: " + last); continue; }
+        }
+      else
+        {
+         int brkShift = iBarShift(_Symbol, PERIOD_CURRENT, g_patterns[i].brk_t, false);
+         if(brkShift < 0) { any = true; continue; }
+         if((long)brkShift - 1 > InpPullbackWindowBars)
+           { SkipPattern(i, "InpPullbackWindowBars ran out during the transient-entry retry - last block: " + last); continue; }
+         confirmShift = brkShift;
+        }
+      int res = AttemptEntry(i, confirmShift);
+      if(res == HS_ENTRY_FILLED) return;   // leave g_anyRetry set - remaining retries get the single-position skip next tick
+      if(res == HS_ENTRY_RETRY) any = true;
+     }
+   g_anyRetry = any;
+  }
+//+------------------------------------------------------------------+
+//| Finding #6 - ambiguous entry result (timeout / no connection / placed  |
+//| but not yet filled). Called every tick right after SyncPosition().      |
+//| Since an entry is only ever sent while flat (g_ticket == 0), any own     |
+//| position, or own entry deal, that appears after the ambiguous send IS    |
+//| that order - it is adopted: pattern marked executed, entry arrow drawn,    |
+//| and (InpUseRunner) ArmRunner() called - without which a real position       |
+//| would run with tp=0.0 and nothing trailing it. Every new send, any pattern,  |
+//| is held (HS_WHY_INFLIGHT) for HS_INFLIGHT_HOLD_SEC and for as long as an own   |
+//| order is still live in the terminal.                                            |
+//| KNOWN LIMITATIONS (best-effort scope, disclosed): (1) after the hold, with no   |
+//| live order, no position and no entry deal seen, the first order is presumed NOT   |
+//| filled and a re-send is allowed - if the server still fills the first one later,   |
+//| two positions can exist; SyncPosition() then manages only one and Journals/alerts   |
+//| a loud warning (it does not auto-close anything). (2) A late fill that appears after  |
+//| HS_INFLIGHT_ADOPT_SEC is not adopted (no runner) - also caught by that warning only     |
+//| if a second position exists; a lone one is picked up by SyncPosition() as the open        |
+//| position with the runner NOT armed (same state as v1.10's "no saved runner state" case).   |
+//+------------------------------------------------------------------+
+void ResolveInflight()
+  {
+   if(g_inflightIdx < 0) return;
+   if(g_inflightIdx >= ArraySize(g_patterns)) { g_inflightIdx = -1; return; }   // arrays reset (chart change)
+   if(g_ticket != 0) { AdoptInflightFill(true); return; }
+   static datetime lastHist = 0;   // deal-history lookup at most once per server second
+   if(TimeCurrent() != lastHist)
+     {
+      lastHist = TimeCurrent();
+      if(OwnEntryDealSince((datetime)((long)g_inflightTime - 5))) { AdoptInflightFill(false); return; }
+     }
+   if((long)TimeCurrent() - (long)g_inflightTime > HS_INFLIGHT_ADOPT_SEC && !HasOwnLiveOrder())
+     {
+      PrintFormat("HeadShoulders_EA: no position or fill appeared within %d s of the ambiguous entry sent %s - treated as NOT filled.",
+                  HS_INFLIGHT_ADOPT_SEC, TimeToString(g_inflightTime, TIME_DATE|TIME_SECONDS));
+      g_inflightIdx = -1;
+     }
+  }
+void AdoptInflightFill(const bool posOpen)
+  {
+   int i = g_inflightIdx;
+   bool isBuy = g_inflightIsBuy;
+   double px = 0.0;
+   if(posOpen)
+     {
+      if(!PositionSelectByTicket(g_ticket)) return;   // try again next tick
+      bool posBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      g_inflightIdx = -1;
+      if(posBuy != isBuy)
+        {
+         PrintFormat("HeadShoulders_EA: WARNING - own position #%I64u appeared after an ambiguous %s entry but is a %s - NOT adopted, runner NOT armed. Check it manually.",
+                     g_ticket, isBuy ? "BUY" : "SELL", posBuy ? "BUY" : "SELL");
+         return;
+        }
+      px = PositionGetDouble(POSITION_PRICE_OPEN);
+     }
+   else
+      g_inflightIdx = -1;
+   if(g_patterns[i].executed) return;   // already recorded (e.g. a later send filled) - nothing to adopt
+   HSPattern P = g_patterns[i];
+   ClearRetry(i);
+   g_patterns[i].traded = true;
+   g_patterns[i].executed = true;
+   if(posOpen)
+     {
+      if(!g_skipCosmeticDraws) DrawEntryArrow(P, px);
+      if(InpUseRunner && !g_runnerArmed) ArmRunner(P, isBuy);
+      PrintFormat("HeadShoulders_EA: ambiguous %s entry DID fill - position #%I64u at %s ADOPTED%s.",
+                  isBuy ? "BUY" : "SELL", g_ticket, DoubleToString(px, _Digits), InpUseRunner ? ", runner armed" : "");
+     }
+   else
+      PrintFormat("HeadShoulders_EA: ambiguous %s entry DID fill but the position is already closed again - recorded as executed, nothing to manage.",
+                  isBuy ? "BUY" : "SELL");
   }
 //+------------------------------------------------------------------+
 //| InpUseRunner state persistence (Opus review finding, fixed pre-first-  |
@@ -916,40 +1537,95 @@ void ManageRunner()
       g_runnerPeak = g_runnerTarget;
      }
 
+   double prevPeak = g_runnerPeak;
    g_runnerPeak = g_runnerIsBuy ? MathMax(g_runnerPeak, h1) : MathMin(g_runnerPeak, l1);
-   double newStop = g_runnerIsBuy ? (g_runnerPeak - InpRunnerTrailATR * g_runnerAtr)
-                                   : (g_runnerPeak + InpRunnerTrailATR * g_runnerAtr);
-   //--- clamp to the broker's own minimum stop distance (Opus review Critical
-   //--- finding, fixed pre-first-MT5-run): without this, once price moves far
-   //--- enough that the trail distance (InpRunnerTrailATR x ATR) is TIGHTER
-   //--- than the broker's SYMBOL_TRADE_STOPS_LEVEL/FREEZE_LEVEL, every single
-   //--- PositionModify call below would be rejected as "invalid stops" - not
-   //--- just once, but on EVERY future bar too (the gap stays roughly
-   //--- constant as price and the trail both advance together), silently
-   //--- leaving the position protected by nothing but the ORIGINAL stop for
-   //--- the rest of the trade. A real winner could give back everything down
-   //--- to that original stop with the runner never actually trailing.
-   //--- Clamping to the broker's minimum keeps the trade genuinely protected
-   //--- (tightest ALLOWED stop) instead of silently reverting to "no runner".
-   long minDistPts = MathMax(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL),
-                              SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL));
-   double minDist = (double)minDistPts * _Point;
-   if(minDist > 0.0)
-     {
-      double refPx = g_runnerIsBuy ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      newStop = g_runnerIsBuy ? MathMin(newStop, refPx - minDist) : MathMax(newStop, refPx + minDist);
-     }
-   newStop = NormalizeDouble(newStop, _Digits);
-   bool improves = g_runnerIsBuy ? (newStop > g_runnerStop) : (newStop < g_runnerStop);
-   if(!improves) return;
+   //--- v1.11: persist peak/reached-target as soon as they move, not only after
+   //--- a successful modify - a restart otherwise restored a stale peak (or
+   //--- reached=false), delaying the trail until price re-made that ground.
+   if(g_runnerPeak != prevPeak) RunnerSaveState();
+   RunnerApplyStop();
+  }
+//--- the research runner's stop: InpRunnerTrailATR x (breakout ATR) behind the best price since target
+double RunnerWantedStop()
+  {
+   return(g_runnerIsBuy ? (g_runnerPeak - InpRunnerTrailATR * g_runnerAtr)
+                        : (g_runnerPeak + InpRunnerTrailATR * g_runnerAtr));
+  }
+//--- round to the symbol's tick, AWAY from price (down for a buy's stop, up for a sell's) - never tighter than asked
+double NormPriceDir(const double px, const bool down)
+  {
+   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(ts <= 0.0) return(NormalizeDouble(px, _Digits));
+   double k = px / ts;
+   return(NormalizeDouble((down ? MathFloor(k + 1e-9) : MathCeil(k - 1e-9)) * ts, _Digits));
+  }
+//+------------------------------------------------------------------+
+//| v1.11 finding #4 - applies the runner's wanted stop with a fallback   |
+//| for every way the broker can refuse it. Called from ManageRunner()     |
+//| (once per new bar, as before) AND from RunnerTick() on every tick,      |
+//| gated to one request per HS_RETRY_SEND_GAP_SEC - so a refused or          |
+//| clamped trail is re-tried within seconds instead of a whole bar later     |
+//| (a full DAY on D1, with the position on its old stop meanwhile).           |
+//|  1. price already through the wanted stop -> close at MARKET. A modify    |
+//|     there is invalid by definition, and the research runner's own stop     |
+//|     has been hit (its replica exits at that stop on the next bar).           |
+//|  2. otherwise clamp to max(SYMBOL_TRADE_STOPS_LEVEL, SYMBOL_TRADE_FREEZE_     |
+//|     LEVEL) x _Point, and never less than one tick, from the live price - the  |
+//|     v1.04 Critical fix, now with the one-tick floor and tick rounding away     |
+//|     from price. While clamped, every later attempt tightens toward the wanted   |
+//|     stop as price allows.                                                        |
+//|  3. any refusal anyway -> Journal "runner PositionModify FAILED" (the string       |
+//|     the earlier audit said to search for) with the numbers needed to see why.       |
+//+------------------------------------------------------------------+
+void RunnerApplyStop()
+  {
+   if(!InpUseRunner || !g_runnerArmed || !g_runnerReachedTarget || g_ticket == 0) return;
+   bool isBuy = g_runnerIsBuy;
+   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(ts <= 0.0) ts = _Point;
+   double want = NormPriceDir(RunnerWantedStop(), isBuy);
+   if(isBuy ? (want < g_runnerStop + 0.5 * ts) : (want > g_runnerStop - 0.5 * ts)) return;   // nothing tighter than what's already in place
    if(!PositionSelectByTicket(g_ticket)) return;   // position closed between OnTick's SyncPosition() and here - nothing to modify
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0.0 || ask <= 0.0) return;
+   double ref = isBuy ? bid : ask;   // the side a buy's / sell's stop triggers on
+   if(isBuy ? (want >= ref) : (want <= ref))
+     {
+      g_runnerLastTry = TimeCurrent();
+      bool okc = trade.PositionClose(g_ticket, (ulong)InpSlippage);
+      uint rcc = trade.ResultRetcode();
+      if(okc && (rcc == TRADE_RETCODE_DONE || rcc == TRADE_RETCODE_DONE_PARTIAL))
+         PrintFormat("HeadShoulders_EA: runner - price %s already through the trailed stop %s, position #%I64u CLOSED at market.",
+                     DoubleToString(ref, _Digits), DoubleToString(want, _Digits), g_ticket);
+      else
+         PrintFormat("HeadShoulders_EA: runner market close FAILED, retcode %u (%s) - price %s is through the trailed stop %s; position still on stop %s, retrying every %d s.",
+                     rcc, trade.ResultRetcodeDescription(), DoubleToString(ref, _Digits), DoubleToString(want, _Digits),
+                     DoubleToString(g_runnerStop, _Digits), HS_RETRY_SEND_GAP_SEC);
+      return;
+     }
+   long lvlPts = MathMax(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL),
+                         SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL));
+   double minDist = MathMax((double)lvlPts * _Point, ts);
+   double newStop = isBuy ? MathMin(want, ref - minDist) : MathMax(want, ref + minDist);
+   newStop = NormPriceDir(newStop, isBuy);
+   if(isBuy ? (newStop < g_runnerStop + 0.5 * ts) : (newStop > g_runnerStop - 0.5 * ts)) return;   // clamp leaves nothing tighter yet
+   g_runnerLastTry = TimeCurrent();
    if(trade.PositionModify(g_ticket, newStop, 0.0) && trade.ResultRetcode() == TRADE_RETCODE_DONE)
      {
       g_runnerStop = newStop;
       RunnerSaveState();
      }
    else
-      PrintFormat("HeadShoulders_EA: runner PositionModify FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      PrintFormat("HeadShoulders_EA: runner PositionModify FAILED, retcode %u (%s) - wanted %s, sent %s, bid %s ask %s, stops/freeze level %d pts; still on stop %s, retrying every %d s.",
+                  trade.ResultRetcode(), trade.ResultRetcodeDescription(), DoubleToString(want, _Digits), DoubleToString(newStop, _Digits),
+                  DoubleToString(bid, _Digits), DoubleToString(ask, _Digits), (int)lvlPts, DoubleToString(g_runnerStop, _Digits), HS_RETRY_SEND_GAP_SEC);
+  }
+//--- every tick: re-try a refused/clamped trail, or close if price crosses the wanted stop intrabar
+void RunnerTick()
+  {
+   if(!InpUseRunner || !g_runnerArmed || !g_runnerReachedTarget || g_ticket == 0) return;
+   if(g_runnerLastTry != 0 && (long)TimeCurrent() - (long)g_runnerLastTry < HS_RETRY_SEND_GAP_SEC) return;
+   RunnerApplyStop();
   }
 //+------------------------------------------------------------------+
 //| Own position only - matches THIS symbol AND magic number, so a      |
@@ -968,12 +1644,47 @@ bool FindOwnPosition(ulong &ticket)
      }
    return(false);
   }
+//+------------------------------------------------------------------+
+//| v1.11 (finding #6's disclosed limitation) - this EA manages ONE       |
+//| position. Two own positions can only mean an ambiguous entry filled    |
+//| after a re-send also filled (see ResolveInflight()), a manual trade     |
+//| opened under this InpMagic, or two charts sharing symbol+magic despite   |
+//| the instance lock. Nothing is closed automatically - it warns, loudly,    |
+//| at most once an hour, so a human decides.                                  |
+//+------------------------------------------------------------------+
+void WarnIfMultipleOwnPositions()
+  {
+   static datetime lastWarn = 0;
+   int cnt = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol && (long)PositionGetInteger(POSITION_MAGIC) == (long)InpMagic) cnt++;
+     }
+   if(cnt <= 1) return;
+   if(lastWarn != 0 && (long)TimeCurrent() - (long)lastWarn < 3600) return;
+   lastWarn = TimeCurrent();
+   string msg = StringFormat("HeadShoulders_EA WARNING: %d open positions on %s with magic %d - this EA manages only #%I64u (runner/stats). Check the others manually.",
+                             cnt, _Symbol, InpMagic, g_ticket);
+   Print(msg);
+   if(!MQLInfoInteger(MQL_TESTER)) Alert(msg);
+  }
 void SyncPosition()
   {
    ulong tk;
    if(FindOwnPosition(tk))
      {
-      g_ticket = tk;
+      if(tk != g_ticket)
+        {
+         g_ticket = tk;
+         //--- v1.11: a fill whose position only became visible AFTER ArmRunner()
+         //--- ran saved runner state under ticket 0 - re-save under the real
+         //--- ticket, or a restart can't restore the runner (it keys on it).
+         if(InpUseRunner && g_runnerArmed) RunnerSaveState();
+        }
+      g_fillUnseenUntil = 0;
+      WarnIfMultipleOwnPositions();
       return;
      }
    if(g_ticket != 0)
@@ -1097,12 +1808,21 @@ void RemovePatternDrawing(const HSPattern &P)
 //| its chart drawing right away. traded=true alone used to mean both         |
 //| "really traded" and "gave up on it" - this keeps that flag's existing      |
 //| meaning (resolved, don't revisit) but records which one separately.          |
+//| v1.11: every permanent skip now Journals its reason - up to v1.10 a skip      |
+//| (incl. a rejected order) logged nothing, which is exactly what made the        |
+//| D1 "valid patterns, zero trades" failure invisible in the Journal. Also        |
+//| clears any transient-retry state; returns HS_ENTRY_SKIPPED for AttemptEntry().   |
 //+------------------------------------------------------------------+
-void SkipPattern(int idx)
+int SkipPattern(const int idx, const string why)
   {
+   PrintFormat("HeadShoulders_EA: %s (head %s, confirmed %s) SKIPPED - %s",
+               g_patterns[idx].top ? "H&S top" : "Inverse H&S", TimeToString(g_patterns[idx].t_head),
+               TimeToString(g_patterns[idx].brk_t), why);
    g_patterns[idx].traded = true;
    g_patterns[idx].executed = false;
+   ClearRetry(idx);
    if(!g_skipCosmeticDraws) RemovePatternDrawing(g_patterns[idx]);
+   return(HS_ENTRY_SKIPPED);
   }
 //+------------------------------------------------------------------+
 //| Un-confirmed shape - InpDrawPending. Same shoulders/head markers    |
@@ -1395,6 +2115,11 @@ void OnTick()
    //--- passed, so a real entry would be silently lost for good, not just
    //--- delayed. The call further down still runs every tick as before.
    SyncPosition();
+   //--- v1.11: these run on EVERY tick, not inside the bar gate - see their own
+   //--- comments. Retries go BEFORE the new-bar block so an older pattern still
+   //--- owed its entry gets priority over a fresh trigger on the same tick.
+   ResolveInflight();          // finding #6 - adopt a fill that followed an ambiguous send
+   RetryTransientEntries();    // findings #1/#2/#9 - tick-level transient-entry retry
    if(IsNewBar())
      {
       //--- the full swing rescan (Recompute) is the expensive part - O(lookback)
@@ -1404,14 +2129,22 @@ void OnTick()
       //--- the search for BRAND NEW pattern shapes is throttled, and a pattern
       //--- takes many dozens of bars to even form, so a few bars' detection lag
       //--- here is immaterial.
+      //--- v1.11 finding #5: ...EXCEPT right after a (re)start, where the
+      //--- throttle alone left the EA blind until the InpRecomputeEveryBars-th
+      //--- new bar - up to 4 DAYS on D1 at the default 5. The first scan after
+      //--- OnInit() now runs unconditionally (and stays forced until one
+      //--- actually succeeds - history may not be loaded on the very first tick).
       g_barCounter++;
-      if(InpRecomputeEveryBars <= 1 || g_barCounter % InpRecomputeEveryBars == 0)
-         Recompute();
+      if(g_forceRecompute || InpRecomputeEveryBars <= 1 || g_barCounter % InpRecomputeEveryBars == 0)
+        {
+         if(Recompute()) g_forceRecompute = false;
+        }
       AdvancePending();
       CheckForEntry();
       ManageRunner();
       RefreshDrawings();
      }
+   RunnerTick();               // finding #4 - tick-level re-try of a refused/clamped trail
    SyncPosition();
    //--- InpShowPanel dropped from this gate (v1.07) - DrawPanel() itself now
    //--- draws the wallpaper/watermark BEFORE its own internal InpShowPanel
@@ -1427,6 +2160,12 @@ void OnTick()
 void OnTimer()
   {
    SyncPosition();
+   //--- v1.11: same tick-level duties as OnTick(), so a quiet market (few ticks)
+   //--- doesn't stall a retry/adoption/trail re-try. Live only - the timer is
+   //--- not started in a non-visual Tester run (see OnInit()).
+   ResolveInflight();
+   RetryTransientEntries();
+   RunnerTick();
    if(!g_skipCosmeticDraws && TimeCurrent() != g_lastPanelDraw)
      {
       g_lastPanelDraw = TimeCurrent();
