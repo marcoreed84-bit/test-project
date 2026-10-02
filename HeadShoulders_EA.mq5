@@ -185,9 +185,19 @@
 //|  gives it. Decision to default this made explicitly by the user after being shown all of the above, not               |
 //|  unilaterally - matching this file's own standing rule that a candidate earns default status only once                 |
 //|  someone has actually looked at the real evidence and chosen it, not on my say-so alone.                                  |
+//|                                                                                                                              |
+//|  v1.09: cosmetic only, no logic/input change. DrawPattern() and DrawPendingPattern() previously             |
+//|  only drew the 3 pivot markers (shoulders/head) and the neckline - the shoulders and head floated            |
+//|  on the chart with nothing connecting them, so the actual zigzag SHAPE of the pattern (left                  |
+//|  shoulder -> trough -> head -> trough -> right shoulder) wasn't visible, only its endpoints and the           |
+//|  neckline derived from it. Added 4 connecting trend-line segments (S1-T1, T1-Head, Head-T2, T2-S2)            |
+//|  tracing the real outline, in both the confirmed (solid, pattern's own top/inverse colour) and                |
+//|  pending/forming (dotted, InpColPending) drawing paths. Same object-name prefix as everything else            |
+//|  in DrawPattern/DrawPendingPattern, so RemovePatternDrawing()'s existing ObjectsDeleteAll(0, base)             |
+//|  already cleans these up too - no new cleanup code needed.                                                    |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.08"
+#property version   "1.09"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo now default (v1.08)"
 #property strict
 #include <Trade\Trade.mqh>
@@ -1003,6 +1013,11 @@ void DrawPattern(const HSPattern &P)
    DrawMarker(base + "s2", P.t_s2, P.p_s2, col, !P.top);
    DrawLabel(base + "hl", P.t_head, P.p_head, (P.top ? "  HEAD" : "  HEAD (inv)"), col);
 
+   DrawLine(base + "seg1", P.t_s1, P.p_s1, P.t_t1, P.p_t1, col, 1, STYLE_SOLID, false);
+   DrawLine(base + "seg2", P.t_t1, P.p_t1, P.t_head, P.p_head, col, 1, STYLE_SOLID, false);
+   DrawLine(base + "seg3", P.t_head, P.p_head, P.t_t2, P.p_t2, col, 1, STYLE_SOLID, false);
+   DrawLine(base + "seg4", P.t_t2, P.p_t2, P.t_s2, P.p_s2, col, 1, STYLE_SOLID, false);
+
    DrawLine(base + "neck", P.t_t1, P.p_t1, P.t_t2, P.p_t2, col, 2, STYLE_SOLID, true);
    DrawLabel(base + "necklbl", P.t_t2, P.p_t2, "  neckline", col);
 
@@ -1063,6 +1078,12 @@ void DrawPendingPattern(const HSPattern &P)
    DrawMarker(base + "head", P.t_head, P.p_head, InpColPending, !P.top);
    DrawMarker(base + "s2", P.t_s2, P.p_s2, InpColPending, !P.top);
    DrawLabel(base + "hl", P.t_head, P.p_head, "  forming...", InpColPending);
+
+   DrawLine(base + "seg1", P.t_s1, P.p_s1, P.t_t1, P.p_t1, InpColPending, 1, STYLE_DOT, false);
+   DrawLine(base + "seg2", P.t_t1, P.p_t1, P.t_head, P.p_head, InpColPending, 1, STYLE_DOT, false);
+   DrawLine(base + "seg3", P.t_head, P.p_head, P.t_t2, P.p_t2, InpColPending, 1, STYLE_DOT, false);
+   DrawLine(base + "seg4", P.t_t2, P.p_t2, P.t_s2, P.p_s2, InpColPending, 1, STYLE_DOT, false);
+
    DrawLine(base + "neck", P.t_t1, P.p_t1, P.t_t2, P.p_t2, InpColPending, 1, STYLE_DASH, true);
    string runTxt = StringFormat("  awaiting break (%d/%d closes)", P.run, InpBreakConfirmCloses);
    DrawLabel(base + "necklbl", P.t_t2, P.p_t2, runTxt, InpColPending);
