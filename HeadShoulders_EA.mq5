@@ -195,10 +195,27 @@
 //|  pending/forming (dotted, InpColPending) drawing paths. Same object-name prefix as everything else            |
 //|  in DrawPattern/DrawPendingPattern, so RemovePatternDrawing()'s existing ObjectsDeleteAll(0, base)             |
 //|  already cleans these up too - no new cleanup code needed.                                                    |
+//|                                                                                                                              |
+//|  v1.10: real bug, found from the user's own live GOLD D1 Journal log (2026-10-02): CheckForEntry()           |
+//|  previously marked EVERY rejected order as a permanent skip (traded=true), with no distinction               |
+//|  between rejection reasons. The real log showed two orders failing with retcode 10018                        |
+//|  (TRADE_RETCODE_MARKET_CLOSED), both timestamped 01:00:0X server time - a pullback-retest trigger             |
+//|  landing right at a session boundary. Unlike every other rejection reason handled here (bad                  |
+//|  stops, no money), a closed market is TRANSIENT - the same retest condition is very likely still              |
+//|  true once the session reopens. D1 has so few real pattern opportunities to begin with (8 real                |
+//|  GOLD candidates 2023-2026, confirmed by an independent Python replication of this exact                      |
+//|  construction) that losing even one or two to this threw away a real trade, not a bad one - the               |
+//|  user's real D1 test showed zero trades for 2023-2026 despite valid patterns genuinely forming.               |
+//|  Fix: on MARKET_CLOSED specifically, under InpUsePullbackEntry (the default), leave the pattern               |
+//|  untouched so CheckForEntry() re-checks it on the next tick, already bounded by the existing                  |
+//|  ageBars > InpPullbackWindowBars expiry - no new unbounded-retry risk. Immediate-entry mode is                |
+//|  unaffected (its trigger is an exact P.brk_t==t1 equality with no later re-check possible, so a               |
+//|  skip is still the only correct outcome there). Every OTHER rejection reason still permanently                |
+//|  skips the pattern exactly as before.                                                                         |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.09"
-#property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo now default (v1.08)"
+#property version   "1.10"
+#property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, MARKET_CLOSED retry fix in v1.10"
 #property strict
 #include <Trade\Trade.mqh>
 CTrade trade;
@@ -761,19 +778,46 @@ void CheckForEntry()
       double tp = InpUseRunner ? 0.0 : P.target;   // InpUseRunner replaces the fixed broker-side TP with ManageRunner()'s trailing stop - see its own input comment
       bool ok = isBuy ? trade.Buy(InpLots, _Symbol, entry, P.stop, tp, cmt)
                        : trade.Sell(InpLots, _Symbol, entry, P.stop, tp, cmt);
-      g_patterns[i].traded = true;     // one shot per pattern either way - don't retry a rejected order every tick
-      g_patterns[i].executed = ok;     // a rejected order (ok=false) is a skip, not a real trade - its drawing clears below like any other skip
       if(ok)
         {
+         g_patterns[i].traded = true;
+         g_patterns[i].executed = true;
          SyncPosition();
          if(!g_skipCosmeticDraws) DrawEntryArrow(P, entry);
          if(InpUseRunner) ArmRunner(P, isBuy);
+         return;
         }
-      else
+      uint retcode = trade.ResultRetcode();
+      PrintFormat("HeadShoulders_EA: entry FAILED, retcode %d (%s)", retcode, trade.ResultRetcodeDescription());
+      if(retcode == TRADE_RETCODE_MARKET_CLOSED && InpUsePullbackEntry)
         {
-         PrintFormat("HeadShoulders_EA: entry FAILED, retcode %d (%s)", trade.ResultRetcode(), trade.ResultRetcodeDescription());
-         if(!g_skipCosmeticDraws) RemovePatternDrawing(g_patterns[i]);
+         //--- real GOLD account evidence (2026-10-02 Journal, D1, 2023-01-01
+         //--- onward): a pullback-retest trigger can land right at a session
+         //--- boundary (both real failures timestamped 01:00:0X server time,
+         //--- the top of a new trading day) and get rejected even though the
+         //--- pattern/retest itself is genuinely valid - unlike every other
+         //--- rejection reason here (bad stops, no money), MARKET_CLOSED is
+         //--- TRANSIENT: the same retest condition will very likely still be
+         //--- true once the session reopens a few minutes/hours later. Do
+         //--- NOT mark traded=true - leave the pattern exactly as it was so
+         //--- CheckForEntry() re-checks it on the next tick, already bounded
+         //--- by the existing ageBars > InpPullbackWindowBars expiry above -
+         //--- no new unbounded-retry risk. This is exactly why D1 could show
+         //--- zero real trades across 2+ years despite the measured-move
+         //--- pattern firing correctly: with so few D1 opportunities to
+         //--- begin with (confirmed: 8 real GOLD candidates 2023-2026 per
+         //--- independent Python replication), losing even one to a closed-
+         //--- market instant the position would have filled fine shortly
+         //--- after threw away a real trade, not a bad one. Immediate-entry
+         //--- mode (InpUsePullbackEntry=false) is excluded here on purpose -
+         //--- its trigger is an exact P.brk_t==t1 equality with no later
+         //--- re-check, so there is no bar on which a retry could land;
+         //--- skipping it outright (as before) is still correct there.
+         return;
         }
+      g_patterns[i].traded = true;
+      g_patterns[i].executed = false;
+      if(!g_skipCosmeticDraws) RemovePatternDrawing(g_patterns[i]);
       return;
      }
   }
