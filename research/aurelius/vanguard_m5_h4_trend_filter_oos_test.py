@@ -53,8 +53,10 @@ if __name__ == "__main__":
     h4_trend_up = h4["close"].values > h4_ema
     h4_time = h4["time"].values
     m5_time = m5["time"].values
-    # for each M5 bar, find the most recent COMPLETED H4 bar (strictly before this M5 bar's time)
-    h4_idx_for_m5 = np.searchsorted(h4_time, m5_time, side="right") - 1
+    # for each M5 bar, find the most recent COMPLETED H4 bar (strictly before this M5 bar's time).
+    # side="left" so an M5 bar exactly AT an H4 bar's open time maps to the PRIOR H4 index, not
+    # the one that just opened (side="right" would leak that bar's final historical close).
+    h4_idx_for_m5 = np.searchsorted(h4_time, m5_time, side="left") - 1
     h4_idx_for_m5 = np.clip(h4_idx_for_m5, 0, len(h4) - 1)
     m5_h4_trend_up = h4_trend_up[h4_idx_for_m5]
     valid_h4 = h4_idx_for_m5 >= 1  # need at least one real completed H4 bar behind us
