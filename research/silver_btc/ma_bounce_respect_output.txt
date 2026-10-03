@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- MA bounce/respect (MA_PERIOD, MA_TYPE, STOP_ATR) [APPROACH_ATR=1.5 fixed, TARGET_R=2.0 fixed]
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=24 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+24/24 combos had IS n>=100; 2 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20, 'sma', 3.0): IS n=  660  IS %PF=1.101  long%=49
+   (21, 'sma', 3.0): IS n=  662  IS %PF=1.055  long%=50
+   (21, 'ema', 3.0): IS n=  600  IS %PF=0.988  long%=49
+   (20, 'ema', 3.0): IS n=  583  IS %PF=0.967  long%=50
+   (50, 'ema', 3.0): IS n=  676  IS %PF=0.899  long%=49
+   (50, 'sma', 3.0): IS n=  694  IS %PF=0.877  long%=47
+   (20, 'sma', 1.5): IS n=  739  IS %PF=0.867  long%=49
+   (20, 'ema', 1.5): IS n=  632  IS %PF=0.867  long%=49
+FROZEN WINNER (IS only): (20, 'sma', 3.0)  IS n=660  IS %PF=1.101
+IS sanity: random-timing IS pool median=0.874; IS winner vs best-of-24 random (median 1.040): p=0.1930
+OOS (untouched): n=617  win%=38.1  %PF=1.027  sum%=4.7  long%=53 (long %PF=0.998 n=330, short %PF=1.061 n=287)
+random-timing OOS null (1000 draws, p_fire=0.00560, mean n=621 vs real 617): median=0.985  p95=1.159
+REAL OOS %PF=1.027 -> 65.7th percentile; p(K=1)=0.3430 [DOES NOT SURVIVE]; p(K=24)=1.0000 (best-of-K median 1.195) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.53): median=0.995  p(K=1)=0.3740
+
+==========================================================================================
+SILVER M15 -- MA bounce/respect (MA_PERIOD, MA_TYPE, STOP_ATR) [APPROACH_ATR=1.5 fixed, TARGET_R=2.0 fixed]
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=24 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+24/24 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (200, 'sma', 3.0): IS n=  548  IS %PF=0.699  long%=51
+   (100, 'sma', 3.0): IS n=  661  IS %PF=0.647  long%=50
+   (150, 'ema', 3.0): IS n=  663  IS %PF=0.640  long%=50
+   (200, 'ema', 3.0): IS n=  583  IS %PF=0.631  long%=53
+   (150, 'sma', 3.0): IS n=  613  IS %PF=0.625  long%=51
+   (100, 'ema', 3.0): IS n=  711  IS %PF=0.615  long%=53
+   (20, 'ema', 3.0): IS n=  663  IS %PF=0.613  long%=50
+   (21, 'ema', 3.0): IS n=  675  IS %PF=0.596  long%=51
+FROZEN WINNER (IS only): (200, 'sma', 3.0)  IS n=548  IS %PF=0.699
+IS sanity: random-timing IS pool median=0.518; IS winner vs best-of-24 random (median 0.630): p=0.0000
+OOS (untouched): n=430  win%=38.8  %PF=0.857  sum%=-37.2  long%=56 (long %PF=0.903 n=241, short %PF=0.793 n=189)
+random-timing OOS null (1000 draws, p_fire=0.00372, mean n=440 vs real 430): median=0.793  p95=0.979
+REAL OOS %PF=0.857 -> 73.2th percentile; p(K=1)=0.2680 [DOES NOT SURVIVE]; p(K=24)=0.9992 (best-of-K median 1.010) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.56): median=0.797  p(K=1)=0.2590
+
+==========================================================================================
+BTCUSD M15 -- MA bounce/respect (MA_PERIOD, MA_TYPE, STOP_ATR) [APPROACH_ATR=1.5 fixed, TARGET_R=2.0 fixed]
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=24 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+24/24 combos had IS n>=100; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20, 'ema', 3.0): IS n=  270  IS %PF=0.996  long%=57
+   (21, 'ema', 3.0): IS n=  272  IS %PF=0.974  long%=57
+   (20, 'sma', 3.0): IS n=  290  IS %PF=0.890  long%=58
+   (200, 'sma', 3.0): IS n=  299  IS %PF=0.881  long%=55
+   (100, 'sma', 3.0): IS n=  323  IS %PF=0.877  long%=54
+   (21, 'sma', 3.0): IS n=  287  IS %PF=0.866  long%=57
+   (100, 'ema', 3.0): IS n=  334  IS %PF=0.844  long%=58
+   (50, 'ema', 3.0): IS n=  326  IS %PF=0.832  long%=58
+FROZEN WINNER (IS only): (20, 'ema', 3.0)  IS n=270  IS %PF=0.996
+IS sanity: random-timing IS pool median=0.819; IS winner vs best-of-24 random (median 1.090): p=0.9208
+OOS (untouched): n=347  win%=36.6  %PF=0.944  sum%=-12.7  long%=55 (long %PF=0.841 n=192, short %PF=1.077 n=155)
+random-timing OOS null (1000 draws, p_fire=0.00444, mean n=361 vs real 347): median=0.879  p95=1.062
+REAL OOS %PF=0.944 -> 73.1th percentile; p(K=1)=0.2690 [DOES NOT SURVIVE]; p(K=24)=0.9994 (best-of-K median 1.098) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.55): median=0.873  p(K=1)=0.2830
+
+SUMMARY
+  {'label': 'GOLD M15 -- MA bounce/respect (MA_PERIOD, MA_TYPE, STOP_ATR) [APPROACH_ATR=1.5 fixed, TARGET_R=2.0 fixed]', 'K': 24, 'cfg': (20, 'sma', 3.0), 'is_n': 660, 'is_pf': np.float64(1.1008276207316077), 'oos_n': 617, 'oos_pf': np.float64(1.0270215514403722), 'p_is_k': 0.193, 'pctile': np.float64(65.7), 'p1': 0.343, 'pK': 1.0, 'p1_dir': 0.374, 'null_median': 0.9854666783736106, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- MA bounce/respect (MA_PERIOD, MA_TYPE, STOP_ATR) [APPROACH_ATR=1.5 fixed, TARGET_R=2.0 fixed]', 'K': 24, 'cfg': (200, 'sma', 3.0), 'is_n': 548, 'is_pf': np.float64(0.6985834710372908), 'oos_n': 430, 'oos_pf': np.float64(0.8566826475304649), 'p_is_k': 0.0, 'pctile': np.float64(73.2), 'p1': 0.268, 'pK': 0.9992, 'p1_dir': 0.259, 'null_median': 0.7925382874933151, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- MA bounce/respect (MA_PERIOD, MA_TYPE, STOP_ATR) [APPROACH_ATR=1.5 fixed, TARGET_R=2.0 fixed]', 'K': 24, 'cfg': (20, 'ema', 3.0), 'is_n': 270, 'is_pf': np.float64(0.9963745744693753), 'oos_n': 347, 'oos_pf': np.float64(0.9441614947053549), 'p_is_k': 0.9208, 'pctile': np.float64(73.1), 'p1': 0.269, 'pK': 0.9994, 'p1_dir': 0.283, 'null_median': 0.8786190438038345, 'verdict': 'DOES NOT SURVIVE'}
