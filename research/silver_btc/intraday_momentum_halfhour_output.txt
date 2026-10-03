@@ -1,0 +1,13 @@
+
+==========================================================================================
+BTCUSD -- intraday time-series momentum, UTC-calendar-day version (first 00:00-00:15 UTC return -> last 23:30-00:00 UTC trade), K=1 (no search)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+==========================================================================================
+signals found: 2845 (one per UTC day with both windows present)
+IS: n=973  win%=19.6  %PF=0.187  net%=-183.6
+OOS: n=999  win%=28.0  %PF=0.304  net%=-95.6
+  random-timing OOS null (1000 draws, p_fire=0.01076, mean n=1020): median=0.356  p95=0.420
+  REAL OOS %PF=0.304 -> 6.1th percentile; p(K=1)=0.9390 [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'BTCUSD', 'K': 1, 'oos_n': 999, 'oos_pf': np.float64(0.3035112882481854), 'pctile': np.float64(6.1), 'p1': 0.939, 'verdict': 'DOES NOT SURVIVE'}
