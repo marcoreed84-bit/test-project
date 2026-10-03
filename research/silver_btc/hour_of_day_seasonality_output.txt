@@ -1,0 +1,24 @@
+
+==========================================================================================
+BTCUSD -- hour-of-day seasonality (HOUR UTC 0-23, DIRECTION)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=48 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+48/48 combos had IS n>=50; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (15, -1.0): IS n=  977  IS %PF=0.590  long%=0
+   (14, 1.0): IS n=  978  IS %PF=0.586  long%=100
+   (0, 1.0): IS n=  978  IS %PF=0.584  long%=100
+   (22, 1.0): IS n=  975  IS %PF=0.575  long%=100
+   (3, -1.0): IS n=  978  IS %PF=0.570  long%=0
+   (17, 1.0): IS n=  977  IS %PF=0.569  long%=100
+   (16, 1.0): IS n=  978  IS %PF=0.567  long%=100
+   (17, -1.0): IS n=  977  IS %PF=0.555  long%=0
+FROZEN WINNER (IS only): (15, -1.0)  IS n=977  IS %PF=0.590
+IS sanity: random-timing IS pool median=0.456; IS winner vs best-of-48 random (median 0.575): p=0.2854
+OOS (untouched): n=1000  win%=42.1  %PF=0.678  sum%=-70.6  long%=0 (long %PF=nan n=0, short %PF=0.678 n=1000)
+random-timing OOS null (1000 draws, p_fire=0.01087, mean n=999 vs real 1000): median=0.583  p95=0.694
+REAL OOS %PF=0.678 -> 92.7th percentile; p(K=1)=0.0730 [borderline]; p(K=48)=0.9730 (best-of-K median 0.725) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.00): median=0.567  p(K=1)=0.0350
+
+SUMMARY
+  {'label': 'BTCUSD -- hour-of-day seasonality (HOUR UTC 0-23, DIRECTION)', 'K': 48, 'cfg': (15, -1.0), 'is_n': 977, 'is_pf': np.float64(0.5896628507046301), 'oos_n': 1000, 'oos_pf': np.float64(0.6777150496210834), 'p_is_k': 0.2854, 'pctile': np.float64(92.7), 'p1': 0.073, 'pK': 0.973, 'p1_dir': 0.035, 'null_median': 0.5833988577807043, 'verdict': 'DOES NOT SURVIVE'}

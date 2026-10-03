@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- volume/price divergence fade (LOOKBACK, VOL_MULT, STOP_ATR)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+12/12 combos had IS n>=50; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20, 0.5, 3.0): IS n= 1118  IS %PF=0.886  long%=49
+   (50, 0.5, 3.0): IS n=  582  IS %PF=0.883  long%=50
+   (50, 0.7, 3.0): IS n= 1046  IS %PF=0.880  long%=46
+   (20, 0.9, 3.0): IS n= 2111  IS %PF=0.876  long%=48
+   (20, 0.9, 1.5): IS n= 3284  IS %PF=0.856  long%=48
+   (20, 0.7, 3.0): IS n= 1649  IS %PF=0.855  long%=48
+   (50, 0.9, 3.0): IS n= 1568  IS %PF=0.844  long%=46
+   (50, 0.7, 1.5): IS n= 1294  IS %PF=0.837  long%=46
+FROZEN WINNER (IS only): (20, 0.5, 3.0)  IS n=1118  IS %PF=0.886
+IS sanity: random-timing IS pool median=0.874; IS winner vs best-of-12 random (median 0.976): p=0.9990
+OOS (untouched): n=896  win%=35.0  %PF=0.903  sum%=-22.7  long%=43 (long %PF=1.169 n=384, short %PF=0.748 n=512)
+random-timing OOS null (1000 draws, p_fire=0.00927, mean n=916 vs real 896): median=0.990  p95=1.127
+REAL OOS %PF=0.903 -> 14.9th percentile; p(K=1)=0.8510 [DOES NOT SURVIVE]; p(K=12)=1.0000 (best-of-K median 1.123) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.43): median=0.976  p(K=1)=0.8250
+
+==========================================================================================
+SILVER M15 -- volume/price divergence fade (LOOKBACK, VOL_MULT, STOP_ATR)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+12/12 combos had IS n>=50; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (20, 0.9, 3.0): IS n= 2157  IS %PF=0.542  long%=48
+   (20, 0.5, 3.0): IS n= 1270  IS %PF=0.532  long%=50
+   (50, 0.9, 3.0): IS n= 1606  IS %PF=0.522  long%=47
+   (20, 0.7, 3.0): IS n= 1805  IS %PF=0.518  long%=50
+   (50, 0.5, 3.0): IS n=  684  IS %PF=0.508  long%=47
+   (50, 0.7, 3.0): IS n= 1201  IS %PF=0.476  long%=48
+   (50, 0.9, 1.5): IS n= 2241  IS %PF=0.403  long%=47
+   (20, 0.9, 1.5): IS n= 3480  IS %PF=0.392  long%=48
+FROZEN WINNER (IS only): (20, 0.9, 3.0)  IS n=2157  IS %PF=0.542
+IS sanity: random-timing IS pool median=0.537; IS winner vs best-of-12 random (median 0.584): p=0.9990
+OOS (untouched): n=1937  win%=35.7  %PF=0.776  sum%=-270.6  long%=44 (long %PF=0.838 n=844, short %PF=0.731 n=1093)
+random-timing OOS null (1000 draws, p_fire=0.03905, mean n=1981 vs real 1937): median=0.805  p95=0.873
+REAL OOS %PF=0.776 -> 27.3th percentile; p(K=1)=0.7270 [DOES NOT SURVIVE]; p(K=12)=1.0000 (best-of-K median 0.873) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.44): median=0.804  p(K=1)=0.7250
+
+==========================================================================================
+BTCUSD M15 -- volume/price divergence fade (LOOKBACK, VOL_MULT, STOP_ATR)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+12/12 combos had IS n>=50; 1 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (50, 0.5, 3.0): IS n=   92  IS %PF=1.232  long%=42
+   (50, 0.7, 3.0): IS n=  299  IS %PF=0.947  long%=39
+   (20, 0.5, 3.0): IS n=  237  IS %PF=0.891  long%=40
+   (20, 0.7, 3.0): IS n=  625  IS %PF=0.869  long%=41
+   (20, 0.9, 3.0): IS n= 1141  IS %PF=0.803  long%=43
+   (20, 0.7, 1.5): IS n=  766  IS %PF=0.789  long%=41
+   (50, 0.9, 3.0): IS n=  696  IS %PF=0.764  long%=43
+   (50, 0.5, 1.5): IS n=   95  IS %PF=0.732  long%=41
+FROZEN WINNER (IS only): (50, 0.5, 3.0)  IS n=92  IS %PF=1.232
+IS sanity: random-timing IS pool median=0.811; IS winner vs best-of-12 random (median 1.221): p=0.4776
+OOS (untouched): n=184  win%=33.7  %PF=0.843  sum%=-16.3  long%=32 (long %PF=0.695 n=58, short %PF=0.915 n=126)
+random-timing OOS null (1000 draws, p_fire=0.00213, mean n=188 vs real 184): median=0.867  p95=1.146
+REAL OOS %PF=0.843 -> 42.4th percentile; p(K=1)=0.5760 [DOES NOT SURVIVE]; p(K=12)=1.0000 (best-of-K median 1.140) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.32): median=0.864  p(K=1)=0.5490
+
+SUMMARY
+  {'label': 'GOLD M15 -- volume/price divergence fade (LOOKBACK, VOL_MULT, STOP_ATR)', 'K': 12, 'cfg': (20, 0.5, 3.0), 'is_n': 1118, 'is_pf': np.float64(0.8857059981386409), 'oos_n': 896, 'oos_pf': np.float64(0.9033758519633224), 'p_is_k': 0.999, 'pctile': np.float64(14.899999999999999), 'p1': 0.851, 'pK': 1.0, 'p1_dir': 0.825, 'null_median': 0.9900570610250776, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- volume/price divergence fade (LOOKBACK, VOL_MULT, STOP_ATR)', 'K': 12, 'cfg': (20, 0.9, 3.0), 'is_n': 2157, 'is_pf': np.float64(0.5422642161578215), 'oos_n': 1937, 'oos_pf': np.float64(0.7760127761826625), 'p_is_k': 0.999, 'pctile': np.float64(27.3), 'p1': 0.727, 'pK': 1.0, 'p1_dir': 0.725, 'null_median': 0.8049853096293911, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- volume/price divergence fade (LOOKBACK, VOL_MULT, STOP_ATR)', 'K': 12, 'cfg': (50, 0.5, 3.0), 'is_n': 92, 'is_pf': np.float64(1.2319803581524904), 'oos_n': 184, 'oos_pf': np.float64(0.8427889063459272), 'p_is_k': 0.4776, 'pctile': np.float64(42.4), 'p1': 0.576, 'pK': 1.0, 'p1_dir': 0.549, 'null_median': 0.8666646950001979, 'verdict': 'DOES NOT SURVIVE'}
