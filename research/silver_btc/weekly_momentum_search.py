@@ -57,7 +57,7 @@ def run(symbol, log):
     log(f"weekly bars: {b.n}, signals: {len(sig_bar)}")
 
     result = dict(label=symbol, K=1)
-    for key, lo, hi in (("is", b.is_lo, b.is_hi), ("oos", b.oos_lo, b.oos_hi)):
+    for key, lo, hi in (("is", b.is_lo, b.is_hi), ("oos", b.oos_lo, b.oos_hi), ("full", 0, b.n)):
         r = C.sim_signals(sig_bar, sig_dir, sig_dist, b.open, b.high, b.low, b.close, b.spread_px, b.atr,
                           *exargs, lo, hi)
         pnl = r[3]
