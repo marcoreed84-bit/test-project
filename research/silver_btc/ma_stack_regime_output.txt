@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD M15 -- 3-MA stack alignment (21/50/100) + RSI/Bollinger regime filter (RSI_BAND, BB_FILTER, STOP_ATR, TRAIL_ATR)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+16/16 combos had IS n>=50; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   ((40.0, 70.0), False, 3.0, 0.0): IS n= 2337  IS %PF=0.860  long%=51
+   ((30.0, 80.0), False, 3.0, 0.0): IS n= 2448  IS %PF=0.855  long%=50
+   ((40.0, 70.0), True, 3.0, 0.0): IS n= 2255  IS %PF=0.854  long%=51
+   ((30.0, 80.0), True, 3.0, 0.0): IS n= 2296  IS %PF=0.845  long%=51
+   ((40.0, 70.0), True, 1.5, 0.0): IS n= 3997  IS %PF=0.788  long%=51
+   ((40.0, 70.0), False, 1.5, 0.0): IS n= 4283  IS %PF=0.783  long%=51
+   ((30.0, 80.0), True, 1.5, 0.0): IS n= 4083  IS %PF=0.782  long%=51
+   ((30.0, 80.0), False, 1.5, 0.0): IS n= 4526  IS %PF=0.779  long%=51
+FROZEN WINNER (IS only): ((40.0, 70.0), False, 3.0, 0.0)  IS n=2337  IS %PF=0.860
+IS sanity: random-timing IS pool median=0.892; IS winner vs best-of-16 random (median 0.970): p=1.0000
+OOS (untouched): n=1995  win%=35.2  %PF=1.045  sum%=25.5  long%=54 (long %PF=1.165 n=1073, short %PF=0.926 n=922)
+random-timing OOS null (1000 draws, p_fire=0.04418, mean n=1942 vs real 1995): median=1.001  p95=1.089
+REAL OOS %PF=1.045 -> 78.5th percentile; p(K=1)=0.2150 [DOES NOT SURVIVE]; p(K=16)=0.9810 (best-of-K median 1.092) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.54): median=1.007  p(K=1)=0.2650
+
+==========================================================================================
+SILVER M15 -- 3-MA stack alignment (21/50/100) + RSI/Bollinger regime filter (RSI_BAND, BB_FILTER, STOP_ATR, TRAIL_ATR)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+16/16 combos had IS n>=50; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   ((30.0, 80.0), True, 3.0, 0.0): IS n= 2262  IS %PF=0.535  long%=51
+   ((40.0, 70.0), True, 3.0, 0.0): IS n= 2234  IS %PF=0.533  long%=51
+   ((30.0, 80.0), False, 3.0, 0.0): IS n= 2400  IS %PF=0.529  long%=51
+   ((40.0, 70.0), False, 3.0, 0.0): IS n= 2317  IS %PF=0.526  long%=51
+   ((30.0, 80.0), True, 1.5, 0.0): IS n= 4255  IS %PF=0.339  long%=51
+   ((40.0, 70.0), True, 1.5, 0.0): IS n= 4183  IS %PF=0.335  long%=51
+   ((30.0, 80.0), False, 1.5, 0.0): IS n= 4674  IS %PF=0.334  long%=51
+   ((40.0, 70.0), False, 1.5, 0.0): IS n= 4470  IS %PF=0.329  long%=51
+FROZEN WINNER (IS only): ((30.0, 80.0), True, 3.0, 0.0)  IS n=2262  IS %PF=0.535
+IS sanity: random-timing IS pool median=0.550; IS winner vs best-of-16 random (median 0.601): p=1.0000
+OOS (untouched): n=2015  win%=32.7  %PF=0.818  sum%=-238.0  long%=53 (long %PF=0.833 n=1071, short %PF=0.802 n=944)
+random-timing OOS null (1000 draws, p_fire=0.04463, mean n=1957 vs real 2015): median=0.810  p95=0.892
+REAL OOS %PF=0.818 -> 55.7th percentile; p(K=1)=0.4430 [DOES NOT SURVIVE]; p(K=16)=1.0000 (best-of-K median 0.897) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.53): median=0.810  p(K=1)=0.4340
+
+==========================================================================================
+BTCUSD M15 -- 3-MA stack alignment (21/50/100) + RSI/Bollinger regime filter (RSI_BAND, BB_FILTER, STOP_ATR, TRAIL_ATR)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=16 (literal grid size); selection = highest IS %PF with IS n>=50
+==========================================================================================
+16/16 combos had IS n>=50; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   ((40.0, 70.0), True, 3.0, 0.0): IS n= 1332  IS %PF=0.893  long%=51
+   ((30.0, 80.0), True, 3.0, 0.0): IS n= 1351  IS %PF=0.887  long%=51
+   ((40.0, 70.0), False, 3.0, 0.0): IS n= 1387  IS %PF=0.868  long%=51
+   ((30.0, 80.0), False, 3.0, 0.0): IS n= 1456  IS %PF=0.865  long%=51
+   ((30.0, 80.0), True, 1.5, 0.0): IS n= 2524  IS %PF=0.763  long%=50
+   ((40.0, 70.0), True, 1.5, 0.0): IS n= 2479  IS %PF=0.754  long%=50
+   ((30.0, 80.0), False, 1.5, 0.0): IS n= 2787  IS %PF=0.745  long%=50
+   ((40.0, 70.0), False, 1.5, 0.0): IS n= 2646  IS %PF=0.732  long%=50
+FROZEN WINNER (IS only): ((40.0, 70.0), True, 3.0, 0.0)  IS n=1332  IS %PF=0.893
+IS sanity: random-timing IS pool median=0.835; IS winner vs best-of-16 random (median 0.948): p=0.9666
+OOS (untouched): n=1416  win%=35.2  %PF=0.875  sum%=-117.5  long%=52 (long %PF=0.937 n=736, short %PF=0.821 n=680)
+random-timing OOS null (1000 draws, p_fire=0.04430, mean n=1390 vs real 1416): median=0.884  p95=0.983
+REAL OOS %PF=0.875 -> 44.7th percentile; p(K=1)=0.5530 [DOES NOT SURVIVE]; p(K=16)=1.0000 (best-of-K median 0.987) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.52): median=0.887  p(K=1)=0.5820
+
+SUMMARY
+  {'label': 'GOLD M15 -- 3-MA stack alignment (21/50/100) + RSI/Bollinger regime filter (RSI_BAND, BB_FILTER, STOP_ATR, TRAIL_ATR)', 'K': 16, 'cfg': ((40.0, 70.0), False, 3.0, 0.0), 'is_n': 2337, 'is_pf': np.float64(0.8598680052042134), 'oos_n': 1995, 'oos_pf': np.float64(1.0448834455313236), 'p_is_k': 1.0, 'pctile': np.float64(78.5), 'p1': 0.215, 'pK': 0.981, 'p1_dir': 0.265, 'null_median': 1.0010351776837263, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER M15 -- 3-MA stack alignment (21/50/100) + RSI/Bollinger regime filter (RSI_BAND, BB_FILTER, STOP_ATR, TRAIL_ATR)', 'K': 16, 'cfg': ((30.0, 80.0), True, 3.0, 0.0), 'is_n': 2262, 'is_pf': np.float64(0.5346154565590913), 'oos_n': 2015, 'oos_pf': np.float64(0.8178565410510945), 'p_is_k': 1.0, 'pctile': np.float64(55.7), 'p1': 0.443, 'pK': 1.0, 'p1_dir': 0.434, 'null_median': 0.8100698290811865, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD M15 -- 3-MA stack alignment (21/50/100) + RSI/Bollinger regime filter (RSI_BAND, BB_FILTER, STOP_ATR, TRAIL_ATR)', 'K': 16, 'cfg': ((40.0, 70.0), True, 3.0, 0.0), 'is_n': 1332, 'is_pf': np.float64(0.8927616603719186), 'oos_n': 1416, 'oos_pf': np.float64(0.8753342289790046), 'p_is_k': 0.9666, 'pctile': np.float64(44.7), 'p1': 0.553, 'pK': 1.0, 'p1_dir': 0.582, 'null_median': 0.8842152480683649, 'verdict': 'DOES NOT SURVIVE'}
