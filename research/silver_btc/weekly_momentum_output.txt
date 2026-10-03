@@ -1,0 +1,35 @@
+
+==========================================================================================
+GOLD -- weekly time-series momentum (1-week lookback, 1-week hold), K=1 (no search)
+GOLD: n=1321 bars 2001-06-10 00:00:00 -> 2026-09-27 00:00:00 | IS 2014-06-15 00:00:00 -> 2020-12-27 00:00:00 (342 bars) | OOS 2021-01-03 00:00:00 -> 2026-09-27 00:00:00 (300 bars, untouched)
+==========================================================================================
+weekly bars: 1321, signals: 1305
+IS: n=171  win%=52.0  %PF=1.269  net%=28.0
+OOS: n=150  win%=48.0  %PF=0.777  net%=-32.2
+  random-timing OOS null (1000 draws, p_fire=0.50000, mean n=100): median=0.998  p95=1.543
+  REAL OOS %PF=0.777 -> 17.4th percentile; p(K=1)=0.8260 [DOES NOT SURVIVE]
+
+==========================================================================================
+SILVER -- weekly time-series momentum (1-week lookback, 1-week hold), K=1 (no search)
+SILVER: n=642 bars 2014-06-15 00:00:00 -> 2026-09-27 00:00:00 | IS 2014-06-15 00:00:00 -> 2020-12-27 00:00:00 (342 bars) | OOS 2021-01-03 00:00:00 -> 2026-09-27 00:00:00 (300 bars, untouched)
+==========================================================================================
+weekly bars: 642, signals: 626
+IS: n=164  win%=43.3  %PF=1.331  net%=56.4
+OOS: n=150  win%=44.0  %PF=0.790  net%=-60.2
+  random-timing OOS null (1000 draws, p_fire=0.50000, mean n=100): median=0.940  p95=1.463
+  REAL OOS %PF=0.790 -> 26.1th percentile; p(K=1)=0.7390 [DOES NOT SURVIVE]
+
+==========================================================================================
+BTCUSD -- weekly time-series momentum (1-week lookback, 1-week hold), K=1 (no search)
+BTCUSD: n=482 bars 2017-07-09 00:00:00 -> 2026-09-27 00:00:00 | IS 2021-01-03 00:00:00 -> 2023-12-31 00:00:00 (157 bars) | OOS 2024-01-07 00:00:00 -> 2026-09-27 00:00:00 (143 bars, untouched)
+==========================================================================================
+weekly bars: 482, signals: 467
+IS: n=79  win%=48.1  %PF=0.916  net%=-23.7
+OOS: n=71  win%=50.7  %PF=1.204  net%=27.4
+  random-timing OOS null (1000 draws, p_fire=0.50000, mean n=47): median=0.972  p95=1.845
+  REAL OOS %PF=1.204 -> 69.4th percentile; p(K=1)=0.3060 [DOES NOT SURVIVE]
+
+SUMMARY
+  {'label': 'GOLD', 'K': 1, 'is_n': 171, 'is_pf': np.float64(1.2693579080862907), 'oos_n': 150, 'oos_pf': np.float64(0.7772776904612925), 'pctile': np.float64(17.4), 'p1': 0.826, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'K': 1, 'is_n': 164, 'is_pf': np.float64(1.3308403335421048), 'oos_n': 150, 'oos_pf': np.float64(0.7903981646736469), 'pctile': np.float64(26.1), 'p1': 0.739, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD', 'K': 1, 'is_n': 79, 'is_pf': np.float64(0.9164922654397882), 'oos_n': 71, 'oos_pf': np.float64(1.203948965870263), 'pctile': np.float64(69.39999999999999), 'p1': 0.306, 'verdict': 'DOES NOT SURVIVE'}
