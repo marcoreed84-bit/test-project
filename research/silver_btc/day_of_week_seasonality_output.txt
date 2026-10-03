@@ -1,0 +1,68 @@
+
+==========================================================================================
+GOLD -- day-of-week seasonality (WEEKDAY 0=Mon..6=Sun, DIRECTION)
+GOLD: n=299856 bars 2001-06-04 01:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 00:00:00 -> 2020-12-31 18:45:00 (154601 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+GRID K=14 (literal grid size); selection = highest IS %PF with IS n>=15
+==========================================================================================
+10/14 combos had IS n>=15; 4 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (4, 1.0): IS n=  333  IS %PF=1.199  long%=100
+   (3, 1.0): IS n=  340  IS %PF=1.107  long%=100
+   (1, 1.0): IS n=  338  IS %PF=1.035  long%=100
+   (0, -1.0): IS n=  338  IS %PF=1.012  long%=0
+   (2, 1.0): IS n=  340  IS %PF=0.988  long%=100
+   (2, -1.0): IS n=  340  IS %PF=0.833  long%=0
+   (0, 1.0): IS n=  338  IS %PF=0.798  long%=100
+   (1, -1.0): IS n=  338  IS %PF=0.797  long%=0
+FROZEN WINNER (IS only): (4, 1.0)  IS n=333  IS %PF=1.199
+IS sanity: random-timing IS pool median=0.909; IS winner vs best-of-14 random (median 1.177): p=0.4522
+OOS (untouched): n=292  win%=54.1  %PF=1.150  sum%=18.9  long%=100 (long %PF=1.150 n=292, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.00272, mean n=292 vs real 292): median=0.958  p95=1.274
+REAL OOS %PF=1.150 -> 85.6th percentile; p(K=1)=0.1440 [borderline]; p(K=14)=0.8852 (best-of-K median 1.274) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=1.128  p(K=1)=0.4480
+
+==========================================================================================
+SILVER -- day-of-week seasonality (WEEKDAY 0=Mon..6=Sun, DIRECTION)
+SILVER: n=290120 bars 2014-06-12 00:00:00 -> 2026-09-25 23:45:00 | IS 2014-06-12 00:00:00 -> 2020-12-31 18:45:00 (154670 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135450 bars, untouched)
+GRID K=14 (literal grid size); selection = highest IS %PF with IS n>=15
+==========================================================================================
+10/14 combos had IS n>=15; 0 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (2, 1.0): IS n=  339  IS %PF=0.746  long%=100
+   (4, 1.0): IS n=  334  IS %PF=0.731  long%=100
+   (1, 1.0): IS n=  340  IS %PF=0.683  long%=100
+   (0, -1.0): IS n=  337  IS %PF=0.614  long%=0
+   (3, -1.0): IS n=  337  IS %PF=0.610  long%=0
+   (0, 1.0): IS n=  337  IS %PF=0.596  long%=100
+   (3, 1.0): IS n=  337  IS %PF=0.570  long%=100
+   (4, -1.0): IS n=  334  IS %PF=0.560  long%=0
+FROZEN WINNER (IS only): (2, 1.0)  IS n=339  IS %PF=0.746
+IS sanity: random-timing IS pool median=0.635; IS winner vs best-of-14 random (median 0.827): p=0.9142
+OOS (untouched): n=296  win%=51.4  %PF=1.196  sum%=39.4  long%=100 (long %PF=1.196 n=296, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.00277, mean n=296 vs real 296): median=0.846  p95=1.124
+REAL OOS %PF=1.196 -> 97.9th percentile; p(K=1)=0.0210 [SURVIVES]; p(K=14)=0.2630 (best-of-K median 1.134) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=0.949  p(K=1)=0.0810
+
+==========================================================================================
+BTCUSD -- day-of-week seasonality (WEEKDAY 0=Mon..6=Sun, DIRECTION)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+GRID K=14 (literal grid size); selection = highest IS %PF with IS n>=15
+==========================================================================================
+14/14 combos had IS n>=15; 4 of them have IS %PF > 1.0. Top 8 by IS %PF:
+   (6, 1.0): IS n=   99  IS %PF=1.208  long%=100
+   (2, 1.0): IS n=  156  IS %PF=1.142  long%=100
+   (1, 1.0): IS n=  156  IS %PF=1.039  long%=100
+   (3, -1.0): IS n=  156  IS %PF=1.026  long%=0
+   (4, 1.0): IS n=  156  IS %PF=0.890  long%=100
+   (4, -1.0): IS n=  156  IS %PF=0.880  long%=0
+   (0, 1.0): IS n=  156  IS %PF=0.875  long%=100
+   (0, -1.0): IS n=  156  IS %PF=0.863  long%=0
+FROZEN WINNER (IS only): (6, 1.0)  IS n=99  IS %PF=1.208
+IS sanity: random-timing IS pool median=0.856; IS winner vs best-of-14 random (median 1.396): p=0.8150
+OOS (untouched): n=143  win%=51.7  %PF=0.961  sum%=-3.4  long%=100 (long %PF=0.961 n=143, short %PF=nan n=0)
+random-timing OOS null (1000 draws, p_fire=0.00175, mean n=143 vs real 143): median=0.901  p95=1.323
+REAL OOS %PF=0.961 -> 60.9th percentile; p(K=1)=0.3910 [DOES NOT SURVIVE]; p(K=14)=0.9998 (best-of-K median 1.331) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=1.00): median=1.000  p(K=1)=0.5690
+
+SUMMARY
+  {'label': 'GOLD -- day-of-week seasonality (WEEKDAY 0=Mon..6=Sun, DIRECTION)', 'K': 14, 'cfg': (4, 1.0), 'is_n': 333, 'is_pf': np.float64(1.1992486421527004), 'oos_n': 292, 'oos_pf': np.float64(1.1502854051083926), 'p_is_k': 0.4522, 'pctile': np.float64(85.6), 'p1': 0.144, 'pK': 0.8852, 'p1_dir': 0.448, 'null_median': 0.9583938516859064, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER -- day-of-week seasonality (WEEKDAY 0=Mon..6=Sun, DIRECTION)', 'K': 14, 'cfg': (2, 1.0), 'is_n': 339, 'is_pf': np.float64(0.7464071521390641), 'oos_n': 296, 'oos_pf': np.float64(1.196462459889104), 'p_is_k': 0.9142, 'pctile': np.float64(97.89999999999999), 'p1': 0.021, 'pK': 0.263, 'p1_dir': 0.081, 'null_median': 0.8458523436620218, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'BTCUSD -- day-of-week seasonality (WEEKDAY 0=Mon..6=Sun, DIRECTION)', 'K': 14, 'cfg': (6, 1.0), 'is_n': 99, 'is_pf': np.float64(1.2080935146553784), 'oos_n': 143, 'oos_pf': np.float64(0.9613234123612363), 'p_is_k': 0.815, 'pctile': np.float64(60.9), 'p1': 0.391, 'pK': 0.9998, 'p1_dir': 0.569, 'null_median': 0.9010947767250095, 'verdict': 'DOES NOT SURVIVE'}
