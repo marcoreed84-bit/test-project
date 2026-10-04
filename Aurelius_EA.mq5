@@ -875,8 +875,19 @@
 //|  either way - InpUseAureliusFilter now defaults off on the Vanguard          |
 //|  readers anyway (see their own headers for why).                              |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.54: two restart-only bugs (mid-trade terminal restart/recompile/   |
+//|  input change - never hit in Strategy Tester, so no validated backtest  |
+//|  number changes): (1) restored g_entryBarCount was wall-clock/           |
+//|  PeriodSeconds(), counting the daily break/weekends/holidays as bars -    |
+//|  now iBarShift() real bars; (2) the Price21/VWAP confirm streaks were      |
+//|  reset to 0 despite the 2026-09-20 comment saying they were preserved,      |
+//|  delaying the shipped VWAP exit by up to InpVwapConfirmBars bars - now       |
+//|  rebuilt by replaying the last closed bars through the same check            |
+//|  (ResyncAfterRestore, run on the first new bar - see g_restoreResync).        |
+//+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.53"
+#property version   "1.54"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1250,6 +1261,15 @@ int      g_price21Bad = 0;    // consecutive closed bars price has spent through
 int      g_vwapBad = 0;       // consecutive closed bars price has spent through session VWAP against the trade
 bool     g_beDone = false;    // stop already moved to breakeven this trade - see InpUseBreakeven
 double   g_peakFavPx = 0.0;   // best closed-bar price seen in the trade's favor - see InpUseTrailAfterBE
+//--- v1.54: set by OnInit's open-position restore, consumed once by OnTick()'s
+//--- next new-bar pass (ResyncAfterRestore). Deferred rather than done in
+//--- OnInit because (a) the first OnTick() after ANY restart always takes the
+//--- new-bar path (g_lastBar starts at 0), so it re-evaluates shift 1 and
+//--- ++g_entryBarCount - a restore done in OnInit would double-count that bar;
+//--- (b) the first tick can land in a later bar than OnInit ran in (restart
+//--- during the daily break); (c) iMA buffers are often not yet calculated
+//--- inside OnInit, which would silently zero the Price21 replay.
+bool     g_restoreResync = false;
 
 //--- InpUseGivebackExit tracking (independent of g_peakFavPx above, which
 //--- only updates when InpUseBreakeven is on) - which ticket g_gbPeakFav
@@ -1377,10 +1397,19 @@ int OnInit()
          //--- enabled. g_addsDone is not reconstructable from broker state (which
          //--- leg is the "base" is unknown) - reset to 0, meaning at most one
          //--- fewer add than intended after a restart, not a wrong count.
-         g_entryBarCount = (int)((TimeCurrent() - g_entryTime) / PeriodSeconds());
+         //--- v1.54: bar count is now real bars (iBarShift), not wall-clock/
+         //--- PeriodSeconds() - that counted the daily break, weekends and
+         //--- holidays as bars. The two streaks below are only PROVISIONAL
+         //--- zeros - the 2026-09-20 comment above claimed they were
+         //--- preserved, but they were not; ResyncAfterRestore() now rebuilds
+         //--- them (and re-syncs the bar count) on the first new bar - see
+         //--- g_restoreResync for why that has to wait for OnTick().
+         int entryShift  = iBarShift(_Symbol, PERIOD_CURRENT, g_entryTime);
+         g_entryBarCount = (entryShift > 0) ? entryShift : 0;
          g_addsDone      = 0;
          g_price21Bad    = 0;
          g_vwapBad       = 0;
+         g_restoreResync = true;
          g_beDone        = (pos.StopLoss() != 0.0 &&
                             ((g_entryDir > 0 && pos.StopLoss() >= g_entryPrice) ||
                              (g_entryDir < 0 && pos.StopLoss() <= g_entryPrice)));
@@ -2271,6 +2300,70 @@ bool VwapExit(const bool isBuy)
    bool bad = isBuy ? (c < vw - buf) : (c > vw + buf);
    g_vwapBad = bad ? g_vwapBad + 1 : 0;
    return(g_vwapBad >= InpVwapConfirmBars);
+  }
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| v1.54: Wilder ATR as UpdateATRManual() would have computed it when |
+//| `shift` was the last closed bar (same 500-bar window, same         |
+//| ComputeWilderATR) - so ResyncAfterRestore's replay sees the exact  |
+//| ATR the live per-bar check saw at that bar, not today's value.     |
+//+------------------------------------------------------------------+
+double ATRAtShift(const int shift)
+  {
+   MqlRates arr[]; ArraySetAsSeries(arr, false);
+   int got = CopyRates(_Symbol, PERIOD_CURRENT, shift, 500, arr);
+   if(got < 14 + 2) return(0.0);
+   double out[]; ComputeWilderATR(arr, out, 14);
+   double last = out[ArraySize(out) - 1];
+   return((last != EMPTY_VALUE && last > 0.0) ? last : 0.0);
+  }
+//+------------------------------------------------------------------+
+//| v1.54: one-shot rebuild of the bar clock and the Price21/VWAP      |
+//| confirm streaks after an OnInit restore of an open position (see   |
+//| g_restoreResync). Called on the first new bar, AFTER that bar's own |
+//| ++g_entryBarCount and BEFORE Price21Exit/VwapExit evaluate shift 1. |
+//| A continuously running EA would by now have evaluated closed bars   |
+//| entryShift..2, so those are replayed (oldest first, at most the     |
+//| confirm-bar count - the streak only matters up to that threshold)   |
+//| through the identical bad/reset rule Price21Exit/VwapExit use, with |
+//| the MA/VWAP/ATR/close as of each replayed bar.                      |
+//+------------------------------------------------------------------+
+void ResyncAfterRestore(const bool isBuy)
+  {
+   int entryShift = iBarShift(_Symbol, PERIOD_CURRENT, g_entryTime);
+   if(entryShift < 0) return;   // history unavailable - keep OnInit's provisional values
+   g_entryBarCount = entryShift;   // continuous-run value; overrides this bar's ++ on top of OnInit's restore
+
+   if(InpUsePrice21Exit)
+     {
+      g_price21Bad = 0;
+      int n = (int)MathMin(InpPrice21ConfirmBars, entryShift - 1);
+      for(int s = n + 1; s >= 2; s--)
+        {
+         double m21, atr = ATRAtShift(s);
+         if(!MA(h21, s, m21) || atr <= 0.0) { g_price21Bad = 0; continue; }
+         double c = iClose(_Symbol, PERIOD_CURRENT, s);
+         double buf = InpPrice21BufferATR * atr;
+         bool bad = isBuy ? (c < m21 - buf) : (c > m21 + buf);
+         g_price21Bad = bad ? g_price21Bad + 1 : 0;
+        }
+     }
+   if(InpUseVwapExit)
+     {
+      g_vwapBad = 0;
+      int n = (int)MathMin(InpVwapConfirmBars, entryShift - 1);
+      for(int s = n + 1; s >= 2; s--)
+        {
+         double vw = SessionVWAP(s), atr = ATRAtShift(s);
+         if(vw <= 0.0 || atr <= 0.0) { g_vwapBad = 0; continue; }
+         double c = iClose(_Symbol, PERIOD_CURRENT, s);
+         double buf = InpVwapBufferATR * atr;
+         bool bad = isBuy ? (c < vw - buf) : (c > vw + buf);
+         g_vwapBad = bad ? g_vwapBad + 1 : 0;
+        }
+     }
+   PrintFormat("Aurelius EA: post-restart resync - bars held %d, Price21 streak %d, VWAP streak %d",
+               g_entryBarCount, g_price21Bad, g_vwapBad);
   }
 //+------------------------------------------------------------------+
 bool Aligned(const int shift, const bool isBuy)
@@ -3278,6 +3371,14 @@ void OnTick()
       if(pos.Symbol() != _Symbol || pos.Magic() != InpMagic) continue;
       if(pos.PositionType() == POSITION_TYPE_BUY) haveLong = true;
       else                                        haveShort = true;
+     }
+
+   //--- v1.54: one-shot post-restart rebuild of bar clock + exit streaks -
+   //--- see g_restoreResync. Must stay before the Price21/VWAP exit checks.
+   if(g_restoreResync)
+     {
+      g_restoreResync = false;
+      if(haveLong || haveShort) ResyncAfterRestore(haveLong);
      }
 
    //--- cross-EA signal (see InpPublishPosition's header) - broadcasts

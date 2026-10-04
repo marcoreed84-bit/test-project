@@ -265,8 +265,25 @@
 //|  Now bar-count based via iBarShift(), matching the v1.04 fix's convention.             |
 //|  NOT YET bar-matched against a real run of this exact build.                           |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.13: neckline SLOPE fix - same bug class as v1.04/v1.12, but in  |
+//|  the trade-decision path itself. The slope was stored per wall-clock |
+//|  SECOND (dt = t_t2-t_t1) and extended by elapsed seconds, so a        |
+//|  pattern pending over a weekend had its neckline pushed ~48-60h of     |
+//|  dead calendar time (~190 M15 bars' worth of slope) for ~1 real bar -   |
+//|  distorting breakout confirmation, head height/target, and the pullback  |
+//|  retest level, and making any trough pair that straddled a gap slope     |
+//|  differently from what Python tested. Now per BAR, exactly the research's |
+//|  construction (head_shoulders_target_test.py:95, hs_next_round_test.py:95):|
+//|  slope = (p_t2-p_t1)/(i_t2-i_t1), neckline(t) = p_t1 + slope x bars from   |
+//|  t_t1 to t (iBarShift, exact). Also: a pending pattern whose anchor bar     |
+//|  left loaded history (iBarShift == -1) was never expired and sat in          |
+//|  g_pending forever - it is now dropped (Journaled) the bar that happens.      |
+//|  hs_sim.py updated to match this AND v1.12's bar-count expiry. Changes which   |
+//|  trades fire - NOT YET bar-matched or random-timing re-tested on this build.     |
+//+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.12"
+#property version   "1.13"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
@@ -365,7 +382,7 @@ struct HSPattern
    int      i_s1, i_t1, i_head, i_t2, i_s2;   // array indices - valid only inside the Recompute() pass that found them, never relied on afterward
    double   p_s1, p_t1, p_head, p_t2, p_s2;
    datetime t_s1, t_t1, t_head, t_t2, t_s2;
-   double   neckSlopePerSec;      // price per SECOND, not per bar-index - stays valid across separate CopyRates calls, unlike an index-based slope would
+   double   neckSlopePerBar;      // v1.13: price per BAR (i_t2 - i_t1 bar count), matching the Python research's neck_slope exactly - a price/bar ratio stays valid across CopyRates calls; only the reference point is re-resolved, via iBarShift() on t_t1 (see NecklineAtTime())
    int      brk_i;                // confirmed breakout bar index, -1 if not yet confirmed
    datetime brk_t;
    double   brk_price;
@@ -814,8 +831,12 @@ int FindHSPatterns(const MqlRates &r[], const double &atr[], const int n,
       P.i_head = zIdx[m+2]; P.p_head = phead; P.t_head = r[zIdx[m+2]].time;
       P.i_t2 = zIdx[m+3]; P.p_t2 = pt2;   P.t_t2 = r[zIdx[m+3]].time;
       P.i_s2 = zIdx[m+4]; P.p_s2 = p2;    P.t_s2 = r[zIdx[m+4]].time;
-      long dtSec = (long)P.t_t2 - (long)P.t_t1;
-      P.neckSlopePerSec = (dtSec != 0) ? (P.p_t2 - P.p_t1) / (double)dtSec : 0.0;
+      //--- v1.13: per-BAR slope, exactly head_shoulders_target_test.py:95 /
+      //--- hs_next_round_test.py:95,144: (p_t2 - p_t1) / (i_t2 - i_t1). The
+      //--- zIdx values come from ONE CopyRates array, so their difference is
+      //--- the real bar count between the troughs (weekend gaps add nothing).
+      int dBars = P.i_t2 - P.i_t1;
+      P.neckSlopePerBar = (dBars != 0) ? (P.p_t2 - P.p_t1) / (double)dBars : 0.0;
       P.brk_i = -1;
       P.traded = false;
       P.executed = false;
@@ -825,9 +846,22 @@ int FindHSPatterns(const MqlRates &r[], const double &atr[], const int n,
      }
    return(nOut);
   }
-double NecklineAtTime(const HSPattern &P, const datetime t)
+//+------------------------------------------------------------------+
+//| v1.13: neckline value at bar-open time t = Python's neckline_at(q) |
+//| = p_t1 + slope * (q - i_t1), with (q - i_t1) as a BAR COUNT taken   |
+//| from iBarShift() (shift(t_t1) - shift(t)), never elapsed seconds.   |
+//| exact=true: t_t1 and t are always real bar open times, so a -1 here  |
+//| means that bar is genuinely not in loaded history - returns false    |
+//| (caller must not trade on it) rather than a silently wrong count.     |
+//+------------------------------------------------------------------+
+bool NecklineAtTime(const HSPattern &P, const datetime t, double &nl)
   {
-   return(P.p_t1 + P.neckSlopePerSec * (double)((long)t - (long)P.t_t1));
+   nl = 0.0;
+   int shiftRef = iBarShift(_Symbol, PERIOD_CURRENT, P.t_t1, true);
+   int shiftT   = iBarShift(_Symbol, PERIOD_CURRENT, t, true);
+   if(shiftRef < 0 || shiftT < 0) return(false);
+   nl = P.p_t1 + P.neckSlopePerBar * (double)((long)shiftRef - (long)shiftT);
+   return(true);
   }
 //+------------------------------------------------------------------+
 //| Same pattern already recorded, either confirmed or still pending?   |
@@ -944,7 +978,27 @@ void AdvancePending()
       HSPattern P = g_pending[i];
       if(t1 <= P.t_s2) continue;   // this candidate's own formation bar hasn't closed relative to t1 yet (can happen the same bar it formed)
 
-      double nl = NecklineAtTime(P, t1);
+      //--- v1.13: bar-count anchors resolved FIRST. Up to v1.12 a -1 from
+      //--- iBarShift() (anchor bar no longer in loaded chart history) left
+      //--- `expired` false forever, so the pattern sat in g_pending (and on
+      //--- the chart) permanently. Any anchor that can't be resolved now
+      //--- drops the pattern immediately - it can never be evaluated again
+      //--- (history only loses old bars). exact=true: these are always real
+      //--- bar open times, so -1 means genuinely gone, not "nearest bar".
+      int shift_s1 = iBarShift(_Symbol, PERIOD_CURRENT, P.t_s1, true);
+      int shift_s2 = iBarShift(_Symbol, PERIOD_CURRENT, P.t_s2, true);
+      double nl = 0.0;
+      bool nlOk = NecklineAtTime(P, t1, nl);
+      if(shift_s1 < 0 || shift_s2 < 0 || !nlOk)
+        {
+         PrintFormat("HeadShoulders_EA: pending %s (head %s) dropped - anchor bar no longer in loaded history (iBarShift s1=%d s2=%d, neckline %s).",
+                     P.top ? "H&S top" : "Inverse H&S", TimeToString(P.t_head), shift_s1, shift_s2, nlOk ? "ok" : "unresolved");
+         int lastD = ArraySize(g_pending) - 1;
+         if(i != lastD) g_pending[i] = g_pending[lastD];
+         ArrayResize(g_pending, lastD);
+         continue;
+        }
+
       double beyond = P.top ? (nl - c1) : (c1 - nl);
       bool confirmed = false;
       if(beyond > InpBreakTolATR * atrNow)
@@ -952,7 +1006,8 @@ void AdvancePending()
          g_pending[i].run++;
          if(g_pending[i].run >= InpBreakConfirmCloses)
            {
-            double headHeight = MathAbs(P.p_head - NecklineAtTime(P, P.t_head));
+            double nlHead = 0.0;
+            double headHeight = NecklineAtTime(P, P.t_head, nlHead) ? MathAbs(P.p_head - nlHead) : 0.0;
             if(headHeight > 0.0)
               {
                P = g_pending[i];
@@ -982,16 +1037,12 @@ void AdvancePending()
       //--- of dead calendar time and get wrongly marked expired/removed on
       //--- Monday, even though essentially zero real trading bars elapsed.
       //--- Now bar-count based via iBarShift(), same pattern as the v1.04 fix.
-      int shift_s1 = iBarShift(_Symbol, PERIOD_CURRENT, P.t_s1, false);
-      int shift_s2 = iBarShift(_Symbol, PERIOD_CURRENT, P.t_s2, false);
-      bool expired = false;
-      if(shift_s1 >= 0 && shift_s2 >= 0)
-        {
-         long patLenBars = (long)shift_s1 - (long)shift_s2;
-         long ageBars = (long)shift_s2 - 1;   // shift 1 = t1, the last closed bar
-         long horizonBars = (long)(MathMax((double)patLenBars, 1.0) * InpMaxHorizonMult);
-         expired = (!confirmed) && (ageBars > horizonBars);
-        }
+      //--- (v1.13: shift_s1/shift_s2 are resolved at the top of the loop, and
+      //--- a -1 on either already dropped the pattern there.)
+      long patLenBars = (long)shift_s1 - (long)shift_s2;
+      long ageBars = (long)shift_s2 - 1;   // shift 1 = t1, the last closed bar
+      long horizonBars = (long)(MathMax((double)patLenBars, 1.0) * InpMaxHorizonMult);
+      bool expired = (!confirmed) && (ageBars > horizonBars);
 
       if(confirmed || expired)
         {
@@ -1064,7 +1115,9 @@ void CheckForEntry()
          long ageBars = (long)brkShift - 1;
          if(ageBars > InpPullbackWindowBars)   // missed - matches the Python research's own "missed" bucket, skip entirely
            { SkipPattern(i, StringFormat("no neckline retest within InpPullbackWindowBars=%d bars", InpPullbackWindowBars)); continue; }
-         double nl = NecklineAtTime(P, t1);
+         double nl = 0.0;
+         if(!NecklineAtTime(P, t1, nl))   // v1.13: per-bar neckline needs t_t1 still in loaded history - can't come back, so skip rather than retry every bar
+           { SkipPattern(i, "neckline anchor bar (t_t1) no longer in loaded history - retest level can't be computed"); continue; }
          double tol = InpPullbackTolATR * P.atrAtBrk;
          trigger = P.top ? (h1 >= nl - tol) : (l1 <= nl + tol);
         }

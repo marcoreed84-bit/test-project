@@ -164,8 +164,12 @@ def find_hs_patterns(zIdx, zType, zPx, atr, shoulder_tol_atr, times):
             continue
         i_s1, i_t1, i_t2, i_s2 = zIdx[m], zIdx[m + 1], zIdx[m + 3], zIdx[m + 4]
         t_t1, t_t2 = times[i_t1], times[i_t2]
-        dt = t_t2 - t_t1
-        neck_slope = (pt2 - pt1) / dt if dt != 0 else 0.0
+        # EA v1.13: per-BAR slope, exactly head_shoulders_target_test.py:95 /
+        # hs_next_round_test.py:95,144 - (p_t2 - p_t1) / (i_t2 - i_t1). Was per
+        # wall-clock second (t_t2 - t_t1) up to EA v1.12, which over-extended
+        # the neckline across weekend/session gaps.
+        d_bars = i_t2 - i_t1
+        neck_slope = (pt2 - pt1) / d_bars if d_bars != 0 else 0.0
         out.append(dict(top=top, i_s1=i_s1, p_s1=p1, i_t1=i_t1, p_t1=pt1, t_t1=t_t1,
                          i_head=i_head, p_head=phead, i_t2=i_t2, p_t2=pt2, t_t2=t_t2,
                          i_s2=i_s2, p_s2=p2, t_s2=times[i_s2], t_s1=times[i_s1], t_head=times[i_head],
@@ -173,8 +177,11 @@ def find_hs_patterns(zIdx, zType, zPx, atr, shoulder_tol_atr, times):
     return out
 
 
-def neckline_at_time(P, t):
-    return P["p_t1"] + P["neck_slope"] * (t - P["t_t1"])
+def neckline_at_bar(P, q):
+    """EA v1.13 NecklineAtTime(): p_t1 + slope * (bars from i_t1 to q). The EA
+    gets that bar count from iBarShift(t_t1) - iBarShift(t); here it's the
+    positional index difference (q - i_t1), identical on the same bar series."""
+    return P["p_t1"] + P["neck_slope"] * (q - P["i_t1"])
 
 
 def simulate(m15, params):
@@ -195,7 +202,6 @@ def simulate(m15, params):
     sp = m15["spread"].values * params["point"] if "spread" in m15 else np.zeros(len(m15))
     n = len(m15)
     N = params["pivot_strength"]
-    period_sec = 15 * 60
 
     atr = build_atr(h, l, c, params["atr_period"], params["point"])
     isH, isL = raw_pivot_candidates(h, l, N)
@@ -294,13 +300,13 @@ def simulate(m15, params):
             if t1 <= P["t_s2"]:
                 still_pending.append(P)
                 continue
-            nl = neckline_at_time(P, t1)
+            nl = neckline_at_bar(P, k)
             beyond = (nl - c1) if P["top"] else (c1 - nl)
             confirmed_now = False
             if beyond > params["break_tol_atr"] * atr_now:
                 P["run"] += 1
                 if P["run"] >= params["break_confirm_closes"]:
-                    head_height = abs(P["p_head"] - neckline_at_time(P, P["t_head"]))
+                    head_height = abs(P["p_head"] - neckline_at_bar(P, P["i_head"]))
                     if head_height > 0.0:
                         P["brk_t"] = t1
                         P["brk_i"] = k
@@ -315,10 +321,16 @@ def simulate(m15, params):
             else:
                 P["run"] = 0
 
-            pat_len = P["t_s2"] - P["t_s1"]
-            age = t1 - P["t_s2"]
-            horizon = max(pat_len, period_sec) * params["max_horizon_mult"]
-            expired = (not confirmed_now) and (age > horizon)
+            # EA v1.12 bar-count expiry (was wall-clock seconds, which aged a
+            # pattern by dead weekend time): patLenBars = shift_s1 - shift_s2,
+            # ageBars = shift_s2 - 1, horizonBars = (long)(max(patLenBars,1) * mult).
+            # With shift 1 = bar k: shift_s2 - 1 = k - i_s2. The EA's v1.13
+            # iBarShift()==-1 drop path has no analogue here (full history is
+            # always in memory).
+            pat_len_bars = P["i_s2"] - P["i_s1"]
+            age_bars_p = k - P["i_s2"]
+            horizon_bars = int(max(pat_len_bars, 1) * params["max_horizon_mult"])
+            expired = (not confirmed_now) and (age_bars_p > horizon_bars)
             if not (confirmed_now or expired):
                 still_pending.append(P)
         pending = still_pending
@@ -347,7 +359,7 @@ def simulate(m15, params):
                     if age_bars > params["pullback_window_bars"]:
                         P["traded"] = True
                         continue
-                    nl = neckline_at_time(P, t1)
+                    nl = neckline_at_bar(P, k)
                     tol = params["pullback_tol_atr"] * P["atr_at_brk"]
                     trigger = (h1 >= nl - tol) if P["top"] else (l1 <= nl + tol)
                 if not trigger:

@@ -811,8 +811,24 @@
 //|  v1.11: position-broadcast now also writes a heartbeat variable, same   |
 //|  fix/reasoning as Aurelius_EA.mq5's v1.53 - see its header.              |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.12: three execution/display fixes from the 2026-10-04 audit, no    |
+//|  signal/entry/exit-rule change. (1) A FAILED REVERSAL close was never   |
+//|  retried - it only runs inside the new-bar gate, and by the next bar    |
+//|  DetectCross() no longer sees a fresh cross, so the position rode on to |
+//|  the next opposite cross or the 2.5xATR stop. Now armed for a tick-level|
+//|  retry (RetryReversalClose(), every tick, at most one send per second)  |
+//|  until it closes, the position is gone, or InpReversalRetryMinutes runs |
+//|  out (then a loud log + push - never silent). (2) InpUsePartialScaleOut |
+//|  state (ticket/done/target) lived only in RAM, so a restart/recompile    |
+//|  mid-trade silently skipped the partial - now persisted to terminal      |
+//|  GlobalVariables and restored in OnInit(), same pattern as               |
+//|  HeadShoulders_EA.mq5's InpUseRunner state. (3) Panel "bars held" was    |
+//|  wall-clock seconds/300 (wrong across weekends/overnight gaps) - now     |
+//|  iBarShift(). Display only.                                             |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.11"
+#property version   "1.12"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -839,6 +855,7 @@ input int    InpH4EMAPeriod      = 50;      // EMA period on H4 - unused while t
 input group "=== Exit ==="
 input double InpSafetyStopATR   = 2.5;      // v1.01: tightened from 3.0 - see header (net AND drawdown both improved)
 input int    InpATRPeriod       = 14;
+input int    InpReversalRetryMinutes = 60;  // v1.12: how long a FAILED reversal close keeps being retried on ticks (0 = no retry, pre-v1.12 behaviour) - see header
 
 input group "=== Giveback-to-breakeven exit (v1.06 candidate, Python-only so far) ==="
 input bool   InpUseGivebackExit    = false;   // REJECTED (2026-09-25): the Python method was fixed (giveback check wired into msim.py's real exit_fn hook, using its own already-tracked pos['peak'], instead of a post-hoc swap on a fixed entry list) and re-run - net 3334.65->1894.09 (-43.2%), trades 2616->2674 (+2.2%), win% 25.8->30.9. Same cascade mechanism confirmed on Aurelius_EA.mq5 against a REAL MT5 A/B test (-64.3% real vs -63.9% corrected-Python, near-exact match) - this file's own corrected result is now trusted at that same level. Stays false. See Aurelius_EA.mq5 v1.52's header and research/aurelius/giveback_event_driven_test.py.
@@ -955,6 +972,13 @@ double   g_gbPeakFav = 0.0;   // best floating profit (price units) seen so far 
 ulong    g_partialTicket = 0;
 bool     g_partialDone   = false;   // whether the partial close has already been taken for g_partialTicket
 double   g_partialTP     = 0.0;     // this trade's partial-target price, set once at entry (CheckForEntry)
+//--- v1.12: all three persisted to terminal GlobalVariables (PartialSaveState())
+//--- and restored in OnInit() - see PartialGVPrefix()'s comment.
+
+//--- v1.12 failed-REVERSAL-close retry (see RetryReversalClose()) - 0 = none pending
+ulong    g_revRetryTicket  = 0;
+datetime g_revRetryUntil   = 0;
+datetime g_revRetryLastTry = 0;     // one send per server second at most - no tick-burst flooding the broker
 
 //--- cross-EA signal (see InpPublishPosition) - no M5/M15 variant suffix
 //--- needed, unlike Aurelius's writer-side name: Meridian has no timeframe
@@ -1240,6 +1264,115 @@ void CloseCurrentPosition(const string reason)
                   reason, g_ticket, trade.ResultRetcode(), trade.ResultRetcodeDescription());
   }
 //+------------------------------------------------------------------+
+//| v1.12 - failed REVERSAL close retry. Before v1.12 the "will retry  |
+//| next tick" above was only true for FRIDAY/GIVEBACK (both re-checked|
+//| every tick); REVERSAL is only ever evaluated inside the new-bar    |
+//| gate, and on the next bar DetectCross() (shift 1 vs 2) no longer   |
+//| sees the cross, so a single failed send left the position open     |
+//| until the NEXT opposite cross or the safety stop. ArmReversalRetry()|
+//| is called by ManageOpenPosition() when the close fails;            |
+//| RetryReversalClose() runs on EVERY tick (before the new-bar gate,  |
+//| same placement as HeadShoulders_EA.mq5's RetryTransientEntries())  |
+//| until the close succeeds, the position is gone (broker SL, Friday, |
+//| giveback, manual close, or an ambiguous send that did fill), or    |
+//| InpReversalRetryMinutes runs out. Not stop-and-reverse either way: |
+//| a successful retry leaves the EA flat, and the cross bar has       |
+//| already passed, so the next bar's CheckForEntry() can't re-enter   |
+//| on it - exactly what a first-try success would have done. Known    |
+//| limitation (disclosed): the pending retry lives in RAM only, so a  |
+//| restart mid-retry drops it (pre-v1.12 behaviour for that trade).   |
+//+------------------------------------------------------------------+
+void ArmReversalRetry(const ulong ticket)
+  {
+   if(InpReversalRetryMinutes <= 0 || ticket == 0) return;
+   g_revRetryTicket  = ticket;
+   g_revRetryUntil   = (datetime)((long)TimeCurrent() + (long)InpReversalRetryMinutes * 60);
+   g_revRetryLastTry = TimeCurrent();   // this tick's send just failed - next try from the next second on
+   PrintFormat("Meridian EA: REVERSAL close for ticket %I64u DEFERRED - retrying on ticks until %s",
+               ticket, TimeToString(g_revRetryUntil, TIME_DATE|TIME_SECONDS));
+  }
+void ClearReversalRetry()
+  {
+   g_revRetryTicket = 0; g_revRetryUntil = 0; g_revRetryLastTry = 0;
+  }
+void RetryReversalClose()
+  {
+   if(g_revRetryTicket == 0) return;
+   //--- position already gone (or replaced) - nothing is owed any more
+   if(g_ticket != g_revRetryTicket || !PositionSelectByTicket(g_revRetryTicket))
+     {
+      PrintFormat("Meridian EA: pending REVERSAL retry for ticket %I64u dropped - position no longer open", g_revRetryTicket);
+      ClearReversalRetry();
+      return;
+     }
+   if(TimeCurrent() >= g_revRetryUntil)
+     {
+      PrintFormat("Meridian EA: REVERSAL close for ticket %I64u GAVE UP after %d min of retries - position left open on its safety stop, CHECK IT",
+                  g_revRetryTicket, InpReversalRetryMinutes);
+      NotifyPush(StringFormat("Meridian: REVERSAL close for #%I64u failed for %d min - position still OPEN, check it",
+                              g_revRetryTicket, InpReversalRetryMinutes));
+      ClearReversalRetry();
+      return;
+     }
+   if(TimeCurrent() == g_revRetryLastTry) return;
+   g_revRetryLastTry = TimeCurrent();
+   CloseCurrentPosition("REVERSAL (retry)");
+   if(g_ticket == 0)
+     {
+      PrintFormat("Meridian EA: REVERSAL close for ticket %I64u succeeded on retry", g_revRetryTicket);
+      ClearReversalRetry();
+     }
+  }
+//+------------------------------------------------------------------+
+//| v1.12 - InpUsePartialScaleOut state persistence, same pattern as   |
+//| HeadShoulders_EA.mq5's RunnerSaveState()/RunnerLoadState...():     |
+//| terminal GlobalVariables keyed by symbol+magic survive a terminal  |
+//| restart/VPS reboot/recompile. Without this, g_partialTicket came   |
+//| back 0 after a restart mid-trade, g_partialTicket == g_ticket was  |
+//| never true again, and the partial was silently skipped for that    |
+//| trade. Saved at entry and whenever g_partialDone flips; restored in |
+//| OnInit() only if the saved ticket IS the live position (tickets are |
+//| never reused), otherwise the stale keys are deleted.               |
+//+------------------------------------------------------------------+
+string PartialGVPrefix() { return("MERIDIAN_PS_" + _Symbol + "_" + (string)InpMagic + "_"); }
+void PartialSaveState()
+  {
+   string p = PartialGVPrefix();
+   GlobalVariableSet(p + "ticket", (double)g_partialTicket);
+   GlobalVariableSet(p + "done",   g_partialDone ? 1.0 : 0.0);
+   GlobalVariableSet(p + "tp",     g_partialTP);
+  }
+void PartialSaveEntryVolume(const double vol)
+  {
+   GlobalVariableSet(PartialGVPrefix() + "vol", vol);
+  }
+void PartialClearState()
+  {
+   string p = PartialGVPrefix();
+   GlobalVariableDel(p + "ticket"); GlobalVariableDel(p + "done");
+   GlobalVariableDel(p + "tp");     GlobalVariableDel(p + "vol");
+  }
+bool PartialLoadStateIfMatchingTicket(const ulong ticket)
+  {
+   string p = PartialGVPrefix();
+   if(ticket == 0 || !GlobalVariableCheck(p + "ticket")) return(false);
+   if((ulong)GlobalVariableGet(p + "ticket") != ticket) return(false);
+   g_partialTicket = ticket;
+   g_partialDone   = (GlobalVariableGet(p + "done") >= 0.5);
+   g_partialTP     = GlobalVariableGet(p + "tp");
+   //--- belt-and-braces for a crash in the gap between a successful
+   //--- PositionClosePartial() and PartialSaveState(): if the live volume
+   //--- is already below the entry volume, the partial was taken - never
+   //--- send it a second time.
+   if(!g_partialDone && GlobalVariableCheck(p + "vol") && PositionSelectByTicket(ticket))
+     {
+      double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      if(PositionGetDouble(POSITION_VOLUME) < GlobalVariableGet(p + "vol") - 0.5 * MathMax(step, 1e-8))
+        { g_partialDone = true; PartialSaveState(); }
+     }
+   return(true);
+  }
+//+------------------------------------------------------------------+
 //| Detects the raw 21/50 cross on the bar that JUST closed (shift 1  |
 //| vs shift 2) - used for both entry (with confirmation) and exit    |
 //| (unconfirmed, per the validated design).                          |
@@ -1265,7 +1398,11 @@ void ManageOpenPosition()
 
    int dir;
    if(DetectCross(dir) && dir != g_posDir)
+     {
+      ulong tk = g_ticket;
       CloseCurrentPosition("REVERSAL");
+      if(g_ticket != 0) ArmReversalRetry(tk);   // v1.12: failed - retried on ticks, see RetryReversalClose()
+     }
    // safety stop is a real resting SL order on the position (set at
    // entry, see CheckForEntry) - the broker enforces it even if this
    // EA/terminal goes offline, so nothing further to do for it here.
@@ -1325,6 +1462,14 @@ void CheckForEntry()
       g_partialTicket = g_ticket;
       g_partialDone   = false;
       g_partialTP     = partialTP;
+      //--- v1.12: persisted so a restart mid-trade doesn't silently skip
+      //--- the partial - see PartialGVPrefix()
+      if(g_ticket != 0)
+        {
+         PartialSaveState();
+         if(PositionSelectByTicket(g_ticket)) PartialSaveEntryVolume(PositionGetDouble(POSITION_VOLUME));
+         else GlobalVariableDel(PartialGVPrefix() + "vol");   // never leave a previous trade's volume keyed to this ticket
+        }
      }
    else
       PrintFormat("Meridian EA: entry FAILED, retcode %d (%s)",
@@ -2196,7 +2341,11 @@ void DrawPanel(const bool reclaim = true)
       datetime ot     = (datetime)PositionGetInteger(POSITION_TIME);
       double   cur    = isLong ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double   toStop = (slp > 0.0 && cur > 0.0) ? MathAbs(cur - slp) : -1.0;
-      int      held   = (int)((TimeCurrent() - ot) / PeriodSeconds(PERIOD_M5));
+      //--- v1.12: real M5 bars since the entry bar, not wall-clock/300 (which
+      //--- counted every weekend/overnight gap as bars). Falls back to the old
+      //--- figure only if the entry bar isn't in loaded history.
+      int      held   = iBarShift(_Symbol, PERIOD_M5, ot, false);
+      if(held < 0) held = (int)((TimeCurrent() - ot) / PeriodSeconds(PERIOD_M5));
       PRow("p1", x, ty, w, isLong ? "LONG" : "SHORT", DoubleToString(opx, _Digits), 1); ty += rh;
       PRow("p2", x, ty, w, "safety stop", slp > 0.0 ? DoubleToString(slp, _Digits) : "none",
            slp > 0.0 ? -1 : 0); ty += rh;
@@ -2297,6 +2446,15 @@ int OnInit()
    SeedVWAP();
    SyncPositionState();   // restart with a position already open - see header
    g_lastBarTime = 0;     // force IsNewBar() true on the first tick
+
+   //--- v1.12: restore InpUsePartialScaleOut state for a position that was
+   //--- already open before this (re)start - see PartialGVPrefix(). No live
+   //--- match = stale keys from an already-closed trade, deleted.
+   if(PartialLoadStateIfMatchingTicket(g_ticket))
+      PrintFormat("Meridian EA: partial scale-out state restored for ticket %I64u (done=%s, target=%s)",
+                  g_ticket, g_partialDone ? "yes" : "no", DoubleToString(g_partialTP, _Digits));
+   else
+      PartialClearState();
 
    //--- v1.03 visuals - skipped entirely in a non-visual Tester run. Drawn
    //--- the moment it attaches (Fulcrum v2.08's lesson: don't wait for the
@@ -2408,6 +2566,10 @@ void OnTick()
       if(g_ticket != 0) CloseCurrentPosition("FRIDAY");
      }
 
+   //--- v1.12: tick-level retry of a FAILED reversal close - see
+   //--- RetryReversalClose(). No-op (one compare) unless one is pending.
+   RetryReversalClose();
+
    //--- tick-level giveback-to-breakeven exit (InpUseGivebackExit, v1.06
    //--- candidate - see header). Checked every tick, not gated on a new
    //--- bar, so the live peak-favorable-excursion tracking matches the
@@ -2453,13 +2615,13 @@ void OnTick()
          if(half >= minVol && half < fullVol)
            {
             if(trade.PositionClosePartial(g_ticket, half))
-               g_partialDone = true;
+              { g_partialDone = true; PartialSaveState(); }   // v1.12: persisted - see PartialGVPrefix()
             else
                PrintFormat("Meridian EA: partial close FAILED for ticket %I64u, retcode %d (%s)",
                            g_ticket, trade.ResultRetcode(), trade.ResultRetcodeDescription());
            }
          else
-            g_partialDone = true;   // can't be done at this size - stop re-checking every tick
+           { g_partialDone = true; PartialSaveState(); }   // can't be done at this size - stop re-checking every tick
         }
      }
 
