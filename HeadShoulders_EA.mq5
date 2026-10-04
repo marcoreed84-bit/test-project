@@ -282,8 +282,57 @@
 //|  hs_sim.py updated to match this AND v1.12's bar-count expiry. Changes which   |
 //|  trades fire - NOT YET bar-matched or random-timing re-tested on this build.     |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.14 (2026-10-04): real bugs from a fresh unprimed audit of v1.13,  |
+//|  fixed before any real/further MT5 run. (1) CRITICAL - durable cross-   |
+//|  restart duplicate-confirmation record. g_patterns/g_pending only ever    |
+//|  lived in RAM, and AlreadyKnown() only ever checked those two in-memory     |
+//|  lists - after ANY terminal restart, recompile, or new build attach, the     |
+//|  forced first Recompute() (finding #5) re-adds EVERY pattern shape from the    |
+//|  last InpLookbackBars bars into g_pending with run=0, including ones already    |
+//|  confirmed (and possibly already TRADED) before the restart; if price was        |
+//|  still past the neckline it could confirm again InpBreakConfirmCloses closes       |
+//|  later and fire a real SECOND entry on an already-traded setup. Measured on         |
+//|  real GOLD M15 data: 150 random cold-restart points -> 231 patterns confirmed        |
+//|  within 60 bars of restart, 136 (59%) already-confirmed-before-restart                |
+//|  duplicates, 18 of those producing a valid pullback-retest entry trigger (~1           |
+//|  fake trade per 8 restarts before the single-position gate). Fix: every                 |
+//|  confirmed pattern is now also recorded durably in a terminal GlobalVariable               |
+//|  (MarkPatternSeen(), same symbol+magic-keyed persistence idiom this file already           |
+//|  uses for runner state/the instance lock), keyed on the same head+direction                 |
+//|  AlreadyKnown() already used in RAM (v1.11 finding #7) - checked there too, so                |
+//|  a pattern ever confirmed before, even across a restart, can never be re-queued                |
+//|  as pending again. Bounded: PruneSeenPatterns() (called from the already-                       |
+//|  throttled Recompute()) drops any record whose head bar has aged out of                          |
+//|  InpLookbackBars - Recompute()'s own swing scan can never rediscover a pattern                    |
+//|  that old again, so the durable record can never be needed again either. (2)                       |
+//|  AdvancePending() boundary-value fix: an expired candidate dropped from                              |
+//|  g_pending could be re-added by the NEXT Recompute() with run reset to 0 (the                         |
+//|  swings are still there in price history) - and that bar's confirmation check                          |
+//|  used to run BEFORE expiry was re-evaluated, so a revived-but-already-past-its-                          |
+//|  horizon candidate could accumulate a confirming close immediately; at                                    |
+//|  InpBreakConfirmCloses=1 (not the default 3) that is an instant confirmation one                           |
+//|  Recompute() after being correctly expired. Expiry (age/horizon, which depends                              |
+//|  only on t_s1/t_s2/t1, never on `run`) is now checked FIRST, before any                                      |
+//|  confirmation attempt that bar; a genuinely live, non-revived candidate is                                    |
+//|  unaffected (its age is <= horizon regardless of check order), so default                                     |
+//|  InpBreakConfirmCloses=3 behaviour is unchanged. (3) ScheduleRetry() fix:                                      |
+//|  HS_WHY_THROTTLE (another pattern's send is inside the global 10s send gate -                                  |
+//|  AttemptEntry()) is not a failure of THIS pattern's own order, but with                                         |
+//|  InpEntryRetryMinutes=0 (retries off) it was treated exactly like a real                                         |
+//|  rejection and permanently skipped an otherwise healthy pattern that simply lost                                  |
+//|  a 10-second race to a second triggered pattern on the same bar. A throttle-only                                  |
+//|  block now still gets one short retry bounded to the send gate itself                                              |
+//|  (HS_RETRY_SEND_GAP_SEC) even with retries off; any other (real) failure reason is                                 |
+//|  unaffected and still skips immediately as InpEntryRetryMinutes=0 documents. Also:                                  |
+//|  research/trendbreaker/hs_sim.py brought back in sync - dedup switched to                                            |
+//|  head+direction (was t_s1/t_head/t_s2/top, the pre-v1.11 key) and the retest-window                                   |
+//|  age calculation corrected to brkShift-1 = k-brk_i (was k-brk_i-1, one retest bar too                                  |
+//|  many versus this file). NOT YET bar-matched or random-timing re-tested on this build -   |
+//|  see CLAUDE.md's standing rule before reporting any verdict built on v1.14 trades.           |
+//+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.13"
+#property version   "1.14"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
@@ -864,6 +913,66 @@ bool NecklineAtTime(const HSPattern &P, const datetime t, double &nl)
    return(true);
   }
 //+------------------------------------------------------------------+
+//| v1.14 CRITICAL FIX - durable cross-restart duplicate-confirmation    |
+//| record. Found by a fresh audit (2026-10-04): g_patterns/g_pending     |
+//| only ever lived in RAM, and AlreadyKnown() (below) only checked those  |
+//| two in-memory arrays. After ANY terminal restart, recompile, or new     |
+//| build attach, the forced first Recompute() (finding #5) re-scans the    |
+//| last InpLookbackBars bars from scratch and re-adds EVERY pattern shape    |
+//| it finds into g_pending with run=0 - including ones that were already      |
+//| confirmed (g_patterns), and possibly already TRADED, before the restart.     |
+//| If price was still past the neckline, the revived candidate can confirm       |
+//| again InpBreakConfirmCloses closes later and fire a real SECOND entry on       |
+//| a setup that already traded. Measured on real GOLD M15 data: 150 random         |
+//| cold-restart points -> 231 patterns confirmed within 60 bars of restart,         |
+//| 136 (59%) already-confirmed-before-restart duplicates, 18 of those produced       |
+//| a valid pullback-retest entry trigger (~1 fake trade per 8 restarts before          |
+//| the single-position gate). Fix: every pattern is recorded durably (terminal           |
+//| GlobalVariables, same persistence idiom this file already uses for runner             |
+//| state/the instance lock - see RunnerSaveState()/AcquireInstanceLock()) the              |
+//| moment it is CONFIRMED (MarkPatternSeen(), called from AdvancePending()), keyed          |
+//| on the same head+direction AlreadyKnown() already used in RAM (v1.11 finding              |
+//| #7) - so a pattern that was ever confirmed before, even across restarts, can                |
+//| never be re-queued as pending again. Bounded growth: PruneSeenPatterns() (called              |
+//| from Recompute(), same throttle as the full rescan) drops any record whose head                |
+//| bar has aged out of InpLookbackBars - Recompute()'s own swing scan can never                    |
+//| structurally rediscover a pattern that old again, so its durable record is safe                  |
+//| to drop too.                                                                                       |
+//+------------------------------------------------------------------+
+string SeenPatternPrefix() { return("HSEA_SEEN_" + _Symbol + "_" + (string)InpMagic + "_"); }
+string SeenPatternKey(const bool top, const datetime tHead)
+  {
+   return(SeenPatternPrefix() + (top ? "T_" : "I_") + (string)(long)tHead);
+  }
+void MarkPatternSeen(const HSPattern &P)
+  {
+   GlobalVariableSet(SeenPatternKey(P.top, P.t_head), (double)TimeCurrent());
+  }
+bool PatternSeenPersisted(const bool top, const datetime tHead)
+  {
+   return(GlobalVariableCheck(SeenPatternKey(top, tHead)));
+  }
+//--- cheap, infrequent (called from Recompute(), itself throttled to every
+//--- InpRecomputeEveryBars bars): scans only this symbol+magic's own GV
+//--- prefix, same scan idiom as AcquireInstanceLock(), and deletes any
+//--- "seen" record whose head bar is further back than 2x InpLookbackBars
+//--- worth of time - a pattern that old cannot be rediscovered by
+//--- FindSwings()/FindHSPatterns() (they only ever see the most recent
+//--- InpLookbackBars bars), so its durable record can never be needed again.
+void PruneSeenPatterns()
+  {
+   string prefix = SeenPatternPrefix();
+   int pfxLen = StringLen(prefix);
+   datetime cutoff = (datetime)((long)TimeCurrent() - 2L * (long)InpLookbackBars * (long)PeriodSeconds(PERIOD_CURRENT));
+   for(int g = GlobalVariablesTotal() - 1; g >= 0; g--)
+     {
+      string nm = GlobalVariableName(g);
+      if(StringFind(nm, prefix) != 0) continue;
+      long tHead = StringToInteger(StringSubstr(nm, pfxLen + 2));   // +2 skips "T_"/"I_"
+      if(tHead > 0 && (datetime)tHead < cutoff) GlobalVariableDel(nm);
+     }
+  }
+//+------------------------------------------------------------------+
 //| Same pattern already recorded, either confirmed or still pending?   |
 //| v1.11 (finding #7, VERIFIED before fixing): keyed on head bar time + |
 //| direction only. Up to v1.10 this required s1+head+s2 to ALL match -   |
@@ -883,6 +992,8 @@ bool NecklineAtTime(const HSPattern &P, const datetime t, double &nl)
 //| (%PF 1.089 -> 1.099) - ~1% of trades, PF unchanged-to-slightly-better. The        |
 //| FIRST-discovered variant is kept. NOTE: hs_sim.py itself still dedups on the      |
 //| old 4-tuple and must get the same one-line change before the next bar-match.       |
+//| v1.14: also checks PatternSeenPersisted() - see that fix's own header comment       |
+//| above for why the in-memory-only check above is not enough across a restart.         |
 //+------------------------------------------------------------------+
 bool AlreadyKnown(const HSPattern &P)
   {
@@ -892,6 +1003,7 @@ bool AlreadyKnown(const HSPattern &P)
    for(int i = 0; i < ArraySize(g_pending); i++)
       if(g_pending[i].t_head == P.t_head && g_pending[i].top == P.top)
          return(true);
+   if(PatternSeenPersisted(P.top, P.t_head)) return(true);
    return(false);
   }
 //+------------------------------------------------------------------+
@@ -947,6 +1059,7 @@ bool Recompute()
       ArrayResize(g_pending, k + 1, 32);
       g_pending[k] = found[i];
      }
+   PruneSeenPatterns();   // v1.14 - bounds the durable "seen" GV record, see its own header comment
    return(true);
   }
 //+------------------------------------------------------------------+
@@ -999,6 +1112,45 @@ void AdvancePending()
          continue;
         }
 
+      //--- v1.12 FIX: this used to measure patLen/age in wall-clock SECONDS
+      //--- (t_s2-t_s1, t1-t_s2) - the exact same class of bug already found
+      //--- and fixed for InpPullbackWindowBars in v1.04 (real time keeps
+      //--- passing over a weekend/session gap even though no new bars form,
+      //--- so wall-clock seconds overcounts "age" there). A pattern still
+      //--- forming going into a weekend could have its age jump by ~48-60h
+      //--- of dead calendar time and get wrongly marked expired/removed on
+      //--- Monday, even though essentially zero real trading bars elapsed.
+      //--- Now bar-count based via iBarShift(), same pattern as the v1.04 fix.
+      //--- (v1.13: shift_s1/shift_s2 are resolved at the top of the loop, and
+      //--- a -1 on either already dropped the pattern there.)
+      //--- v1.14 FIX: this expiry check now runs BEFORE any confirmation
+      //--- attempt this bar, not after. Bug: once an expired candidate is
+      //--- dropped from g_pending here, the NEXT Recompute() can re-add the
+      //--- IDENTICAL shape (same s1/t1/head/t2/s2 - the swings are still
+      //--- there in price history) with `run` reset to 0, since AlreadyKnown()
+      //--- has no reason to reject something that was never confirmed. Age/
+      //--- horizon depend only on t_s1/t_s2/t1, not on `run` - so a revived
+      //--- candidate that was already past its horizon is STILL past it the
+      //--- instant it reappears. Checking confirmation FIRST (the old order)
+      //--- let that revived-but-already-expired candidate accumulate a
+      //--- confirming close on this very bar - at InpBreakConfirmCloses=1
+      //--- that confirms IMMEDIATELY, one Recompute() after being correctly
+      //--- expired. Now: already past horizon -> drop it, full stop, before
+      //--- it is given any chance at a run++. A genuinely live (non-revived)
+      //--- candidate is unaffected either way (its ageBars <= horizonBars
+      //--- regardless of ordering), so default InpBreakConfirmCloses=3
+      //--- behaviour for normal, non-revived candidates is unchanged.
+      long patLenBars = (long)shift_s1 - (long)shift_s2;
+      long ageBars = (long)shift_s2 - 1;   // shift 1 = t1, the last closed bar
+      long horizonBars = (long)(MathMax((double)patLenBars, 1.0) * InpMaxHorizonMult);
+      if(ageBars > horizonBars)
+        {
+         int lastE = ArraySize(g_pending) - 1;
+         if(i != lastE) g_pending[i] = g_pending[lastE];
+         ArrayResize(g_pending, lastE);
+         continue;
+        }
+
       double beyond = P.top ? (nl - c1) : (c1 - nl);
       bool confirmed = false;
       if(beyond > InpBreakTolATR * atrNow)
@@ -1021,6 +1173,7 @@ void AdvancePending()
                int k = ArraySize(g_patterns);
                ArrayResize(g_patterns, k + 1, 32);
                g_patterns[k] = P;
+               MarkPatternSeen(P);   // v1.14 - durable cross-restart record, see AlreadyKnown()'s header comment
                confirmed = true;
               }
            }
@@ -1028,23 +1181,7 @@ void AdvancePending()
       else
          g_pending[i].run = 0;
 
-      //--- v1.12 FIX: this used to measure patLen/age in wall-clock SECONDS
-      //--- (t_s2-t_s1, t1-t_s2) - the exact same class of bug already found
-      //--- and fixed for InpPullbackWindowBars in v1.04 (real time keeps
-      //--- passing over a weekend/session gap even though no new bars form,
-      //--- so wall-clock seconds overcounts "age" there). A pattern still
-      //--- forming going into a weekend could have its age jump by ~48-60h
-      //--- of dead calendar time and get wrongly marked expired/removed on
-      //--- Monday, even though essentially zero real trading bars elapsed.
-      //--- Now bar-count based via iBarShift(), same pattern as the v1.04 fix.
-      //--- (v1.13: shift_s1/shift_s2 are resolved at the top of the loop, and
-      //--- a -1 on either already dropped the pattern there.)
-      long patLenBars = (long)shift_s1 - (long)shift_s2;
-      long ageBars = (long)shift_s2 - 1;   // shift 1 = t1, the last closed bar
-      long horizonBars = (long)(MathMax((double)patLenBars, 1.0) * InpMaxHorizonMult);
-      bool expired = (!confirmed) && (ageBars > horizonBars);
-
-      if(confirmed || expired)
+      if(confirmed)
         {
          int last = ArraySize(g_pending) - 1;
          if(i != last) g_pending[i] = g_pending[last];
@@ -1369,14 +1506,29 @@ void ClearRetry(const int i)
   }
 int ScheduleRetry(const int i, const int why, const uint rc)
   {
-   if(InpEntryRetryMinutes <= 0)
+   //--- v1.14 FIX: HS_WHY_THROTTLE is NOT a failure of this pattern's own order -
+   //--- it means a DIFFERENT pattern's send is still inside the global
+   //--- HS_RETRY_SEND_GAP_SEC(10s) send gate (AttemptEntry()), so THIS pattern
+   //--- never actually got to try. With InpEntryRetryMinutes=0 (retries off,
+   //--- documented as "every failure skips") the old code treated that race
+   //--- exactly like a real rejection and permanently skipped an otherwise
+   //--- perfectly healthy pattern - CheckForEntry() moves on to a second
+   //--- triggered pattern on the same bar, which then loses the 10s race and
+   //--- was thrown away for good. Fix: a throttle-only block still gets one
+   //--- short, bounded retry (until the send gate itself clears, never open-
+   //--- ended) even with retries off; any OTHER reason (a real order failure/
+   //--- rejection) is unaffected and still skips immediately as documented.
+   bool throttleOnly = (why == HS_WHY_THROTTLE);
+   if(InpEntryRetryMinutes <= 0 && !throttleOnly)
       return(SkipPattern(i, "transient block (" + WhyText(why, rc) + ") and InpEntryRetryMinutes=0 (retry off)"));
    bool first = (g_patterns[i].retryUntil == 0);
    if(first)
      {
       datetime now = TimeCurrent();
       datetime bar0 = iTime(_Symbol, PERIOD_CURRENT, 0);
-      datetime until = (datetime)((long)now + (long)InpEntryRetryMinutes * 60);
+      datetime until = (InpEntryRetryMinutes <= 0)
+                        ? (datetime)((long)now + HS_RETRY_SEND_GAP_SEC)   // throttle-only, retries off: bounded to the send gate itself
+                        : (datetime)((long)now + (long)InpEntryRetryMinutes * 60);
       if(!InpUsePullbackEntry)
         {
          datetime barEnd = (datetime)((long)bar0 + PeriodSeconds(PERIOD_CURRENT));

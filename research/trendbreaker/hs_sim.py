@@ -287,7 +287,11 @@ def simulate(m15, params):
                 if len(zIdx) >= 5:
                     found = find_hs_patterns(zIdx, zType, zPx, atr, params["shoulder_tol_atr"], t)
                     for P in found:
-                        key = (P["t_s1"], P["t_head"], P["t_s2"], P["top"])
+                        # v1.11 EA dedup key is head+direction only (AddSwing() can merge a
+                        # later, more extreme same-type pivot into s1/s2, re-queuing the same
+                        # head as a "new" pattern under the old t_s1/t_s2-inclusive key) -
+                        # ported here 2026-10-04 so this sim's dedup matches the EA exactly.
+                        key = (P["t_head"], P["top"])
                         if key in known_keys:
                             continue
                         known_keys.add(key)
@@ -355,7 +359,10 @@ def simulate(m15, params):
                 else:
                     if t1 <= P["brk_t"]:
                         continue
-                    age_bars = k - P["brk_i"] - 1
+                    # EA: brkShift = iBarShift(..., P.brk_t, false); ageBars = brkShift - 1
+                    # = k - brk_i (one more retest bar allowed than this sim used to give it -
+                    # fixed 2026-10-04, this sim previously computed k - brk_i - 1).
+                    age_bars = k - P["brk_i"]
                     if age_bars > params["pullback_window_bars"]:
                         P["traded"] = True
                         continue
