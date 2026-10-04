@@ -887,7 +887,26 @@
 //|  (ResyncAfterRestore, run on the first new bar - see g_restoreResync).        |
 //+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.54"
+//+------------------------------------------------------------------+
+//|  v1.55 (2026-10-04): second fresh/unprimed audit found real bugs    |
+//|  beyond today's v1.54 restart-restore fix. Fixed: LotSize()'s        |
+//|  MathFloor(lots/st)*st (and the scale-in addLots path) silently       |
+//|  dropped a whole lot step at specific sizes (0.29, 0.47, 0.57-0.59,   |
+//|  0.94 and more above 1.0 at step 0.01) from IEEE double rounding -    |
+//|  same bug class and fix as Ratchet_EA.mq5 v3.33. Also added OnInit     |
+//|  validation rejecting InpVwapConfirmBars<=0, InpPrice21ConfirmBars<=0  |
+//|  (both made their exit's `streak >= N` check always true, closing      |
+//|  every trade on its first managed bar) and InpVolAvgBars<=0 (zero       |
+//|  divide in VolumeRatio()) - none are the shipped defaults, but nothing  |
+//|  previously stopped a sweep or a fat-fingered input from hitting them.   |
+//|  NOT yet fixed from this same audit (tracked, deliberately deferred):     |
+//|  OnTradeTransaction() only resets g_barsSinceClose/logs a close on         |
+//|  DEAL_REASON_SL, so a manual close or a margin stop-out lets the EA         |
+//|  skip the cooldown and re-enter immediately; g_barsSinceClose also resets   |
+//|  to 9999 (not restored) across any restart, which can also skip the          |
+//|  cooldown. See the 2026-10-04 fresh-audit section of CLAUDE.md.               |
+//+------------------------------------------------------------------+
+#property version   "1.55"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1349,6 +1368,20 @@ int OnInit()
      {
       Print("EA: failed to create an indicator handle. Error ", GetLastError());
       return(INIT_FAILED);
+     }
+   //--- 2026-10-04 fresh-audit fix: InpVwapConfirmBars<=0 or
+   //--- InpPrice21ConfirmBars<=0 make their `streak >= N` exit checks
+   //--- always true, closing every position on its first managed bar
+   //--- regardless of price - the opposite of a stricter confirmation
+   //--- requirement. InpVolAvgBars<=0 divides by zero in VolumeRatio().
+   //--- None of these are the shipped defaults (8/8/100) but nothing
+   //--- previously stopped an optimization pass or a fat-fingered input
+   //--- change from setting one - fail init cleanly instead of trading on
+   //--- a broken exit or crashing on a zero-divide.
+   if(InpVwapConfirmBars <= 0 || InpPrice21ConfirmBars <= 0 || InpVolAvgBars <= 0)
+     {
+      Print("EA: InpVwapConfirmBars, InpPrice21ConfirmBars and InpVolAvgBars must all be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
      }
    PrintFormat("EA init: bars available=%d, needed=%d",
                Bars(_Symbol, PERIOD_CURRENT), InpP2400 + NEED_BARS);
@@ -2489,7 +2522,13 @@ double LotSize(const double stopDistance)
    double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double st = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   if(st > 0.0) lots = MathFloor(lots / st) * st;
+   //--- 2026-10-04 fresh-audit fix (same bug found in Ratchet_EA.mq5): a
+   //--- bare MathFloor(lots/st)*st drops a whole step at specific sizes
+   //--- (0.29, 0.47, 0.57-0.59, 0.94 and more above 1.0 at step 0.01)
+   //--- because the division lands just under the intended integer step
+   //--- count in IEEE double arithmetic. Epsilon fixes it without changing
+   //--- any size that wasn't already exactly on a step boundary.
+   if(st > 0.0) lots = MathFloor(lots / st + 1e-8) * st;
    lots = MathMax(mn, MathMin(MathMin(mx, InpMaxLots), lots));
    return(NormalizeDouble(lots, 2));
   }
@@ -3461,7 +3500,7 @@ void OnTick()
             double addLots = (InpAddLots > 0.0) ? InpAddLots : g_entryLots;
             double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
             double st = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-            if(st > 0.0) addLots = MathFloor(addLots / st) * st;
+            if(st > 0.0) addLots = MathFloor(addLots / st + 1e-8) * st;   // 2026-10-04: same epsilon fix as LotSize() above
             addLots = MathMax(mn, addLots);
             bool okAdd = haveLong
                ? trade.Buy(addLots, _Symbol, 0.0, 0.0, 0.0, InpComment + "-add")
