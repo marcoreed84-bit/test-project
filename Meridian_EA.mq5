@@ -787,8 +787,27 @@
 //|  exactly like the feature is off. See this file's accompanying chat notes for                       |
 //|  the exact Strategy Tester settings to test this properly.                                            |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.09 CANDIDATE: InpUseH4TrendFilter - the same H4 trend-alignment  |
+//|  filter that fixed Vanguard_EA.mq5's entry, added here on top of the |
+//|  existing 21/50 cross + InpPConfirm SMA + VWAP + S/R logic.          |
+//|  Python-validated (research/meridian/audit_2026-09-28/               |
+//|  h4_trend_filter_test.py, K=1) on the SAME genuinely untouched        |
+//|  2014-07-01->2022-07-04 GOLD M5 window this file's own standing       |
+//|  "drop" verdict is based on: makes the entry's timing real (100.0th  |
+//|  percentile vs random, p=0.0000 - InpPConfirm=250 was NOT doing this |
+//|  job on its own) and roughly halves the loss (%PF 0.807->0.958,      |
+//|  net% -107.6->-14.3, n=5101->3313) - but does NOT flip this system    |
+//|  profitable (%PF still < 1.0). The standing verdict (drop - no exit   |
+//|  that reacts to a stalling trend; three prior exit-side fixes all     |
+//|  failed, see header) is UNCHANGED - this only fixes the entry half    |
+//|  of the problem, confirming the exit is the real remaining gap.       |
+//|  NOT a reason to resume running this system live on its own. NOT YET  |
+//|  real-MT5-validated - bar-match a real backtest of this build against |
+//|  the Python result above before trusting it further.                 |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.08"
+#property version   "1.09"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -802,6 +821,28 @@ input int    InpPConfirm        = 250;      // v1.02: was 150 (named InpP150) - 
 input ENUM_MA_METHOD InpConfirmMAMethod = MODE_SMA; // v1.02: was MODE_EMA (shared with 21/50) - see header
 input int    InpSRDays          = 3;        // trailing completed D1 bars checked for the nearest level
 input double InpMinSRDistATR    = 0.50;     // reject entries this close (xATR) to that level - see header
+
+input group "=== Entry filter: H4 trend alignment (v1.09 candidate) ==="
+input bool   InpUseH4TrendFilter = true;    // Require the LAST CLOSED H4 bar's close to be on the same
+                                             // side of its own InpH4EMAPeriod EMA as the trade direction
+                                             // - the same filter that fixed Vanguard_EA.mq5's entry
+                                             // (research/aurelius/vanguard_m5_h4_trend_filter_oos_test.py).
+                                             // Python-validated here too (K=1,
+                                             // research/meridian/audit_2026-09-28/h4_trend_filter_test.py)
+                                             // on genuinely untouched 2014-07-01->2022-07-04 GOLD M5 data:
+                                             // makes the entry's timing real (beats random decisively,
+                                             // 100.0th pctile, p=0.0000 - the InpPConfirm=250 SMA alone
+                                             // was NOT doing this job) and cuts losses roughly in half
+                                             // (%PF 0.807->0.958, net% -107.6->-14.3) - but does NOT make
+                                             // this system profitable on its own (%PF still < 1). The
+                                             // underlying problem CLAUDE.md's standing "drop" verdict is
+                                             // based on (no exit that reacts to a stalling trend, see
+                                             // header) is still unresolved - this filter fixes the entry
+                                             // half of it, not the exit half. NOT a reason to resume
+                                             // running this system live by itself. NOT YET real-MT5-
+                                             // validated - bar-match any real backtest of this build
+                                             // against the Python result above before trusting it further.
+input int    InpH4EMAPeriod      = 50;      // EMA period on H4 - fixed, not swept (K=1 discipline)
 
 input group "=== Exit ==="
 input double InpSafetyStopATR   = 2.5;      // v1.01: tightened from 3.0 - see header (net AND drawdown both improved)
@@ -902,6 +943,7 @@ input string  InpWaterFont   = "Arial Black";     // Watermark font
 
 //--- indicator handles
 int h21 = INVALID_HANDLE, h50 = INVALID_HANDLE, h150 = INVALID_HANDLE;
+int g_h4EmaHandle = INVALID_HANDLE;   // H4 trend-alignment filter (v1.09 candidate) - see InpUseH4TrendFilter
 
 //--- restart-safe position state (re-synced from the live account every
 //--- check, not trusted from cache alone - see FindOwnPosition() and its
@@ -1148,6 +1190,25 @@ bool MA(int handle, int shift, double &value)
    return(true);
   }
 //+------------------------------------------------------------------+
+//| True only when the LAST CLOSED H4 bar's close sits on the isBuy    |
+//| side of its own InpH4EMAPeriod EMA - see InpUseH4TrendFilter's      |
+//| header. Both iClose() and the g_h4EmaHandle buffer use shift 1, so  |
+//| this always reads the most recent FULLY FORMED H4 bar - MT5's own   |
+//| HTF alignment handles that, no manual M5->H4 index mapping needed    |
+//| (unlike the Python research reproduction, which had a real off-by-  |
+//| one there before being fixed). False (blocks entry) if H4 history    |
+//| isn't ready yet - same fail-closed convention as SRDistance() above. |
+//+------------------------------------------------------------------+
+bool H4TrendAgrees(bool isBuy)
+  {
+   double ema;
+   if(!MA(g_h4EmaHandle, 1, ema)) return(false);
+   double h4Close = iClose(_Symbol, PERIOD_H4, 1);
+   if(h4Close <= 0.0) return(false);
+   bool h4Up = h4Close > ema;
+   return isBuy ? h4Up : !h4Up;
+  }
+//+------------------------------------------------------------------+
 double LotSize()
   {
    double lots = InpLots;
@@ -1248,6 +1309,8 @@ void CheckForEntry()
    // the Python model's fail-open convention for missing data.
    double sr = SRDistance(isBuy, atr);
    if(sr >= 0.0 && sr < InpMinSRDistATR) return;
+
+   if(InpUseH4TrendFilter && !H4TrendAgrees(isBuy)) return;
 
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = isBuy ? px - InpSafetyStopATR * atr : px + InpSafetyStopATR * atr;
@@ -2016,11 +2079,11 @@ void DrawPanel(const bool reclaim = true)
    int hdr = rh + 14;
    //--- Counted directly against the literal ty+= sequence below (project
    //--- convention - Aurelius/Fulcrum/Ratchet each found an off-by-one here):
-   //--- a0(1) + ENTRY GATE(1 band + c1-c8) + POSITION(1 + p1-p5, SAME count
-   //--- in and out of a trade, so nothing is left stale when a trade closes)
-   //--- + DRAWN LINES(1 + l1-l6) + ACCOUNT(1 + q1-q5) = 29 rh-rows.
-   //--- GAPS: after a0, s1, c8, s2, p5, s3, l6, s4 = 8.
-   const int ROWS = 29, GAPS = 8;
+   //--- a0(1) + ENTRY GATE(1 band + c1-c9, v1.09 added c6 H4 trend) + POSITION
+   //--- (1 + p1-p5, SAME count in and out of a trade, so nothing is left
+   //--- stale when a trade closes) + DRAWN LINES(1 + l1-l6) + ACCOUNT(1 +
+   //--- q1-q5) = 30 rh-rows. GAPS: after a0, s1, c9, s2, p5, s3, l6, s4 = 8.
+   const int ROWS = 30, GAPS = 8;
    //--- autofit: shrink the row height until the panel fits the window
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
@@ -2117,11 +2180,18 @@ void DrawPanel(const bool reclaim = true)
         sr < 0.0 ? "n/a" : DoubleToString(sr, 2) + (srPass ? " >= " : " < ") +
                            DoubleToString(InpMinSRDistATR, 2) + " ATR",
         sr < 0.0 ? -1 : (srPass ? 1 : 0)); ty += rh;
-   PRow("c6", x, ty, w, "spread", IntegerToString(spr) + " / " + DoubleToString(InpMaxSpreadPoints, 0),
+   //--- v1.09 candidate - see InpUseH4TrendFilter's header
+   double h4Ema = 0.0; bool h4Ok = InpUseH4TrendFilter && MA(g_h4EmaHandle, 1, h4Ema);
+   double h4Close1 = h4Ok ? iClose(_Symbol, PERIOD_H4, 1) : 0.0;
+   bool h4Pass = InpUseH4TrendFilter && h4Ok && H4TrendAgrees(isBuy);
+   PRow("c6", x, ty, w, "H4 trend (vs EMA" + (string)InpH4EMAPeriod + ")",
+        !InpUseH4TrendFilter ? "filter off" : (h4Ok ? (h4Close1 > h4Ema ? "up" : "down") : "-"),
+        !InpUseH4TrendFilter ? -1 : (h4Ok ? (h4Pass ? 1 : 0) : -1)); ty += rh;
+   PRow("c7", x, ty, w, "spread", IntegerToString(spr) + " / " + DoubleToString(InpMaxSpreadPoints, 0),
         sprPass ? 1 : 0); ty += rh;
-   PRow("c7", x, ty, w, "Friday flatten", !InpCloseFriday ? "off" : (friPass ? "not yet" : "ACTIVE"),
+   PRow("c8", x, ty, w, "Friday flatten", !InpCloseFriday ? "off" : (friPass ? "not yet" : "ACTIVE"),
         !InpCloseFriday ? -1 : (friPass ? 1 : 0)); ty += rh;
-   PRow("c8", x, ty, w, "last bar", verdict, vState); ty += rh + 6;
+   PRow("c9", x, ty, w, "last bar", verdict, vState); ty += rh + 6;
 
    //--- position --------------------------------------------------------
    PSection("s2", x, ty, w, rh, "POSITION"); ty += rh + 6;
@@ -2224,7 +2294,9 @@ int OnInit()
    h21  = iMA(_Symbol, PERIOD_M5, InpP21,      0, InpFastMAMethod,    PRICE_CLOSE);
    h50  = iMA(_Symbol, PERIOD_M5, InpP50,      0, InpFastMAMethod,    PRICE_CLOSE);
    h150 = iMA(_Symbol, PERIOD_M5, InpPConfirm, 0, InpConfirmMAMethod, PRICE_CLOSE);
-   if(h21 == INVALID_HANDLE || h50 == INVALID_HANDLE || h150 == INVALID_HANDLE)
+   g_h4EmaHandle = iMA(_Symbol, PERIOD_H4, InpH4EMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(h21 == INVALID_HANDLE || h50 == INVALID_HANDLE || h150 == INVALID_HANDLE ||
+      g_h4EmaHandle == INVALID_HANDLE)
      {
       Print("Meridian EA: indicator handle creation failed");
       return(INIT_FAILED);
@@ -2265,6 +2337,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(h21);
    IndicatorRelease(h50);
    IndicatorRelease(h150);
+   if(g_h4EmaHandle != INVALID_HANDLE) IndicatorRelease(g_h4EmaHandle);
    ObjectsDeleteAll(0, g_pp);
    ObjectsDeleteAll(0, g_pw);
    ObjectsDeleteAll(0, g_pm);
