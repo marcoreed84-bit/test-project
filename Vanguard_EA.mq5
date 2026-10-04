@@ -242,8 +242,39 @@
 //|  staleness bug hid through a full prior audit. Modest original benefit       |
 //|  against a permanently-unverifiable mechanism - not worth the risk.           |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.10: four live-vs-simulator bugs from the 2026-10-04 audit fixed  |
+//|  (first three are the same ones found in Vanguard_M15_EA.mq5 v1.11).  |
+//|  (1) A failed REVERSAL close was never retried - the breakout is edge-|
+//|  triggered, so next bar breakoutDir=0 and the old position stayed open|
+//|  until SL/stale/Friday. Now RetryReversalClose() re-sends the close on|
+//|  every tick (1 s send gap, 10 s hold after an ambiguous retcode) until|
+//|  it succeeds or the position is gone, capped at                       |
+//|  InpReversalRetryMinutes; the reversal ENTRY is still taken only if   |
+//|  the close lands inside the trigger bar (same bar-1 filters, same bar |
+//|  as the Python fill).                                                 |
+//|  (2) Stale exit fired one bar early: iBarShift() of the fill bar      |
+//|  counts from bar 0, the simulators' kk-fill_i counts from the just-   |
+//|  closed bar 1 - now barsHeld-1 >= InpStaleBars, matching              |
+//|  kk-fill_i >= stale_bars (vanguard_random_timing_test.py sim_full).   |
+//|  (3) VWAP counted bar 1 twice on attach (SeedVWAP() + the first-tick  |
+//|  UpdateVWAP()) - g_vwapLastBar now stops the double add, and also     |
+//|  lets UpdateVWAP() catch up any same-day bars missed while no ticks   |
+//|  arrived (disconnect), which were previously never summed.            |
+//|  (4) Swing/trendline state started EMPTY on every attach/restart -    |
+//|  no backfill, so after a terminal restart/VPS reboot/recompile no     |
+//|  entry (and no REVERSAL exit for a held position) could fire until    |
+//|  two NEW swing highs/lows had each been confirmed (InpFractalK bars   |
+//|  after each, often days), while the Python model builds swings over   |
+//|  full history. WarmUpSwingState() now replays recent history through  |
+//|  the identical swing/line/edge rules on the first new bar, so live    |
+//|  state matches what a never-restarted EA would hold. Strategy Tester  |
+//|  has no requotes, so (1) cannot change a backtest; (2)-(4) bring      |
+//|  live (and a backtest's first days) closer to the simulators, not     |
+//|  further. Not yet re-run through MT5 Strategy Tester.                 |
+//+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -269,6 +300,7 @@ input int    InpATRPeriod         = 14;
 input bool   InpUseStaleExit      = true;    // cut a non-performing trade loose early - see header (v1.04)
 input int    InpStaleBars         = 225;     // ~18.75h on M5 - real, Python-validated optimum, see header
 input double InpStaleMinProfitATR = 0.0;     // exit if floating profit (in entry-ATR units) is still below this once InpStaleBars have elapsed.
+input int    InpReversalRetryMinutes = 60;   // v1.10: keep re-sending a FAILED reversal close on every tick for up to this long (0 = off = old never-retry behaviour). The reversal entry itself is only taken if the close lands inside the trigger bar.
 
 input group "=== Giveback-to-breakeven exit (v1.05 candidate, Python-only so far) ==="
 input bool   InpUseGivebackExit    = false;   // Different from InpUseStaleExit above (which reacts to a trade NEVER making progress): this reacts to a trade that DID make progress, then lost it. REJECTED (2026-09-25): the Python method was fixed (giveback check wired into the real per-bar exit-priority loop, so it can change which later breakout events get taken, instead of a post-hoc swap on a fixed entry list) and re-run - net 2989.87->1162.81 (-61.1%), trades 716->857 (+19.7%), win% 25.8->53.7. Same cascade mechanism confirmed on Aurelius_EA.mq5 against a REAL MT5 A/B test (-64.3% real vs -63.9% corrected-Python, near-exact match) - this file's own corrected result is now trusted at that same level. Stays false. See Aurelius_EA.mq5 v1.52's header and research/aurelius/vanguard_giveback_event_driven_test.py.
@@ -409,6 +441,21 @@ datetime g_vwapDay    = 0;
 double   g_vwapCumPV  = 0.0;
 double   g_vwapCumVol = 0.0;
 double   g_vwapValue  = 0.0;
+datetime g_vwapLastBar = 0;   // v1.10: open time of the last bar already summed in - stops the first-tick UpdateVWAP() re-adding SeedVWAP()'s bar 1
+
+//--- v1.10 failed-REVERSAL-close retry (see RetryReversalClose()) -
+//--- g_revTicket == 0 = no retry pending.
+ulong    g_revTicket   = 0;   // position the reversal close is still owed on
+int      g_revDir      = 0;   // direction of the reversal breakout (the entry owed if the close lands in-bar)
+datetime g_revBar      = 0;   // bar-0 open time when the reversal fired (entry window = this bar only)
+datetime g_revUntil    = 0;   // hard stop for close retries
+datetime g_revLastSend = 0;   // throttle: last send time
+bool     g_revAmbig    = false; // last failure was ambiguous (timeout/no connection) - hold before re-sending
+int      g_revSends    = 0;
+
+//--- v1.10 swing-state warm-up (see WarmUpSwingState()) - false until the
+//--- trendline state has been rebuilt from history after this attach.
+bool     g_swingWarm   = false;
 
 //--- manual Wilder ATR (see header - NOT iATR)
 double   g_atrBuf[];
@@ -471,6 +518,7 @@ void PWatermark();
 void UpdateSignalLines();
 void UpdateVWAPLine();
 void UpdateLevelLines();
+void CheckForEntry(int breakoutDir);   // v1.10: called from RetryReversalClose(), defined below it
 
 //+------------------------------------------------------------------+
 bool IsNewBar()
@@ -573,6 +621,7 @@ void SeedVWAP()
       g_vwapCumPV  += typical * vol;
       g_vwapCumVol += vol;
      }
+   g_vwapLastBar = last;   // v1.10: bar 1 is now in the sum - UpdateVWAP() must not add it again
    g_vwapValue = (g_vwapCumVol > 0.0) ? g_vwapCumPV / g_vwapCumVol : iClose(_Symbol, PERIOD_M5, 1);
   }
 //+------------------------------------------------------------------+
@@ -580,17 +629,30 @@ void UpdateVWAP()
   {
    datetime t1 = iTime(_Symbol, PERIOD_M5, 1);
    if(t1 == 0) return;
+   //--- v1.10: OnInit()'s SeedVWAP() already summed bar 1, and g_lastBarTime=0
+   //--- makes the very first tick a "new bar" - skip the double add.
+   if(t1 <= g_vwapLastBar) return;
    datetime day = DayStart(t1);
    if(day != g_vwapDay)
      {
       SeedVWAP();
       return;
      }
-   double typical = (iHigh(_Symbol, PERIOD_M5, 1) + iLow(_Symbol, PERIOD_M5, 1) +
-                      iClose(_Symbol, PERIOD_M5, 1)) / 3.0;
-   double vol = (double)iTickVolume(_Symbol, PERIOD_M5, 1);
-   g_vwapCumPV  += typical * vol;
-   g_vwapCumVol += vol;
+   //--- v1.10: sum EVERY closed same-day bar newer than g_vwapLastBar, not
+   //--- just bar 1 - normally that IS just bar 1, but after a stretch with
+   //--- no ticks (disconnect) the bars in between were previously skipped
+   //--- for the rest of the session.
+   for(int shift = 1; shift < 400; shift++)
+     {
+      datetime t = iTime(_Symbol, PERIOD_M5, shift);
+      if(t == 0 || t <= g_vwapLastBar || DayStart(t) != day) break;
+      double typical = (iHigh(_Symbol, PERIOD_M5, shift) + iLow(_Symbol, PERIOD_M5, shift) +
+                         iClose(_Symbol, PERIOD_M5, shift)) / 3.0;
+      double vol = (double)iTickVolume(_Symbol, PERIOD_M5, shift);
+      g_vwapCumPV  += typical * vol;
+      g_vwapCumVol += vol;
+     }
+   g_vwapLastBar = t1;
    g_vwapValue = (g_vwapCumVol > 0.0) ? g_vwapCumPV / g_vwapCumVol : iClose(_Symbol, PERIOD_M5, 1);
   }
 //+------------------------------------------------------------------+
@@ -800,6 +862,72 @@ int UpdateSwingsAndCheckBreakout()
    g_prevAscValid = ascValid;
 
    return(dir);
+  }
+//+------------------------------------------------------------------+
+//| v1.10 - rebuilds the swing/trendline/edge state from history on    |
+//| the first new bar after an attach (see header item 4). Replays     |
+//| every closed bar from the oldest usable one down to bar 2, through |
+//| the EXACT rules UpdateSwingsAndCheckBreakout() applies live (same  |
+//| strict 2K+1 fractal window, same line extrapolation by bar count,  |
+//| same descValid/aboveDesc edge flags) - but emits no trades. Bar 1  |
+//| is deliberately left out: OnTick() processes it live right after,  |
+//| exactly once (replaying it here too would detect a swing confirmed |
+//| on bar 1 twice, making prev == cur and invalidating the line).     |
+//| Swing detection is local, so any window holding the last two swing |
+//| highs and lows gives the same state as the Python model's full-    |
+//| history build; WARMUP_BARS (~70 days of M5) is far more than that. |
+//| Returns false (retried next new bar) if history isn't loaded yet.  |
+//+------------------------------------------------------------------+
+bool WarmUpSwingState()
+  {
+   const int WARMUP_BARS = 20000;
+   int K = InpFractalK;
+   int avail = Bars(_Symbol, PERIOD_M5);
+   if(avail <= 0) return(false);
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   int got = CopyRates(_Symbol, PERIOD_M5, 0, MathMin(avail, WARMUP_BARS), r);
+   if(got < 2 * K + 3) return(false);
+
+   int    curHiS = -1, prevHiS = -1, curLoS = -1, prevLoS = -1;   // shift of each swing's formation bar
+   double curHiP = 0.0, prevHiP = 0.0, curLoP = 0.0, prevLoP = 0.0;
+   bool   prevAboveDesc = false, prevDescValid = false, prevBelowAsc = false, prevAscValid = false;
+
+   for(int b = got - 1 - 2 * K; b >= 2; b--)   // b plays the role of live "bar 1"
+     {
+      int c = b + K;                             // live centerShift = InpFractalK+1, relative to bar 1
+      bool isHi = true, isLo = true;
+      for(int s = b; s <= b + 2 * K; s++)
+        {
+         if(s == c) continue;
+         if(r[s].high >= r[c].high) isHi = false;
+         if(r[s].low  <= r[c].low)  isLo = false;
+         if(!isHi && !isLo) break;
+        }
+      if(isHi) { prevHiS = curHiS; prevHiP = curHiP; curHiS = c; curHiP = r[c].high; }
+      if(isLo) { prevLoS = curLoS; prevLoP = curLoP; curLoS = c; curLoP = r[c].low; }
+
+      bool descValid = (prevHiS > curHiS && curHiS >= 0 && curHiP < prevHiP);
+      double descVal = descValid ? curHiP + (curHiP - prevHiP) / (double)(prevHiS - curHiS) * (double)(curHiS - b) : 0.0;
+      prevAboveDesc = descValid && (r[b].close > descVal);
+      prevDescValid = descValid;
+
+      bool ascValid = (prevLoS > curLoS && curLoS >= 0 && curLoP > prevLoP);
+      double ascVal = ascValid ? curLoP + (curLoP - prevLoP) / (double)(prevLoS - curLoS) * (double)(curLoS - b) : 0.0;
+      prevBelowAsc = ascValid && (r[b].close < ascVal);
+      prevAscValid = ascValid;
+     }
+
+   g_curHiTime  = (curHiS  >= 0) ? r[curHiS].time  : 0;  g_curHiPrice  = curHiP;
+   g_prevHiTime = (prevHiS >= 0) ? r[prevHiS].time : 0;  g_prevHiPrice = prevHiP;
+   g_curLoTime  = (curLoS  >= 0) ? r[curLoS].time  : 0;  g_curLoPrice  = curLoP;
+   g_prevLoTime = (prevLoS >= 0) ? r[prevLoS].time : 0;  g_prevLoPrice = prevLoP;
+   g_prevAboveDesc = prevAboveDesc; g_prevDescValid = prevDescValid;
+   g_prevBelowAsc  = prevBelowAsc;  g_prevAscValid  = prevAscValid;
+   PrintFormat("Vanguard EA: swing state rebuilt from %d bars of history - last highs %s/%s, last lows %s/%s",
+               got, TimeToString(g_prevHiTime), TimeToString(g_curHiTime),
+               TimeToString(g_prevLoTime), TimeToString(g_curLoTime));
+   return(true);
   }
 //+------------------------------------------------------------------+
 //| VISUALS (v1.02) - see the header block above InpShowPanel for the |
@@ -1515,17 +1643,107 @@ bool IsFridayFlattenTime()
    return(dt.day_of_week == 5 && dt.hour >= InpFridayCloseHour);
   }
 //+------------------------------------------------------------------+
-void CloseCurrentPosition(const string reason)
+bool CloseCurrentPosition(const string reason)
   {
-   if(!PositionSelectByTicket(g_ticket)) { g_ticket = 0; g_posDir = 0; return; }
+   if(!PositionSelectByTicket(g_ticket)) { g_ticket = 0; g_posDir = 0; return(true); }
    if(trade.PositionClose(g_ticket))
      {
       g_ticket = 0;
       g_posDir = 0;
+      return(true);
      }
-   else
-      PrintFormat("Vanguard EA: %s close FAILED for ticket %I64u, retcode %d (%s) - will retry next tick",
-                  reason, g_ticket, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+   //--- v1.10: "next tick" was only ever true for FRIDAY/GIVEBACK (checked
+   //--- every tick) and STALE (re-checked next bar). REVERSAL is edge-
+   //--- triggered - its retry is RetryReversalClose()'s job.
+   PrintFormat("Vanguard EA: %s close FAILED for ticket %I64u, retcode %d (%s) - will retry",
+               reason, g_ticket, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+   return(false);
+  }
+//+------------------------------------------------------------------+
+//| v1.10 - failed REVERSAL close retry (header item 1). Identical      |
+//| design to Vanguard_M15_EA.mq5 v1.11; same scope as                  |
+//| HeadShoulders_EA.mq5's RetryTransientEntries(): run on EVERY tick,  |
+//| before OnTick()'s new-bar gate. The CLOSE is owed until it succeeds |
+//| or the position is gone (SL, manual, an ambiguous earlier send that |
+//| did land), capped at InpReversalRetryMinutes. The reversal ENTRY is |
+//| only attempted if the close lands inside the trigger bar -          |
+//| CheckForEntry()'s filters all read bar 1, which is unchanged within |
+//| that bar, so it is the same decision the Python model makes at that |
+//| fill bar; a later entry would be a construction no simulator        |
+//| modeled. Known limitation (disclosed, same as Meridian v1.12): the  |
+//| pending retry lives in RAM only, so a restart mid-retry drops it.   |
+//+------------------------------------------------------------------+
+void ClearReversalRetry()
+  {
+   g_revTicket = 0; g_revDir = 0; g_revBar = 0; g_revUntil = 0;
+   g_revLastSend = 0; g_revAmbig = false; g_revSends = 0;
+  }
+//+------------------------------------------------------------------+
+void ScheduleReversalRetry(int breakoutDir)
+  {
+   if(InpReversalRetryMinutes <= 0) return;
+   datetime now = TimeCurrent();
+   uint rc = trade.ResultRetcode();
+   g_revTicket   = g_ticket;
+   g_revDir      = breakoutDir;
+   g_revBar      = iTime(_Symbol, PERIOD_M5, 0);
+   g_revUntil    = (datetime)((long)now + (long)InpReversalRetryMinutes * 60);
+   g_revLastSend = now;
+   g_revAmbig    = (rc == 0 || rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_CONNECTION);
+   g_revSends    = 1;
+   PrintFormat("Vanguard EA: REVERSAL close for ticket %I64u DEFERRED - retrying on ticks until %s "
+               "(reversal entry only if the close lands before this bar ends)",
+               g_revTicket, TimeToString(g_revUntil, TIME_DATE|TIME_SECONDS));
+  }
+//+------------------------------------------------------------------+
+void RetryReversalClose()
+  {
+   if(g_revTicket == 0) return;
+   datetime now = TimeCurrent();
+   bool inBar = (iTime(_Symbol, PERIOD_M5, 0) == g_revBar);
+
+   SyncPositionState();
+   if(g_ticket != g_revTicket)
+     {
+      //--- the owed position is gone (closed by SL/manually, or an ambiguous
+      //--- earlier send did land). If we're flat and still in the trigger
+      //--- bar, the reversal entry is still owed too.
+      int dir = g_revDir;
+      ClearReversalRetry();
+      if(g_ticket == 0 && inBar) CheckForEntry(dir);
+      return;
+     }
+   if(now >= g_revUntil)
+     {
+      string msg = StringFormat("Vanguard EA: REVERSAL close retry for ticket %I64u GAVE UP after %d send(s), "
+                                "last retcode %d (%s) - position left open under its safety stop",
+                                g_revTicket, g_revSends, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      Print(msg);
+      NotifyPush(msg);
+      ClearReversalRetry();
+      return;
+     }
+   //--- throttle: >= 1 s between sends, >= 10 s after an ambiguous retcode
+   //--- (the earlier close may still be landing - don't stack a second one)
+   if((long)now - (long)g_revLastSend < (g_revAmbig ? 10 : 1)) return;
+
+   g_revLastSend = now;
+   g_revSends++;
+   if(trade.PositionClose(g_revTicket))
+     {
+      PrintFormat("Vanguard EA: REVERSAL close for ticket %I64u succeeded on send #%d%s",
+                  g_revTicket, g_revSends, inBar ? "" : " (trigger bar already closed - no reversal entry)");
+      int dir = g_revDir;
+      ClearReversalRetry();
+      SyncPositionState();
+      if(g_ticket == 0 && inBar) CheckForEntry(dir);
+      return;
+     }
+   uint rc = trade.ResultRetcode();
+   g_revAmbig = (rc == 0 || rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_CONNECTION);
+   if(g_revSends <= 3 || g_revSends % 10 == 0)
+      PrintFormat("Vanguard EA: REVERSAL close retry FAILED for ticket %I64u, send #%d, retcode %d (%s)",
+                  g_revTicket, g_revSends, rc, trade.ResultRetcodeDescription());
   }
 //+------------------------------------------------------------------+
 void ManageOpenPosition(int breakoutDir)
@@ -1536,7 +1754,10 @@ void ManageOpenPosition(int breakoutDir)
    if(IsFridayFlattenTime()) { CloseCurrentPosition("FRIDAY"); return; }
 
    if(breakoutDir != 0 && breakoutDir != g_posDir)
-      { CloseCurrentPosition("REVERSAL"); return; }
+     {
+      if(!CloseCurrentPosition("REVERSAL")) ScheduleReversalRetry(breakoutDir);
+      return;
+     }
 
    //--- stale exit (v1.04, see header): cut a trade loose - at whatever
    //--- it's currently worth - if it's shown no real progress after
@@ -1559,7 +1780,11 @@ void ManageOpenPosition(int breakoutDir)
      {
       datetime opTime = (datetime)PositionGetInteger(POSITION_TIME);
       int barsHeld = (int)iBarShift(_Symbol, PERIOD_M5, opTime, false);
-      if(barsHeld >= InpStaleBars)
+      //--- v1.10: barsHeld is the fill bar's shift from bar 0, but the bar
+      //--- being judged (iClose(...,1) below) is bar 1 - so bars elapsed
+      //--- since the fill is barsHeld-1, the simulators' kk-fill_i. Was
+      //--- `barsHeld >= InpStaleBars`, which exited one bar early.
+      if(barsHeld - 1 >= InpStaleBars)
         {
          double curClose = iClose(_Symbol, PERIOD_M5, 1);
          double openPx = PositionGetDouble(POSITION_PRICE_OPEN);
@@ -1646,6 +1871,8 @@ int OnInit()
    SeedVWAP();
    SyncPositionState();
    g_lastBarTime = 0;
+   g_swingWarm = false;   // v1.10: rebuild swing state from history on the first new bar (WarmUpSwingState())
+   ClearReversalRetry();
 
    //--- visuals (v1.02) - same performance guard as Aurelius: skip every
    //--- cosmetic draw entirely in a non-visual Strategy Tester pass,
@@ -1694,6 +1921,10 @@ void OnTick()
       if(g_ticket != 0) CloseCurrentPosition("FRIDAY");
      }
 
+   //--- v1.10: a failed REVERSAL close is retried every tick, not left to
+   //--- the next (edge-triggered, so usually never-coming) breakout.
+   RetryReversalClose();
+
    //--- tick-level giveback-to-breakeven exit (InpUseGivebackExit, v1.05
    //--- candidate - see header). Checked every tick, not gated on a new
    //--- bar, so the live peak-favorable-excursion tracking matches the
@@ -1716,6 +1947,10 @@ void OnTick()
 
    double vwapPrev = g_vwapValue;
    UpdateVWAP();
+   //--- v1.10: replays bars 2..N first (once per attach, retried each new
+   //--- bar until history is available), so bar 1 below is processed
+   //--- against the same swing state a never-restarted EA would hold.
+   if(!g_swingWarm) g_swingWarm = WarmUpSwingState();
    int breakoutDir = UpdateSwingsAndCheckBreakout();
    g_barLastBreakoutDir = breakoutDir;
 
