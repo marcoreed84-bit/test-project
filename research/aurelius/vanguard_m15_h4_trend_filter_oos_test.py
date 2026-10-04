@@ -61,12 +61,14 @@ if __name__ == "__main__":
         sr_dist_buy = np.abs(sr_hi - close) / atr
         sr_dist_sell = np.abs(close - sr_lo) / atr
 
-    # H4 trend state, causal, same construction/fix as the M5 version
+    # H4 trend state, causal. CORRECTED (2026-10-04, same Opus-audit finding as the M5 version):
+    # side="left"-1 still leaked the still-forming H4 bar for any M15 bar not exactly on an H4
+    # boundary. side="right" on (time + one M15 bar) then -2 steps back to the bar actually closed.
     h4_ema = ema(h4["close"].values, H4_EMA_PERIOD)
     h4_trend_up = h4["close"].values > h4_ema
     h4_time = h4["time"].values
     m15_time = m15["time"].values
-    h4_idx_for_m15 = np.searchsorted(h4_time, m15_time, side="left") - 1
+    h4_idx_for_m15 = np.searchsorted(h4_time, m15_time + np.timedelta64(15, "m"), side="right") - 2
     h4_idx_for_m15 = np.clip(h4_idx_for_m15, 0, len(h4) - 1)
     m15_h4_trend_up = h4_trend_up[h4_idx_for_m15]
     valid_h4 = h4_idx_for_m15 >= 1

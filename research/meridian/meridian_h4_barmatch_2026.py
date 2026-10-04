@@ -28,7 +28,8 @@ def build_h4_trend_up(m5_time, h4):
     h4_ema = ema(h4["close"].values, H4_EMA_PERIOD)
     h4_trend_up = h4["close"].values > h4_ema
     h4_time = h4["time"].values
-    h4_idx = np.searchsorted(h4_time, m5_time, side="left") - 1
+    # CORRECTED 2026-10-04 (Opus-audit finding) - see vanguard_m5_h4_trend_filter_oos_test.py's header
+    h4_idx = np.searchsorted(h4_time, m5_time + np.timedelta64(5, "m"), side="right") - 2
     h4_idx = np.clip(h4_idx, 0, len(h4) - 1)
     valid = h4_idx >= 1
     return h4_trend_up[h4_idx], valid

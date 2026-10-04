@@ -788,26 +788,27 @@
 //|  the exact Strategy Tester settings to test this properly.                                            |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//|  v1.09 CANDIDATE: InpUseH4TrendFilter - the same H4 trend-alignment  |
-//|  filter that fixed Vanguard_EA.mq5's entry, added here on top of the |
-//|  existing 21/50 cross + InpPConfirm SMA + VWAP + S/R logic.          |
-//|  Python-validated (research/meridian/audit_2026-09-28/               |
-//|  h4_trend_filter_test.py, K=1) on the SAME genuinely untouched        |
-//|  2014-07-01->2022-07-04 GOLD M5 window this file's own standing       |
-//|  "drop" verdict is based on: makes the entry's timing real (100.0th  |
-//|  percentile vs random, p=0.0000 - InpPConfirm=250 was NOT doing this |
-//|  job on its own) and roughly halves the loss (%PF 0.807->0.958,      |
-//|  net% -107.6->-14.3, n=5101->3313) - but does NOT flip this system    |
-//|  profitable (%PF still < 1.0). The standing verdict (drop - no exit   |
-//|  that reacts to a stalling trend; three prior exit-side fixes all     |
-//|  failed, see header) is UNCHANGED - this only fixes the entry half    |
-//|  of the problem, confirming the exit is the real remaining gap.       |
-//|  NOT a reason to resume running this system live on its own. NOT YET  |
-//|  real-MT5-validated - bar-match a real backtest of this build against |
-//|  the Python result above before trusting it further.                 |
+//|  v1.09: InpUseH4TrendFilter - REJECTED (2026-10-04), default now false. |
+//|  Initial test (research/meridian/audit_2026-09-28/h4_trend_filter_test.|
+//|  py) reported the entry timing becoming real (100.0th pctile vs random,|
+//|  p=0.0000) and net% improving -107.6->-14.3. That result was an        |
+//|  artifact: the H4 bar lookup used `searchsorted(h4_time, t, side=      |
+//|  "left")-1`, which for any M5 bar not exactly on an H4 boundary picks  |
+//|  the H4 bar that is STILL FORMING (e.g. at 09:30 it returns the 08:00  |
+//|  bar, which doesn't close until 12:00) - leaking up to ~4h of future   |
+//|  H4 price into every entry decision. Found via an Opus audit of a real|
+//|  MT5 bar-match mismatch on Vanguard_EA.mq5 (2026-10-04), which also    |
+//|  flagged this file's identical bug. Corrected alignment, same         |
+//|  untouched window: %PF 0.807->0.762 (WORSE than no filter), 56.2th     |
+//|  percentile vs random, p=0.44 - no edge, in either direction. Input    |
+//|  and code kept (fail-closed, same as every other filter here) in case |
+//|  a future H4 construction is worth trying, but OFF by default -       |
+//|  nothing here should be read as "Meridian's entry can be fixed this    |
+//|  way." Standing "drop" verdict (no exit that reacts to a stalling      |
+//|  trend) is unaffected either way.                                      |
 //+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -823,26 +824,13 @@ input int    InpSRDays          = 3;        // trailing completed D1 bars checke
 input double InpMinSRDistATR    = 0.50;     // reject entries this close (xATR) to that level - see header
 
 input group "=== Entry filter: H4 trend alignment (v1.09 candidate) ==="
-input bool   InpUseH4TrendFilter = true;    // Require the LAST CLOSED H4 bar's close to be on the same
-                                             // side of its own InpH4EMAPeriod EMA as the trade direction
-                                             // - the same filter that fixed Vanguard_EA.mq5's entry
-                                             // (research/aurelius/vanguard_m5_h4_trend_filter_oos_test.py).
-                                             // Python-validated here too (K=1,
-                                             // research/meridian/audit_2026-09-28/h4_trend_filter_test.py)
-                                             // on genuinely untouched 2014-07-01->2022-07-04 GOLD M5 data:
-                                             // makes the entry's timing real (beats random decisively,
-                                             // 100.0th pctile, p=0.0000 - the InpPConfirm=250 SMA alone
-                                             // was NOT doing this job) and cuts losses roughly in half
-                                             // (%PF 0.807->0.958, net% -107.6->-14.3) - but does NOT make
-                                             // this system profitable on its own (%PF still < 1). The
-                                             // underlying problem CLAUDE.md's standing "drop" verdict is
-                                             // based on (no exit that reacts to a stalling trend, see
-                                             // header) is still unresolved - this filter fixes the entry
-                                             // half of it, not the exit half. NOT a reason to resume
-                                             // running this system live by itself. NOT YET real-MT5-
-                                             // validated - bar-match any real backtest of this build
-                                             // against the Python result above before trusting it further.
-input int    InpH4EMAPeriod      = 50;      // EMA period on H4 - fixed, not swept (K=1 discipline)
+input bool   InpUseH4TrendFilter = false;   // REJECTED (2026-10-04) - see header. The original
+                                             // Python-validated claim (100.0th pctile, p=0.0000,
+                                             // %PF 0.807->0.958) used a buggy H4 alignment that
+                                             // leaked up to ~4h of future H4 price into every
+                                             // entry. Corrected: %PF 0.807->0.762 (worse), p=0.44
+                                             // (no edge). Stays false.
+input int    InpH4EMAPeriod      = 50;      // EMA period on H4 - unused while the filter above is off
 
 input group "=== Exit ==="
 input double InpSafetyStopATR   = 2.5;      // v1.01: tightened from 3.0 - see header (net AND drawdown both improved)

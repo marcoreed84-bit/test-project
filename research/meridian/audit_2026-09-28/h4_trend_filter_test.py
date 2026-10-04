@@ -43,10 +43,13 @@ def build_h4_trend_up(m5_time, h4):
     h4_ema = ema(h4["close"].values, H4_EMA_PERIOD)
     h4_trend_up = h4["close"].values > h4_ema
     h4_time = h4["time"].values
-    # side="left"-1: strictly the last COMPLETED H4 bar before this M5 bar's
-    # time (the Vanguard test's own lookahead bug used side="right" here -
-    # fixed there, applying the fix from day one here instead of repeating it).
-    h4_idx = np.searchsorted(h4_time, m5_time, side="left") - 1
+    # CORRECTED 2026-10-04 (Opus-audit finding): side="left"-1 above was STILL WRONG for any
+    # M5 bar not exactly on an H4 boundary - leaked the still-forming H4 bar's already-known
+    # final close. side="right" on (time + one M5 bar) then -2 steps back to the bar actually
+    # closed - see research/aurelius/vanguard_m5_h4_trend_filter_oos_test.py's header for the
+    # full finding (verified against real MT5 fills: this fix took Meridian's bar-match from
+    # 246/255 (96.5%) to 255/255 (100%)).
+    h4_idx = np.searchsorted(h4_time, m5_time + np.timedelta64(5, "m"), side="right") - 2
     h4_idx = np.clip(h4_idx, 0, len(h4) - 1)
     valid = h4_idx >= 1
     return h4_trend_up[h4_idx], valid

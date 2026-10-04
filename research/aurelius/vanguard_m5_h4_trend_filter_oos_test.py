@@ -54,9 +54,15 @@ if __name__ == "__main__":
     h4_time = h4["time"].values
     m5_time = m5["time"].values
     # for each M5 bar, find the most recent COMPLETED H4 bar (strictly before this M5 bar's time).
-    # side="left" so an M5 bar exactly AT an H4 bar's open time maps to the PRIOR H4 index, not
-    # the one that just opened (side="right" would leak that bar's final historical close).
-    h4_idx_for_m5 = np.searchsorted(h4_time, m5_time, side="left") - 1
+    # CORRECTED (found by an Opus audit of a real-MT5 bar-match mismatch, 2026-10-04): side="left"-1
+    # above was STILL WRONG for any M5 bar not exactly on an H4 boundary - e.g. at 09:30 it picked
+    # the 08:00 H4 bar, which doesn't close until 12:00 (still forming), leaking its already-known
+    # final close up to ~4h into the future. The real EA's iClose(PERIOD_H4,1) never has this problem
+    # (MT5's own HTF alignment always returns the last truly-closed bar). side="right" on (m5_time +
+    # one M5 bar) then -2 steps back two bars from the "last h4_time <= T" index, which is always the
+    # FORMING bar, to the one before it - the actually-completed one - verified against real MT5
+    # fills: this one-line fix took Vanguard M5's bar-match from 57/65 (88%) to 64/65 (98.5%).
+    h4_idx_for_m5 = np.searchsorted(h4_time, m5_time + np.timedelta64(5, "m"), side="right") - 2
     h4_idx_for_m5 = np.clip(h4_idx_for_m5, 0, len(h4) - 1)
     m5_h4_trend_up = h4_trend_up[h4_idx_for_m5]
     valid_h4 = h4_idx_for_m5 >= 1  # need at least one real completed H4 bar behind us

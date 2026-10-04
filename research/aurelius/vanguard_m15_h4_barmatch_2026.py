@@ -46,7 +46,8 @@ if __name__ == "__main__":
     h4_trend_up = h4_full["close"].values > h4_ema
     h4_time = h4_full["time"].values
     m15_time = m15["time"].values
-    h4_idx_for_m15 = np.searchsorted(h4_time, m15_time, side="left") - 1
+    # CORRECTED 2026-10-04 (Opus-audit finding) - see vanguard_m5_h4_trend_filter_oos_test.py's header
+    h4_idx_for_m15 = np.searchsorted(h4_time, m15_time + np.timedelta64(15, "m"), side="right") - 2
     h4_idx_for_m15 = np.clip(h4_idx_for_m15, 0, len(h4_full) - 1)
     m15_h4_trend_up = h4_trend_up[h4_idx_for_m15]
     valid_h4 = h4_idx_for_m15 >= 1
