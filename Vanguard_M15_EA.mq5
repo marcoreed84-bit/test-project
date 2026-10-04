@@ -254,8 +254,15 @@
 //|  than baseline, no edge. Input and code kept (fail-closed) but OFF by  |
 //|  default.                                                               |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.10: InpUseAureliusFilter now defaults false (InpUseMeridianFilter   |
+//|  already was), and both ReadAureliusDir()/ReadMeridianDir() fixed        |
+//|  (heartbeat variable) - same finding/fix/reasoning as Vanguard_EA.mq5's   |
+//|  v1.09, see its header. Structurally unverifiable by MT5 Strategy         |
+//|  Tester; modest original benefit not worth that permanent blind spot.      |
+//+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -304,12 +311,23 @@ input group "=== Notifications ==="
 input bool   InpPushNotifications  = true;
 
 input group "=== Cross-EA signal (v1.03 - optional, Aurelius conflict filter) ==="
-input bool   InpUseAureliusFilter = true;      // Skip an entry only if Aurelius_M15_EA.mq5 (its own M15 chart) is already holding the opposite direction right now - real, Python-validated on the M5 pair.
-                                                // (research/aurelius/
-                                                // vanguard_aurelius_position_filter_test.py); reused unchanged
-                                                // here since the mechanism (broadcast + stale-check) is
-                                                // timeframe-independent. If Aurelius_M15_EA isn't attached, or
-                                                // hasn't updated recently, Vanguard trades completely normally.
+input bool   InpUseAureliusFilter = false;     // DEFAULTS OFF (2026-10-04 decision, same reasoning as
+                                                // Vanguard_EA.mq5's own copy of this input - see its header).
+                                                // Skip an entry only if Aurelius_M15_EA.mq5 (its own M15 chart)
+                                                // is already holding the opposite direction right now. The
+                                                // validated figure (research/aurelius/vanguard_aurelius_
+                                                // position_filter_test.py) came from a Python simulation of
+                                                // combined trade histories, not from the real GlobalVariable
+                                                // mechanism - MT5 Strategy Tester can never run two EAs
+                                                // simultaneously reading each other's live state, so this
+                                                // mechanism is structurally untestable by this project's own
+                                                // methodology. That blind spot is exactly how a real staleness
+                                                // bug survived a full prior audit undetected (see CLAUDE.md's
+                                                // 2026-10-04 section). Now fixed (heartbeat variable), but left
+                                                // off by default given the modest original benefit against an
+                                                // unverifiable mechanism. If Aurelius_M15_EA isn't attached, or
+                                                // hasn't updated recently, Vanguard trades completely normally
+                                                // either way.
 input int    InpAureliusStaleSecs = 2700;      // Treat the signal as absent if it hasn't updated in this long (45 min default - a few Aurelius M15 bars, scaled up from the M5 pair's 15 min default).
                                                 // Covers Aurelius being removed, crashed, or never attached
                                                 // in the first place.
@@ -659,8 +677,18 @@ bool H4TrendAgrees(bool isBuy)
 int ReadAureliusDir()
   {
    if(!InpUseAureliusFilter) return(0);
-   if(!GlobalVariableCheck(g_aurGVarName)) return(0);   // Aurelius never attached this session
-   datetime lastSet = (datetime)GlobalVariableTime(g_aurGVarName);
+   //--- v1.XX CORRECTION: staleness is now checked against a DEDICATED
+   //--- heartbeat variable (g_aurGVarName+"_HB") that nothing ever reads
+   //--- via GlobalVariableGet() - a live test (GlobalVariableStalenessTest.mq5,
+   //--- 2026-10-04) confirmed GlobalVariableGet() ITSELF refreshes
+   //--- GlobalVariableTime(), so checking staleness against the POSITION
+   //--- variable's own time (the old v1.03 design) was self-defeating - see
+   //--- the M5 Vanguard_EA.mq5's own copy of this comment for the full
+   //--- explanation. Requires an Aurelius_M15_EA.mq5 build that writes the
+   //--- heartbeat (same date or later).
+   string hbName = g_aurGVarName + "_HB";
+   if(!GlobalVariableCheck(hbName)) return(0);   // Aurelius never attached this session (or a pre-fix build)
+   datetime lastSet = (datetime)GlobalVariableTime(hbName);
    //--- TimeLocal(), NOT TimeCurrent() (found in review): global variable
    //--- timestamps are stamped against the terminal's LOCAL clock, not
    //--- the broker's server time - comparing against TimeCurrent() would
@@ -670,6 +698,7 @@ int ReadAureliusDir()
    //--- live forever), depending on which side of the gap the broker
    //--- sits.
    if(TimeLocal() - lastSet > InpAureliusStaleSecs) return(0);   // attached before, not actively updating now
+   if(!GlobalVariableCheck(g_aurGVarName)) return(0);
    return (int)GlobalVariableGet(g_aurGVarName);
   }
 //+------------------------------------------------------------------+
@@ -698,9 +727,14 @@ bool AureliusBlocksEntry(int dir)
 int ReadMeridianDir()
   {
    if(!InpUseMeridianFilter) return(0);
-   if(!GlobalVariableCheck(g_meridianGVarName)) return(0);   // Meridian never attached this session
-   datetime lastSet = (datetime)GlobalVariableTime(g_meridianGVarName);
+   //--- v1.XX CORRECTION: same heartbeat fix as ReadAureliusDir() above -
+   //--- see its comment. Requires a Meridian_EA.mq5 build that writes the
+   //--- heartbeat (same date or later).
+   string hbName = g_meridianGVarName + "_HB";
+   if(!GlobalVariableCheck(hbName)) return(0);   // Meridian never attached this session (or a pre-fix build)
+   datetime lastSet = (datetime)GlobalVariableTime(hbName);
    if(TimeLocal() - lastSet > InpMeridianStaleSecs) return(0);   // attached before, not actively updating now
+   if(!GlobalVariableCheck(g_meridianGVarName)) return(0);
    return (int)GlobalVariableGet(g_meridianGVarName);
   }
 //+------------------------------------------------------------------+

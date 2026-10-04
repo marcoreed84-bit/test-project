@@ -866,8 +866,17 @@
 //|  in this project, and no further real MT5 test on this specific feature is                          |
 //|  expected to be worth running.                                                                        |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.53: position-broadcast now also writes a heartbeat variable         |
+//|  (g_posDirGVarName+"_HB") - fixes a confirmed bug where Vanguard's own    |
+//|  staleness check on this broadcast was silently defeated by its own       |
+//|  GlobalVariableGet() call refreshing the timestamp it relied on (see       |
+//|  CLAUDE.md's 2026-10-04 section). No effect on this EA's own trading        |
+//|  either way - InpUseAureliusFilter now defaults off on the Vanguard          |
+//|  readers anyway (see their own headers for why).                              |
+//+------------------------------------------------------------------+
 #property copyright "Aurelius EA"
-#property version   "1.52"
+#property version   "1.53"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -3274,14 +3283,25 @@ void OnTick()
    //--- cross-EA signal (see InpPublishPosition's header) - broadcasts
    //--- this EA's real position direction once per new bar via a
    //--- terminal global variable, for Vanguard_EA.mq5's OWN, separate,
-   //--- optional conflict filter to read. GlobalVariableSet() also
-   //--- stamps the variable's last-modified time (GlobalVariableTime()),
-   //--- which is what lets a reader tell "actively running" apart from
-   //--- "was attached once, long ago" without a second heartbeat
-   //--- variable. Purely a broadcast - has no effect on this EA's own
-   //--- trading whatsoever, on or off.
+   //--- optional conflict filter to read.
+   //--- v1.XX CORRECTION: the ORIGINAL design here relied on
+   //--- GlobalVariableSet()'s own timestamp stamp (GlobalVariableTime())
+   //--- to let a reader tell "actively running" apart from "was attached
+   //--- once, long ago" - but a live test (GlobalVariableStalenessTest.mq5,
+   //--- 2026-10-04) confirmed GlobalVariableGet() ITSELF refreshes that
+   //--- same timestamp, so a reader's own read of the position value kept
+   //--- resetting the clock its staleness check relied on - once read
+   //--- successfully while fresh, this looked "fresh" forever even after
+   //--- this EA crashed or was removed. Now also writes a dedicated
+   //--- heartbeat variable that NOTHING ever reads via Get() - only its
+   //--- own GlobalVariableTime() is checked, so only this EA's own writes
+   //--- can refresh it. Purely a broadcast - has no effect on this EA's
+   //--- own trading whatsoever, on or off.
    if(InpPublishPosition)
+     {
       GlobalVariableSet(g_posDirGVarName, haveLong ? 1.0 : (haveShort ? -1.0 : 0.0));
+      GlobalVariableSet(g_posDirGVarName + "_HB", 1.0);   // heartbeat - value unused, only its own time is read
+     }
 
    //--- same v1.32 reasoning as the between-bar draw above: purely
    //--- cosmetic, skipped in a non-visual Tester run. MA lines drawn

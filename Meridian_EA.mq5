@@ -807,8 +807,12 @@
 //|  way." Standing "drop" verdict (no exit that reacts to a stalling      |
 //|  trend) is unaffected either way.                                      |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.11: position-broadcast now also writes a heartbeat variable, same   |
+//|  fix/reasoning as Aurelius_EA.mq5's v1.53 - see its header.              |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.10"
+#property version   "1.11"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -2497,8 +2501,19 @@ void OnTick()
    //--- g_posDir is already fresh here: both ManageOpenPosition() and
    //--- CheckForEntry() call SyncPositionState() themselves before
    //--- returning, so this reads this bar's real, final position state.
+   //--- v1.XX CORRECTION: a live test (GlobalVariableStalenessTest.mq5,
+   //--- 2026-10-04) confirmed GlobalVariableGet() itself refreshes
+   //--- GlobalVariableTime() - a reader's own read of the position value
+   //--- was resetting the clock its own staleness check relied on, so a
+   //--- crashed/removed Meridian could look "fresh" forever after one
+   //--- successful read. Now also writes a dedicated heartbeat variable
+   //--- that nothing ever reads via Get() - only its own GlobalVariableTime()
+   //--- is checked, so only this EA's own writes can refresh it.
    if(InpPublishPosition)
+     {
       GlobalVariableSet(g_posDirGVarName, (double)g_posDir);
+      GlobalVariableSet(g_posDirGVarName + "_HB", 1.0);   // heartbeat - value unused, only its own time is read
+     }
 
    // v1.03 visuals, AFTER this bar's trading decision (so a position opened
    // or closed just now is drawn now, not a bar late) and skipped entirely
