@@ -211,30 +211,27 @@
 //|  research/aurelius/vanguard_giveback_event_driven_test.py.                               |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//|  v1.07: InpUseH4TrendFilter - the first entry-side fix for this EA   |
-//|  that actually passed. Require the last CLOSED H4 bar's close to    |
-//|  agree with the trade direction vs its own 50-period EMA, added on   |
-//|  top of the existing trendline+VWAP+S/R logic. Python-validated      |
-//|  (research/aurelius/vanguard_m5_h4_trend_filter_oos_test.py, K=1):    |
-//|  on genuinely untouched 2014-06-13->2022-07-01 GOLD M5 data, baseline|
-//|  Vanguard (no H4 filter) sits at 87.8th percentile vs random timing  |
-//|  (p=0.12, not distinguishable from luck - the standing verdict). +H4 |
-//|  filter: 100.0th percentile, p=0.0000 (0/600 random draws matched    |
-//|  it), n=1662->805, %PF 1.019->1.560. That result survived fixing a   |
-//|  real lookahead bug found in the TEST ITSELF (an M5 bar landing      |
-//|  exactly on an H4 bar's open matched that still-forming bar instead  |
-//|  of the prior completed one - affected 2.24% of events, barely moved |
-//|  the result once fixed). Also checked on Vanguard's own 2026 tuning  |
-//|  window (vanguard_m5_h4_filter_2026_check.py) so this isn't a fix     |
-//|  that only works on old data: %PF 1.751->2.167, n=158->72. Roughly   |
-//|  halves trade frequency both ends - fewer, better signals, not more. |
-//|  NOT YET real-MT5-validated - this is the first time this filter has |
-//|  run anywhere outside the Python simulator. Per CLAUDE.md, a real    |
-//|  MT5 backtest of this build must be bar-matched against the Python   |
-//|  result above before this is trusted the way Aurelius M5/H&S are.    |
+//|  v1.07: InpUseH4TrendFilter - REJECTED (2026-10-04), default now false.|
+//|  The original "100.0th pctile, p=0.0000, %PF 1.019->1.560" claim was   |
+//|  an artifact of a lookahead bug: the H4 bar lookup used `searchsorted  |
+//|  (h4_time, t, side="left")-1`, which for any M5 bar not exactly on an  |
+//|  H4 boundary picks the H4 bar that is STILL FORMING (e.g. at 09:30 it  |
+//|  returns the 08:00 bar, which doesn't close until 12:00) - leaking up  |
+//|  to ~4h of future H4 price into every entry decision. The "fix a      |
+//|  lookahead bug, result barely moved" note in the ORIGINAL version of   |
+//|  this comment only caught the exact-boundary edge case (2.24% of       |
+//|  events) - the general mid-interval case, which is nearly everything  |
+//|  else, was still leaking. Found via an Opus audit of a real MT5 bar-   |
+//|  match mismatch (57/65 trades matched before the real fix, 64/65 after|
+//|  - the fix itself is solid, now verified against real fills). With    |
+//|  the CORRECTED alignment, same untouched window: baseline 87.8th       |
+//|  pctile/p=0.12 -> +H4 filter 83.3th pctile/p=0.17 - WORSE than         |
+//|  baseline, no edge in either direction. Input and code kept (fail-     |
+//|  closed, same convention as InpUseGivebackExit) in case a future H4    |
+//|  construction is worth trying, but OFF by default.                    |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.07"
+#property version   "1.08"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -246,28 +243,13 @@ input int    InpSRDays            = 3;       // trailing completed D1 bars check
 input double InpMinSRDistATR      = 0.50;    // reject entries this close (xATR) to that level
 
 input group "=== Entry filter: H4 trend alignment (v1.07) ==="
-input bool   InpUseH4TrendFilter  = true;    // Require the LAST CLOSED H4 bar's close to be on the
-                                              // same side of its own InpH4EMAPeriod EMA as the trade
-                                              // direction (buy needs H4 close > H4 EMA, sell the
-                                              // mirror) - Python-validated (research/aurelius/
-                                              // vanguard_m5_h4_trend_filter_oos_test.py, K=1, one
-                                              // pre-specified filter): on genuinely untouched
-                                              // 2014-06-13->2022-07-01 GOLD M5 data this turns
-                                              // Vanguard's entry from indistinguishable-from-random
-                                              // (87.8th pctile, p=0.12) into a real edge (100.0th
-                                              // pctile, p=0.0000, survived fixing a lookahead bug in
-                                              // the test itself - re-run gave n=810->805, %PF
-                                              // 1.582->1.560, same conclusion). Also checked on
-                                              // Vanguard's own 2026 tuning window, not just old data:
-                                              // %PF 1.751->2.167 (n=158->72) - a real improvement
-                                              // both ends, not a fix that only "works" on history.
-                                              // Roughly halves trade frequency - fewer, better
-                                              // signals. NOT YET bar-matched against a real MT5 log
-                                              // (brand new, never run live) - this backtest is step
-                                              // one of validating it for real money, not the final
-                                              // word; CLAUDE.md's bar-match rule still applies before
-                                              // trusting it.
-input int    InpH4EMAPeriod       = 50;      // EMA period on H4 - fixed, not swept (K=1 discipline)
+input bool   InpUseH4TrendFilter  = false;   // REJECTED (2026-10-04) - see header. The original
+                                              // Python-validated claim (100.0th pctile, p=0.0000,
+                                              // %PF 1.019->1.560) used a buggy H4 alignment that
+                                              // leaked up to ~4h of future H4 price into every
+                                              // entry. Corrected: 87.8th->83.3th pctile, p=0.12->0.17
+                                              // (worse, not better). Stays false.
+input int    InpH4EMAPeriod       = 50;      // EMA period on H4 - unused while the filter above is off
 
 input group "=== Exit ==="
 input double InpSafetyStopATR     = 4.0;     // validated best cell - see header

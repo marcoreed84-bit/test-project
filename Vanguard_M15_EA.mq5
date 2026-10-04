@@ -241,23 +241,21 @@
 //|  research/aurelius/vanguard_giveback_event_driven_test.py.                               |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//|  v1.08: InpUseH4TrendFilter - same filter validated for the M5 pair, |
-//|  separately re-tested here rather than assumed to transfer           |
-//|  (vanguard_m15_h4_trend_filter_oos_test.py, K=1). Also fixed the      |
-//|  underlying OOS baseline test: it loaded load_m15_native() filtered   |
-//|  only by the upper cutoff, missing the lower 2014-06-13 contamination |
-//|  boundary that file's own docstring documents (daily bars before      |
-//|  2013-05, hourly until 2014-06-13 - same gotcha CLAUDE.md flags for    |
-//|  GOLD_M15_native.csv) - ~5% of the "untouched" slice was contaminated. |
-//|  On the corrected 2014-06-13->2022-07-04 window: baseline M15 Vanguard |
-//|  76.7th pctile, p=0.23 (still doesn't survive, slightly better than    |
-//|  the uncorrected 50.7th/p=0.49). + H4 filter: n=1433->688, %PF          |
-//|  1.015->1.508, 100.0th pctile, p=0.0000 - same result as M5, confirmed  |
-//|  independently. NOT YET real-MT5-validated - bar-match a real backtest |
-//|  of this build against the Python result above before trusting it.     |
+//|  v1.08: InpUseH4TrendFilter - REJECTED (2026-10-04), default now false.|
+//|  The "100.0th pctile, p=0.0000" claim used the same lookahead bug as   |
+//|  the M5 pair: searchsorted(h4_time, t, side="left")-1 picks the H4 bar |
+//|  that is STILL FORMING for any M15 bar not exactly on an H4 boundary,  |
+//|  leaking up to ~4h of future H4 price into every entry. Found via an   |
+//|  Opus audit of a real MT5 bar-match mismatch (45/51 matched before the |
+//|  real fix, 51/51 after - the alignment fix itself is solid, verified   |
+//|  against real fills). With the CORRECTED alignment, same corrected     |
+//|  2014-06-13->2022-07-04 window: baseline 76.7th pctile/p=0.23 -> +H4    |
+//|  filter 60.2th pctile/p=0.40, %PF 1.015->0.996 (a net LOSER) - worse    |
+//|  than baseline, no edge. Input and code kept (fail-closed) but OFF by  |
+//|  default.                                                               |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
-#property version   "1.08"
+#property version   "1.09"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -269,26 +267,13 @@ input int    InpSRDays            = 3;       // trailing completed D1 bars check
 input double InpMinSRDistATR      = 0.50;    // reject entries this close (xATR) to that level
 
 input group "=== Entry filter: H4 trend alignment (v1.08) ==="
-input bool   InpUseH4TrendFilter  = true;    // Require the LAST CLOSED H4 bar's close to be on the
-                                              // same side of its own InpH4EMAPeriod EMA as the trade
-                                              // direction - the same filter validated for the M5
-                                              // Vanguard_EA.mq5 (research/aurelius/
-                                              // vanguard_m5_h4_trend_filter_oos_test.py), separately
-                                              // re-tested here for M15 (K=1,
-                                              // vanguard_m15_h4_trend_filter_oos_test.py) on the
-                                              // CORRECTED genuinely untouched 2014-06-13->2022-07-04
-                                              // window (the original M15 OOS test's "untouched" slice
-                                              // included ~5% contaminated pre-2014-06-13 rows -
-                                              // load_m15_native()'s own docstring documents this, same
-                                              // issue CLAUDE.md flags for GOLD_M15_native.csv - fixed
-                                              // for this test). Baseline M15 Vanguard on that corrected
-                                              // window: 76.7th pctile, p=0.23 - does not survive. + H4
-                                              // filter: n=1433->688, %PF 1.015->1.508, 100.0th pctile,
-                                              // p=0.0000. Same result as M5, independently confirmed,
-                                              // not assumed to transfer. Roughly halves trade frequency.
-                                              // NOT YET real-MT5-validated - bar-match a real backtest
-                                              // of this build against the Python result above first.
-input int    InpH4EMAPeriod       = 50;      // EMA period on H4 - fixed, not swept (K=1 discipline)
+input bool   InpUseH4TrendFilter  = false;   // REJECTED (2026-10-04) - see header. The original
+                                              // Python-validated claim (100.0th pctile, p=0.0000,
+                                              // %PF 1.015->1.508) used a buggy H4 alignment that
+                                              // leaked up to ~4h of future H4 price into every
+                                              // entry. Corrected: 76.7th->60.2th pctile, p=0.23->0.40,
+                                              // %PF 1.015->0.996 (a net loser). Stays false.
+input int    InpH4EMAPeriod       = 50;      // EMA period on H4 - unused while the filter above is off
 
 input group "=== Exit ==="
 input double InpSafetyStopATR     = 3.0;     // validated best cell on M15 - see header
