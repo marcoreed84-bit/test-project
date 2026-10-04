@@ -279,7 +279,17 @@
 //|  bring live closer to the simulators, not further. Not yet re-run.      |
 //+------------------------------------------------------------------+
 #property copyright "Vanguard_M15_EA"
-#property version   "1.11"
+//+------------------------------------------------------------------+
+//|  v1.12: WarmUpSwingState() - ported from Vanguard_EA.mq5's v1.10 fix  |
+//|  (same bug, same construction, see its own header for full rationale):  |
+//|  trendline swing state lived only in RAM and started empty on every      |
+//|  restart/recompile - the EA couldn't trade, or get a reversal exit on     |
+//|  a held position, until two new swing points formed naturally (often      |
+//|  days). Invisible to Strategy Tester. Now replays up to 20,000 M15 bars    |
+//|  of real history through the exact live swing/line/trigger rules on the    |
+//|  first new bar after attach.                                                |
+//+------------------------------------------------------------------+
+#property version   "1.12"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -472,6 +482,11 @@ double   g_curLoPrice = 0.0, g_prevLoPrice = 0.0;
 //--- not retroactively recomputed with later swing points)
 bool     g_prevAboveDesc = false, g_prevDescValid = false;
 bool     g_prevBelowAsc  = false, g_prevAscValid  = false;
+
+//--- v1.12 swing-state warm-up (see WarmUpSwingState()) - false until the
+//--- first successful rebuild after an attach/restart; retried each new
+//--- bar until history is available.
+bool     g_swingWarm = false;
 
 //--- visuals (v1.02) - object name prefixes, kept distinct from
 //--- Vanguard_EA.mq5's (VGP_/VGW_/VGM_/VGL_) in case both are ever
@@ -828,6 +843,73 @@ bool GetTrendlineValue(datetime t1, double p1, datetime t2, double p2, int atShi
    if(shift1 <= shift2) return(false);
    double slope = (p2 - p1) / (double)(shift1 - shift2);
    value = p2 + slope * (double)(shift2 - atShift);
+   return(true);
+  }
+//+------------------------------------------------------------------+
+//| v1.12 - rebuilds the swing/trendline/edge state from history on    |
+//| the first new bar after an attach. Ported from Vanguard_EA.mq5's   |
+//| v1.10 WarmUpSwingState() (see its header for the full rationale) - |
+//| same bug: without this, the swing/line state lives only in RAM and |
+//| starts empty on every restart/recompile, so the EA can't trade (or |
+//| get a reversal exit on a held position) until two new swing points |
+//| form naturally - often days. Invisible to Strategy Tester (only    |
+//| starts cold once). Replays every closed bar from the oldest usable |
+//| one down to bar 2 through the EXACT rules UpdateSwingsAndCheckBreak|
+//| out() applies live. Bar 1 is deliberately left out - OnTick()      |
+//| processes it live right after, exactly once. WARMUP_BARS (~500     |
+//| days of M15) is far more than the local window swing detection     |
+//| actually needs. Returns false (retried next new bar) if history     |
+//| isn't loaded yet.                                                    |
+//+------------------------------------------------------------------+
+bool WarmUpSwingState()
+  {
+   const int WARMUP_BARS = 20000;
+   int K = InpFractalK;
+   int avail = Bars(_Symbol, PERIOD_M15);
+   if(avail <= 0) return(false);
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   int got = CopyRates(_Symbol, PERIOD_M15, 0, MathMin(avail, WARMUP_BARS), r);
+   if(got < 2 * K + 3) return(false);
+
+   int    curHiS = -1, prevHiS = -1, curLoS = -1, prevLoS = -1;   // shift of each swing's formation bar
+   double curHiP = 0.0, prevHiP = 0.0, curLoP = 0.0, prevLoP = 0.0;
+   bool   prevAboveDesc = false, prevDescValid = false, prevBelowAsc = false, prevAscValid = false;
+
+   for(int b = got - 1 - 2 * K; b >= 2; b--)   // b plays the role of live "bar 1"
+     {
+      int c = b + K;                             // live centerShift = InpFractalK+1, relative to bar 1
+      bool isHi = true, isLo = true;
+      for(int s = b; s <= b + 2 * K; s++)
+        {
+         if(s == c) continue;
+         if(r[s].high >= r[c].high) isHi = false;
+         if(r[s].low  <= r[c].low)  isLo = false;
+         if(!isHi && !isLo) break;
+        }
+      if(isHi) { prevHiS = curHiS; prevHiP = curHiP; curHiS = c; curHiP = r[c].high; }
+      if(isLo) { prevLoS = curLoS; prevLoP = curLoP; curLoS = c; curLoP = r[c].low; }
+
+      bool descValid = (prevHiS > curHiS && curHiS >= 0 && curHiP < prevHiP);
+      double descVal = descValid ? curHiP + (curHiP - prevHiP) / (double)(prevHiS - curHiS) * (double)(curHiS - b) : 0.0;
+      prevAboveDesc = descValid && (r[b].close > descVal);
+      prevDescValid = descValid;
+
+      bool ascValid = (prevLoS > curLoS && curLoS >= 0 && curLoP > prevLoP);
+      double ascVal = ascValid ? curLoP + (curLoP - prevLoP) / (double)(prevLoS - curLoS) * (double)(curLoS - b) : 0.0;
+      prevBelowAsc = ascValid && (r[b].close < ascVal);
+      prevAscValid = ascValid;
+     }
+
+   g_curHiTime  = (curHiS  >= 0) ? r[curHiS].time  : 0;  g_curHiPrice  = curHiP;
+   g_prevHiTime = (prevHiS >= 0) ? r[prevHiS].time : 0;  g_prevHiPrice = prevHiP;
+   g_curLoTime  = (curLoS  >= 0) ? r[curLoS].time  : 0;  g_curLoPrice  = curLoP;
+   g_prevLoTime = (prevLoS >= 0) ? r[prevLoS].time : 0;  g_prevLoPrice = prevLoP;
+   g_prevAboveDesc = prevAboveDesc; g_prevDescValid = prevDescValid;
+   g_prevBelowAsc  = prevBelowAsc;  g_prevAscValid  = prevAscValid;
+   PrintFormat("Vanguard M15 EA: swing state rebuilt from %d bars of history - last highs %s/%s, last lows %s/%s",
+               got, TimeToString(g_prevHiTime), TimeToString(g_curHiTime),
+               TimeToString(g_prevLoTime), TimeToString(g_curLoTime));
    return(true);
   }
 //+------------------------------------------------------------------+
@@ -1820,6 +1902,7 @@ int OnInit()
    SyncPositionState();
    g_lastBarTime = 0;
    ClearReversalRetry();   // v1.11 - never carry a retry across a re-init
+   g_swingWarm = false;    // v1.12: rebuild swing state from history on the first new bar (WarmUpSwingState())
 
    //--- visuals (v1.02) - same performance guard as Aurelius/Vanguard_EA:
    //--- skip every cosmetic draw entirely in a non-visual Strategy
@@ -1894,6 +1977,10 @@ void OnTick()
 
    double vwapPrev = g_vwapValue;
    UpdateVWAP();
+   //--- v1.12: replays bars 2..N first (once per attach, retried each new
+   //--- bar until history is available), so bar 1 below is processed
+   //--- against the same swing state a never-restarted EA would hold.
+   if(!g_swingWarm) g_swingWarm = WarmUpSwingState();
    int breakoutDir = UpdateSwingsAndCheckBreakout();
    g_barLastBreakoutDir = breakoutDir;
 
