@@ -806,8 +806,18 @@
 //|  - unlike Aurelius_EA.mq5's now-fixed b2/b3 rows, none of Ratchet's MA periods were re-tuned this               |
 //|  session, so no label went stale here.                                                                          |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v3.32: the restart-restore block added 2026-09-06 never restored       |
+//|  g_entryBarCount, leaving it at its 0 initializer - understated how      |
+//|  long a held trade had actually been open after a restart and delayed    |
+//|  InpMaxBars past its real threshold. Now restored via iBarShift(), same   |
+//|  construction already used for this in Aurelius_EA.mq5 v1.54/Aurelius_    |
+//|  M15_EA.mq5 v1.58. The deliberate g_entryATR<=0 fail-closed behaviour      |
+//|  from the same 2026-09-06 review is unchanged - reviewed again today,      |
+//|  still the right call, not a bug.                                          |
+//+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
-#property version   "3.31"
+#property version   "3.32"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1141,9 +1151,18 @@ int OnInit()
          g_entryLots   = pos.Volume();
          g_peakFavPx   = g_entryPrice;
          double atrNow;
-         g_entryATR    = MA(hATR, 1, atrNow) ? atrNow : 0.0;   // atr<=0 (cold read) leaves trail/breakeven disabled, not armed on bad data
-         PrintFormat("Ratchet EA: restored open position #%I64u from OnInit (entry %.2f, %s, %.2f lots)",
-                     g_ticket, g_entryPrice, (g_entryDir>0?"BUY":"SELL"), g_entryLots);
+         g_entryATR    = MA(hATR, 1, atrNow) ? atrNow : 0.0;   // atr<=0 (cold read) leaves trail/breakeven disabled, not armed on bad data - deliberate, unchanged
+         //--- 2026-10-04 addition to the 2026-09-06 restore: g_entryBarCount
+         //--- was left at its 0 initializer here, understating how long the
+         //--- trade had actually been open and delaying InpMaxBars/MAXBARS
+         //--- past its real threshold after a restart. iBarShift() gives the
+         //--- real bar count regardless of any weekend/session gap since -
+         //--- same construction already used for this exact purpose in
+         //--- Aurelius_EA.mq5 v1.54/Aurelius_M15_EA.mq5 v1.58.
+         int entryShift = iBarShift(_Symbol, PERIOD_CURRENT, g_entryTime);
+         g_entryBarCount = (entryShift > 0) ? entryShift : 0;
+         PrintFormat("Ratchet EA: restored open position #%I64u from OnInit (entry %.2f, %s, %.2f lots, %d bars held)",
+                     g_ticket, g_entryPrice, (g_entryDir>0?"BUY":"SELL"), g_entryLots, g_entryBarCount);
          break;
         }
      }
