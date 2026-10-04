@@ -251,8 +251,22 @@
 //|  NOT YET REAL-MT5-CONFIRMED, and hs_sim.py NO LONGER REPLICATES this file exactly - it has no transient failures, skips (not retries) on wide spread,          |
 //|  dedups on the old key, and has no intrabar runner close. Update it and re-run the bar-match before trusting any new verdict built on v1.11 trades.         |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.12: AdvancePending() pending-pattern EXPIRY fix - same bug class as   |
+//|  v1.04's InpPullbackWindowBars fix, found in a different spot. The expiry  |
+//|  check measured a pattern's formation length and age in wall-clock          |
+//|  SECONDS (t_s2-t_s1, t1-t_s2), so real time elapsed over a weekend/session   |
+//|  gap (no new bars, but ~48-60h of real time still passes) could push a        |
+//|  still-forming, still-valid pattern's "age" past InpMaxHorizonMult's horizon   |
+//|  purely from dead calendar time - silently deleting it from g_pending (and      |
+//|  off the chart) with no real invalidation reason. Found answering a direct       |
+//|  user question about patterns vanishing over a weekend - NOT by a dedicated        |
+//|  audit, which is itself worth noting (see CLAUDE.md's 2026-10-04 section).           |
+//|  Now bar-count based via iBarShift(), matching the v1.04 fix's convention.             |
+//|  NOT YET bar-matched against a real run of this exact build.                           |
+//+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.11"
+#property version   "1.12"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
@@ -925,8 +939,6 @@ void AdvancePending()
       PrintFormat("HeadShoulders_EA: CurrentATR() read failed at %s - pending-pattern advance skipped this bar.", TimeToString(t1));
       return;
      }
-   int periodSec = PeriodSeconds(PERIOD_CURRENT);
-
    for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
      {
       HSPattern P = g_pending[i];
@@ -961,10 +973,25 @@ void AdvancePending()
       else
          g_pending[i].run = 0;
 
-      long patLenSec = ((long)P.t_s2 - (long)P.t_s1);
-      long ageSec = (long)t1 - (long)P.t_s2;
-      long horizonSec = (long)(MathMax((double)patLenSec, (double)periodSec) * InpMaxHorizonMult);
-      bool expired = (!confirmed) && (ageSec > horizonSec);
+      //--- v1.12 FIX: this used to measure patLen/age in wall-clock SECONDS
+      //--- (t_s2-t_s1, t1-t_s2) - the exact same class of bug already found
+      //--- and fixed for InpPullbackWindowBars in v1.04 (real time keeps
+      //--- passing over a weekend/session gap even though no new bars form,
+      //--- so wall-clock seconds overcounts "age" there). A pattern still
+      //--- forming going into a weekend could have its age jump by ~48-60h
+      //--- of dead calendar time and get wrongly marked expired/removed on
+      //--- Monday, even though essentially zero real trading bars elapsed.
+      //--- Now bar-count based via iBarShift(), same pattern as the v1.04 fix.
+      int shift_s1 = iBarShift(_Symbol, PERIOD_CURRENT, P.t_s1, false);
+      int shift_s2 = iBarShift(_Symbol, PERIOD_CURRENT, P.t_s2, false);
+      bool expired = false;
+      if(shift_s1 >= 0 && shift_s2 >= 0)
+        {
+         long patLenBars = (long)shift_s1 - (long)shift_s2;
+         long ageBars = (long)shift_s2 - 1;   // shift 1 = t1, the last closed bar
+         long horizonBars = (long)(MathMax((double)patLenBars, 1.0) * InpMaxHorizonMult);
+         expired = (!confirmed) && (ageBars > horizonBars);
+        }
 
       if(confirmed || expired)
         {
