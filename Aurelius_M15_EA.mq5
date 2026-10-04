@@ -876,7 +876,43 @@
 //| g_barsSinceClose also resets to 9999 across any restart instead    |
 //| of being rebuilt from history. See CLAUDE.md's 2026-10-04 section. |
 //+------------------------------------------------------------------+
-#property version   "1.59"
+//| v1.60 (2026-10-04): third fresh/unprimed audit pass, same bug class |
+//| as Aurelius_EA.mq5's own M5 sibling (fixed independently, in          |
+//| parallel, not coordinated). Fixed the two items v1.59 deferred:        |
+//| (1) g_barsSinceClose is now rebuilt in OnInit from this EA's own real    |
+//| trade history (most recent closed deal, symbol+magic match) instead      |
+//| of staying at its 9999 "cooldown satisfied" initializer across a          |
+//| restart - bars elapsed measured via iBarShift() (bar-count, not           |
+//| wall-clock), with a one-shot g_cooldownResync correction consumed on       |
+//| the first OnTick() pass so the restart's always-"new-bar" first tick       |
+//| (g_lastBar starts at 0) can't double-count. Leaves g_barsSinceClose at      |
+//| 9999 exactly as before when there is no prior closed deal to restore        |
+//| from. (2) OnTradeTransaction()'s close handling broadened from              |
+//| DEAL_REASON_SL only to every reason except DEAL_REASON_EXPERT (which         |
+//| ClosePosition() already handles inline) - a manual close from the            |
+//| terminal/phone (CLIENT/MOBILE/WEB) or a broker stop-out (SO) now also         |
+//| logs and resets the cooldown instead of being invisible to this EA and         |
+//| leaving it free to silently re-enter and undo a human's own close. Added       |
+//| a belt-and-suspenders OnTick() backstop too, for the (unconfirmed by the         |
+//| audit) event-ordering race where a gap-through-the-stop tick could see           |
+//| the account flat before OnTradeTransaction has run: g_ticket nonzero with          |
+//| no matching position open now self-heals the same way every tick. Also            |
+//| fixed, from the same audit pass: scale-in's addLots was clamped to the             |
+//| broker minimum but never to InpMaxLots/the broker maximum (one-line clamp,         |
+//| same pattern LotSize() already uses); and a failed ClosePosition() send             |
+//| (requote/market-closed) now retries every tick via RetryPendingClose()               |
+//| instead of waiting for the next bar, where the VWAP/Price21 confirm-bar               |
+//| streaks that triggered the exit could reset and silently drop the exit                 |
+//| intent - not a full reversal-retry redesign (Vanguard_EA.mq5's                          |
+//| RetryReversalClose() also re-arms a reversal entry, which doesn't apply                  |
+//| here), just enough to stop losing the close itself. The simulator/EA time-                |
+//| gate parity gap the same audit flagged (engine.py checks a gate on the bar                 |
+//| that just closed, this EA checks it at that bar's open on the next tick) is                |
+//| NOT changed here - it's a research-sim-vs-live-EA modeling difference, not                  |
+//| a bug in either side on its own, and is left documented rather than "fixed"                  |
+//| out of either file.                                                                            |
+//+------------------------------------------------------------------+
+#property version   "1.60"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1386,6 +1422,21 @@ bool     g_restoreResync = false;
 ulong    g_gbTicket  = 0;
 double   g_gbPeakFav = 0.0;   // best floating profit (price units) seen so far this trade
 
+//--- v1.60: restart restore of the cooldown (g_barsSinceClose) - see OnInit's
+//--- own comment for why this is a separate one-shot resync rather than a
+//--- direct seed, same "first tick after restart always takes the new-bar
+//--- path" reasoning as g_restoreResync/ResyncAfterRestore above.
+datetime g_cooldownRestoreTime = 0;
+bool     g_cooldownResync = false;
+
+//--- v1.60: a failed exit (ClosePosition()'s trade.PositionClose() call
+//--- rejected on requote/market-closed/etc.) used to just sit until the next
+//--- new bar before being retried - see RetryPendingClose()'s own header for
+//--- why that's a real gap and why this fixes it without a bigger redesign.
+ulong    g_pendingCloseTicket  = 0;
+string   g_pendingCloseReason  = "";
+datetime g_pendingCloseLastTry = 0;
+
 #define NEED_BARS 60
 
 //--- forward declaration: OnInit draws the panel before DrawPanel is defined
@@ -1483,6 +1534,59 @@ int OnInit()
 
    UpdateATRManual();   // initial seed - also refreshed once per new bar in OnTick()
    g_dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   //--- v1.60 (2026-10-04 fresh audit): g_barsSinceClose's 9999 initializer
+   //--- was never restored across a restart, so ANY restart (terminal
+   //--- restart, recompile, input change) landing mid-cooldown silently
+   //--- jumped straight to "cooldown satisfied" (9999 >= any realistic
+   //--- InpCooldownBars) and could let a fresh entry straight through with
+   //--- however much of InpCooldownBars was actually still owed. Rebuilt
+   //--- here from this EA's own trade history instead: find the most recent
+   //--- CLOSED deal (symbol+magic match, DEAL_ENTRY_OUT) and measure how many
+   //--- bars ago it closed via iBarShift() - bar-count based, not wall-clock
+   //--- (see this repo's CLAUDE.md on that recurring bug class: a wall-clock
+   //--- gap through a weekend/holiday would otherwise read as far more
+   //--- "bars" than actually traded). HistoryDealGetTicket() returns deals
+   //--- oldest-first, so scanning backward from the last index and taking
+   //--- the first match found is already the most recent one - no need to
+   //--- walk the whole account history. If no prior closed deal exists at
+   //--- all (brand new account/magic), g_barsSinceClose is left at its 9999
+   //--- default, same as before this fix - that default already doesn't
+   //--- block entry, which is the documented behavior for "nothing to
+   //--- restore from" and is deliberately left unchanged.
+   if(HistorySelect(0, TimeCurrent()))
+     {
+      datetime lastCloseTime = 0;
+      for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+        {
+         ulong dticket = HistoryDealGetTicket(i);
+         if(dticket == 0) continue;
+         if(HistoryDealGetInteger(dticket, DEAL_MAGIC) != InpMagic) continue;
+         if(HistoryDealGetString(dticket, DEAL_SYMBOL) != _Symbol) continue;
+         if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(dticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
+         lastCloseTime = (datetime)HistoryDealGetInteger(dticket, DEAL_TIME);
+         break;   // most recent match - deals are oldest-first, so this is it
+        }
+      if(lastCloseTime > 0)
+        {
+         int barsAgo = iBarShift(_Symbol, PERIOD_CURRENT, lastCloseTime);
+         if(barsAgo >= 0)
+           {
+            g_barsSinceClose      = barsAgo;
+            g_cooldownRestoreTime = lastCloseTime;
+            //--- consumed once by OnTick()'s first pass - see its own comment
+            //--- for why this can't just be used directly here: the very
+            //--- first OnTick() after ANY restart always takes the new-bar
+            //--- path (g_lastBar starts at 0) even when it is NOT actually a
+            //--- new bar, so the ++g_barsSinceClose on that spurious pass
+            //--- would silently add one extra bar on top of what's seeded
+            //--- here. Same reasoning/pattern as g_restoreResync above.
+            g_cooldownResync      = true;
+            PrintFormat("Aurelius EA: restored cooldown from history - last close %s, %d bar(s) ago",
+                        TimeToString(lastCloseTime, TIME_DATE|TIME_MINUTES), barsAgo);
+           }
+        }
+     }
 
    // 2026-09-06 (Opus deep-dive review): a terminal restart, recompile, or
    // input change while a position is open resets every g_entry*/g_ticket
@@ -1584,20 +1688,44 @@ void OnDeinit(const int reason)
    Comment("");
   }
 //+------------------------------------------------------------------+
-//| Catches closes ClosePosition() never sees: a broker-side stop-loss|
-//| fill happens on the broker's own server, not through this EA's    |
-//| own trade.PositionClose() call, so nothing in OnTick() ever ran    |
+//| Catches closes ClosePosition() never sees: anything closed on the |
+//| broker's own server rather than through this EA's own             |
+//| trade.PositionClose() call, so nothing in OnTick() ever ran        |
 //| LogClosed() - OR reset the cooldown/state tracking - for it.       |
 //| Roughly 1 in 6-7 real trades (the SL hits) were silently missing   |
 //| from the CSV, and InpCooldownBars was not being respected after    |
 //| one either, since g_barsSinceClose never got reset to 0 the way    |
-//| ClosePosition() already does for its own closes. This handles      |
-//| exactly the SL-hit case and only that case: an EA-initiated close  |
-//| already gets logged AND resets state inline via ClosePosition(),   |
-//| and that always carries DEAL_REASON_EXPERT, not DEAL_REASON_SL -   |
-//| so filtering on SL specifically here means every close is handled  |
-//| exactly once, from exactly one place, never both.                  |
+//| ClosePosition() already does for its own closes. Originally this   |
+//| only caught DEAL_REASON_SL - v1.60 (2026-10-04 fresh audit)         |
+//| broadened it to every reason except DEAL_REASON_EXPERT, because a  |
+//| manual close from the terminal or a phone (DEAL_REASON_CLIENT/     |
+//| MOBILE/WEB) or a broker-forced stop-out (DEAL_REASON_SO) is exactly|
+//| the same gap: the EA goes flat, g_barsSinceClose is left wherever  |
+//| it was (often already >= InpCooldownBars, since it only climbs     |
+//| while a position is open), and it can re-enter on the very next    |
+//| bar and undo whatever the human (or the broker) just did. An       |
+//| EA-initiated close already gets logged AND resets state inline via |
+//| ClosePosition(), and that always carries DEAL_REASON_EXPERT - so   |
+//| excluding only that one reason here still means every close is     |
+//| handled exactly once, from exactly one place, never both.          |
 //+------------------------------------------------------------------+
+//--- short label for the CSV/log line - EnumToString() would work too but
+//--- prints the full "DEAL_REASON_XXX" constant name; this matches the
+//--- terse "SL"/"FRIDAY"/"ALIGN_BREAK"/etc. style already used everywhere
+//--- else LogClosed() is called.
+string DealReasonTag(const ENUM_DEAL_REASON r)
+  {
+   switch(r)
+     {
+      case DEAL_REASON_SL:     return("SL");
+      case DEAL_REASON_TP:     return("TP");
+      case DEAL_REASON_SO:     return("STOPOUT");
+      case DEAL_REASON_CLIENT: return("MANUAL");
+      case DEAL_REASON_MOBILE: return("MANUAL_MOBILE");
+      case DEAL_REASON_WEB:    return("MANUAL_WEB");
+      default:                 return("UNTRACKED_CLOSE");
+     }
+  }
 //+------------------------------------------------------------------+
 //| Push notification on trade open/close, via MT5's own               |
 //| SendNotification() - requires this terminal's MetaQuotes ID under   |
@@ -1668,12 +1796,23 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                        + HistoryDealGetDouble(ticket, DEAL_SWAP)
                        + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
 
-   if((ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_SL) return;
+   ENUM_DEAL_REASON reason = (ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON);
+   if(reason == DEAL_REASON_EXPERT) return;   // ClosePosition() already handled this one inline
    double exitPx = HistoryDealGetDouble(ticket, DEAL_PRICE);
-   LogClosed("SL", exitPx);
+   LogClosed(DealReasonTag(reason), exitPx);
    g_lastClose = TimeCurrent();
    g_barsSinceClose = 0;
    g_ticket = 0;
+   //--- a pending retry (see RetryPendingClose()) can only be for THIS
+   //--- position going flat some other way first (SL/manual/SO winning the
+   //--- race against our own retry) - clear it so the retry loop doesn't
+   //--- try to close a position that no longer exists. DEAL_POSITION_ID,
+   //--- not the deal ticket itself (`ticket`/trans.deal is a different
+   //--- number from the position ticket g_pendingCloseTicket/g_ticket are
+   //--- stored as - comparing against the deal ticket directly would never
+   //--- match).
+   if(g_pendingCloseTicket == (ulong)HistoryDealGetInteger(ticket, DEAL_POSITION_ID))
+     { g_pendingCloseTicket = 0; g_pendingCloseReason = ""; }
   }
 //+------------------------------------------------------------------+
 //| Panel primitives.                                                 |
@@ -3068,17 +3207,83 @@ void ClosePosition(const string reason)
       if(!pos.SelectByIndex(i)) continue;
       if(pos.Symbol() != _Symbol || pos.Magic() != InpMagic) continue;
       double px = pos.PriceCurrent();
-      if(trade.PositionClose(pos.Ticket()))
+      ulong tk = pos.Ticket();
+      if(trade.PositionClose(tk))
         {
          if(InpVerbose) Print("Closed: ", reason);
          LogClosed(reason, px);
          g_lastClose = TimeCurrent();
          g_barsSinceClose = 0;
          g_ticket = 0;
+         if(g_pendingCloseTicket == tk) { g_pendingCloseTicket = 0; g_pendingCloseReason = ""; }
         }
       else
+        {
          Print("Close failed: ", trade.ResultRetcodeDescription());
+         //--- v1.60: retry sooner than "next bar" - see RetryPendingClose()'s
+         //--- own header for why waiting for the next new bar can lose the
+         //--- exit intent (the VWAP/Price21 confirm-bar streaks that
+         //--- triggered it can reset before the retry ever runs).
+         g_pendingCloseTicket  = tk;
+         g_pendingCloseReason  = reason;
+         g_pendingCloseLastTry = TimeCurrent();
+        }
      }
+  }
+//+------------------------------------------------------------------+
+//| v1.60: a failed ClosePosition() (requote/market-closed/etc.) used to |
+//| just sit there until the next new bar before being retried, because |
+//| ClosePosition() itself is only ever called from the once-per-bar     |
+//| section of OnTick(). On a bar as long as M15 that's up to 15 real     |
+//| minutes of the exit intent going unfulfilled - and the VWAP/Price21   |
+//| confirm-bar streaks (g_vwapBad/g_price21Bad) that triggered the exit    |
+//| in the first place are themselves re-evaluated and can reset to 0 on    |
+//| that very next bar if price has moved back in the trade's favor by      |
+//| then, silently losing the exit signal that was supposed to fire. Called  |
+//| every tick (see OnTick()), same idiom as the existing InpUseGivebackExit  |
+//| tick-level check just above it, so a failed close is retried roughly      |
+//| once a second instead of once every 15 minutes - not a full reversal-      |
+//| retry redesign like Vanguard_EA.mq5's RetryReversalClose() (there is no     |
+//| reversal entry to re-arm here), just the minimum needed to stop losing       |
+//| the exit itself.                                                              |
+//+------------------------------------------------------------------+
+void RetryPendingClose()
+  {
+   if(g_pendingCloseTicket == 0) return;
+   bool stillOpen = false;
+   double px = 0.0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!pos.SelectByIndex(i)) continue;
+      if(pos.Ticket() != g_pendingCloseTicket) continue;
+      stillOpen = true;
+      px = pos.PriceCurrent();
+      break;
+     }
+   if(!stillOpen)
+     {
+      //--- gone already - OnTradeTransaction() (SL/manual/SO) or an earlier
+      //--- retry send that actually landed got there first; either way
+      //--- there is nothing left for this retry to do.
+      g_pendingCloseTicket = 0;
+      g_pendingCloseReason = "";
+      return;
+     }
+   datetime now = TimeCurrent();
+   if((long)now - (long)g_pendingCloseLastTry < 1) return;   // throttle: at most once a second
+   g_pendingCloseLastTry = now;
+   if(trade.PositionClose(g_pendingCloseTicket))
+     {
+      if(InpVerbose) Print("Closed (retry): ", g_pendingCloseReason);
+      LogClosed(g_pendingCloseReason, px);
+      g_lastClose = TimeCurrent();
+      g_barsSinceClose = 0;
+      g_ticket = 0;
+      g_pendingCloseTicket = 0;
+      g_pendingCloseReason = "";
+     }
+   else
+      Print("Close retry failed: ", trade.ResultRetcodeDescription());
   }
 //+------------------------------------------------------------------+
 //--- default argument lives on the forward declaration only (line 603) -
@@ -3421,6 +3626,35 @@ void OnTick()
    //--- state or InpMaxDailyLossPct - the panel's "today" P&L needs this
    UpdateDayStamp();
 
+   //--- v1.60: retry a close ClosePosition() failed to send, every tick
+   //--- instead of waiting for the next bar - see RetryPendingClose()'s
+   //--- own header.
+   RetryPendingClose();
+
+   //--- v1.60 (2026-10-04 fresh audit): backstop for a possible
+   //--- OnTradeTransaction event-ordering race (unconfirmed by the audit,
+   //--- cheap to guard anyway) - if price gaps through the stop on the
+   //--- first tick after a gap (daily break/weekend), OnTick() could in
+   //--- principle run before OnTradeTransaction() has processed the
+   //--- closing deal, seeing the account already flat while g_ticket and
+   //--- g_barsSinceClose still reflect the stale in-position state. g_ticket
+   //--- nonzero with no matching position actually open can ONLY mean an
+   //--- unrecorded close happened - whatever the cause, treat it exactly
+   //--- like OnTradeTransaction's own close handler does: log it, reset the
+   //--- cooldown, clear the ticket. If OnTradeTransaction's own (now
+   //--- broadened) handler for the same real-world close arrives afterward
+   //--- anyway, g_ticket is already 0 so this block just doesn't fire again -
+   //--- the only cost of that ordering is a second CSV row for the one
+   //--- close, never a missed or doubled cooldown reset.
+   if(g_ticket != 0 && !HasOwnPosition())
+     {
+      PrintFormat("Aurelius EA: flat but g_ticket still set (#%I64u) - unrecorded close detected, resetting cooldown.", g_ticket);
+      LogClosed("UNTRACKED", SymbolInfoDouble(_Symbol, SYMBOL_BID));
+      g_lastClose = TimeCurrent();
+      g_barsSinceClose = 0;
+      g_ticket = 0;
+     }
+
    //--- tick-level weekend-flatten backstop, evaluated BEFORE the new-bar
    //--- gate below - a holiday can leave zero ticks/bars near the normal
    //--- Friday cutoff hour, so the bar-gated FridayCutoff(false) check
@@ -3505,6 +3739,20 @@ void OnTick()
      }
    UpdateATRManual();   // once per new bar - see its own header note
    if(g_barsSinceClose < 100000) g_barsSinceClose++;
+   //--- v1.60: one-shot post-restart cooldown resync - see g_cooldownResync's
+   //--- own declaration comment and OnInit's restore block. Overrides the
+   //--- ++ just above: this pass may be the SAME still-forming bar that was
+   //--- already forming before the restart (g_lastBar starts at 0, so the
+   //--- very first OnTick() always takes this "new bar" branch even when it
+   //--- isn't one), in which case the ++ just now double-counted a bar that
+   //--- hasn't actually elapsed yet. Recomputing directly from the restored
+   //--- close time is correct whether or not that happened.
+   if(g_cooldownResync)
+     {
+      g_cooldownResync = false;
+      int barsAgo = iBarShift(_Symbol, PERIOD_CURRENT, g_cooldownRestoreTime);
+      if(barsAgo >= 0) g_barsSinceClose = barsAgo;
+     }
    if(PositionsTotal() > 0) g_entryBarCount++;   // once per bar, not per leg
 
    bool haveLong = false, haveShort = false;
@@ -3599,9 +3847,16 @@ void OnTick()
            {
             double addLots = (InpAddLots > 0.0) ? InpAddLots : g_entryLots;
             double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+            double mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
             double st = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
             if(st > 0.0) addLots = MathFloor(addLots / st + 1e-8) * st;   // 2026-10-04: same epsilon fix as LotSize() above
-            addLots = MathMax(mn, addLots);
+            //--- 2026-10-04 fresh audit: this clamped to the broker's MINIMUM
+            //--- but never to InpMaxLots or the broker's own SYMBOL_VOLUME_MAX -
+            //--- an InpAddLots fat-finger (or a large g_entryLots used as the
+            //--- add size when InpAddLots<=0) could add a leg bigger than this
+            //--- EA's own documented "Hard cap on size" allows, or bigger than
+            //--- the broker permits at all. Same clamp LotSize() already uses.
+            addLots = MathMax(mn, MathMin(MathMin(mx, InpMaxLots), addLots));
             bool okAdd = haveLong
                ? trade.Buy(addLots, _Symbol, 0.0, 0.0, 0.0, InpComment + "-add")
                : trade.Sell(addLots, _Symbol, 0.0, 0.0, 0.0, InpComment + "-add");
