@@ -289,7 +289,40 @@
 //|  of real history through the exact live swing/line/trigger rules on the    |
 //|  first new bar after attach.                                                |
 //+------------------------------------------------------------------+
-#property version   "1.12"
+//+------------------------------------------------------------------+
+//|  v1.13: three more live-vs-simulator bugs from the 2026-10-04 audit     |
+//|  fixed (independent of, but same audit pass as, v1.11's three fixes).    |
+//|  (1) A connection-loss GAP (ticks resume WITHOUT a restart after the      |
+//|  VPS drops for, say, 45 minutes and several M15 bars close at once) was    |
+//|  never detected: only the fixed shift InpFractalK+1 was ever tested for    |
+//|  a swing centre, and only "bar 1" was ever summed into VWAP, both read      |
+//|  relative to bar 0 at the moment OnTick() ran - any swing point or VWAP     |
+//|  contribution inside a multi-bar gap was silently lost for good once bar    |
+//|  0 moved past it. WarmUpSwingState()/SeedVWAP() already rebuild from        |
+//|  scratch on an actual restart, but a gap without a restart hit neither.      |
+//|  Now OnTick() compares the previously-processed bar's shift against the      |
+//|  new current bar (iBarShift(...,prevBarTime)); more than 1 means bars         |
+//|  were skipped, and it sets g_swingWarm=false (forcing WarmUpSwingState()'s     |
+//|  full replay) and calls SeedVWAP() directly, same rebuild path a restart        |
+//|  already takes. (2) OnTick()'s ManageOpenPosition()-vs-CheckForEntry()           |
+//|  routing trusted the cached g_ticket from the PREVIOUS bar: if an entry           |
+//|  send returned TIMEOUT but actually filled, g_ticket wrongly stayed 0,            |
+//|  so the next bar's routing called CheckForEntry() instead of                       |
+//|  ManageOpenPosition() - which resyncs, sees it's not flat, and returns              |
+//|  without acting - silently eating that bar's breakout. Now SyncPositionState()       |
+//|  is called explicitly right before the routing decision, not just inside              |
+//|  the two functions it chooses between. (3) A pending RetryReversalClose()              |
+//|  (v1.11) kept retrying for up to InpReversalRetryMinutes even after the                 |
+//|  market reversed back in the open position's favour - e.g. a long open,                 |
+//|  a sell breakout's close failing and retrying, then a buy breakout two                   |
+//|  bars later that agrees with the still-open long. If the stale close ever                 |
+//|  did succeed it would flatten the account with no new entry following (the                |
+//|  agreeing breakout's own edge-triggered window has already passed). Now any                |
+//|  new breakout that agrees with the currently-held position (breakoutDir ==                  |
+//|  g_posDir) and matches the pending retry's own ticket cancels it via the                     |
+//|  existing ClearReversalRetry().                                                                |
+//+------------------------------------------------------------------+
+#property version   "1.13"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1973,16 +2006,60 @@ void OnTick()
          CloseCurrentPosition("GIVEBACK");
      }
 
+   datetime prevBarTime = g_lastBarTime;
    if(!IsNewBar()) return;
+
+   //--- v1.13 (Bug 1 of the 2026-10-04 audit): detect a connection-loss GAP
+   //--- (ticks resume WITHOUT a restart after several M15 bars closed at
+   //--- once) - prevBarTime is the bar-0 open time as of the LAST new-bar
+   //--- event; if it now sits more than 1 bar back, bars were skipped.
+   //--- Without this, any swing centre or VWAP contribution inside the gap
+   //--- is lost for good (both are only ever read relative to the CURRENT
+   //--- bar 0). Force the same full-rebuild-from-history path a restart
+   //--- already takes, rather than silently missing the skipped bars.
+   if(prevBarTime != 0)
+     {
+      int gapBars = iBarShift(_Symbol, PERIOD_M15, prevBarTime, false);
+      if(gapBars > 1)
+        {
+         PrintFormat("Vanguard M15 EA: %d bars closed since the last bar processed (%s) - gap detected "
+                     "(connection loss?), rebuilding swing state and VWAP from history",
+                     gapBars, TimeToString(prevBarTime, TIME_DATE | TIME_SECONDS));
+         g_swingWarm = false;
+         SeedVWAP();
+        }
+     }
 
    double vwapPrev = g_vwapValue;
    UpdateVWAP();
    //--- v1.12: replays bars 2..N first (once per attach, retried each new
    //--- bar until history is available), so bar 1 below is processed
-   //--- against the same swing state a never-restarted EA would hold.
+   //--- against the same swing state a never-restarted EA would hold. A
+   //--- gap (above) forces this to run again too, for the same reason.
    if(!g_swingWarm) g_swingWarm = WarmUpSwingState();
    int breakoutDir = UpdateSwingsAndCheckBreakout();
    g_barLastBreakoutDir = breakoutDir;
+
+   //--- v1.13 (Bug 2): resync before the routing decision below - g_ticket
+   //--- can be wrongly 0 while a real position exists (e.g. an entry send
+   //--- that returned TIMEOUT but actually filled), which would otherwise
+   //--- skip ManageOpenPosition() below and let CheckForEntry() silently
+   //--- consume this bar's breakout signal instead. ManageOpenPosition()/
+   //--- CheckForEntry() each resync again internally too, but that's too
+   //--- late to fix which of the two this decision picks.
+   SyncPositionState();
+
+   //--- v1.13 (Bug 3): a pending reversal-close retry (RetryReversalClose())
+   //--- is owed only because an EARLIER breakout disagreed with the still-
+   //--- open position. If this bar's breakout now AGREES with the position
+   //--- actually held (g_posDir, just resynced above) for that same owed
+   //--- ticket, the original disagreement is gone - cancel the retry rather
+   //--- than keep fighting to close a position the current signal wants
+   //--- kept open (a late success would flatten the account with no new
+   //--- entry following, since the agreeing breakout's own edge-triggered
+   //--- window has already passed).
+   if(g_revTicket != 0 && g_revTicket == g_ticket && breakoutDir != 0 && breakoutDir == g_posDir)
+      ClearReversalRetry();
 
    // NOT else-if: a reversal breakout must close the old position AND
    // open the new opposite one on the SAME bar (matches the Python
