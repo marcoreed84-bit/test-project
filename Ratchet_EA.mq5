@@ -816,8 +816,24 @@
 //|  from the same 2026-09-06 review is unchanged - reviewed again today,      |
 //|  still the right call, not a bug.                                          |
 //+------------------------------------------------------------------+
+//|  v3.33: a SECOND, fresh/unprimed audit (same day) found the v3.32 fix   |
+//|  above had its own bug - g_lastBar was never seeded in OnInit, so the    |
+//|  first tick after a restart always took the new-bar branch and ran      |
+//|  g_entryBarCount++ on top of the just-restored value, overcounting by    |
+//|  exactly 1 bar and closing MAXBARS trades one bar early. Fixed by        |
+//|  seeding g_lastBar to the current bar's open time in OnInit. Also        |
+//|  fixed in the same pass: InpMaxBars=0 closed every trade on its first    |
+//|  bar despite its own "0 = off" comment (now gated on InpMaxBars>0,       |
+//|  same input-semantics bug class as Aurelius's confirm-bar inputs found   |
+//|  today); TailLossHit() was missing the g_entryPrice<=0 phantom-fill      |
+//|  guard that TrailStop() already had; LotSize()'s MathFloor(lots/st)*st   |
+//|  silently dropped a whole lot step at specific sizes (0.29, 0.47,        |
+//|  0.57-0.59, 0.94 at step 0.01) from IEEE double rounding - fixed with a  |
+//|  small epsilon before the floor, same fix needed in Aurelius_EA.mq5/     |
+//|  Aurelius_M15_EA.mq5's identical LotSize() pattern (separate commit).    |
+//+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
-#property version   "3.32"
+#property version   "3.33"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -1166,6 +1182,17 @@ int OnInit()
          break;
         }
      }
+
+   //--- 2026-10-04 fresh-audit fix: g_lastBar was left at its 0 initializer
+   //--- here, so OnTick()'s `if(bt == g_lastBar) return;` new-bar gate
+   //--- always sees a "new" bar on the very first tick after a restart and
+   //--- runs `g_entryBarCount++` on top of the value just restored above -
+   //--- overcounting the restored trade's age by exactly 1 bar and closing
+   //--- MAXBARS-limited trades one bar early. Seeding g_lastBar to the
+   //--- current bar's open time here makes that first post-restart tick
+   //--- behave as a same-bar tick, same as every other tick within that bar
+   //--- would have if the EA had never restarted.
+   g_lastBar = iTime(_Symbol, PERIOD_CURRENT, 0);
 
    if(Period() != PERIOD_M5)
       Print("WARNING: tested on M5. Current timeframe is ",
@@ -2068,7 +2095,14 @@ double LotSize(const double stopDistance)
    double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double st = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   if(st > 0.0) lots = MathFloor(lots / st) * st;
+   //--- 2026-10-04 fresh-audit fix: a bare MathFloor(lots/st)*st drops a
+   //--- whole step at specific sizes (0.29, 0.47, 0.57/0.58/0.59, 0.94 at
+   //--- step 0.01) because the division lands just under the intended
+   //--- integer step count in IEEE double arithmetic (e.g. 0.29/0.01 =
+   //--- 28.999999999999996, not 29.0). A small epsilon before the floor
+   //--- fixes this without changing any size that wasn't already exactly
+   //--- on a step boundary.
+   if(st > 0.0) lots = MathFloor(lots / st + 1e-8) * st;
    lots = MathMax(mn, MathMin(MathMin(mx, InpMaxLots), lots));
    return(NormalizeDouble(lots, 2));
   }
@@ -2178,7 +2212,14 @@ void ClosePosition(const string reason)
 //+------------------------------------------------------------------+
 bool TailLossHit()
   {
-   if(InpMaxLossATR <= 0.0 || g_entryATR <= 0.0) return(false);
+   //--- 2026-10-04 fresh-audit fix: TrailStop() guards against the
+   //--- degenerate g_entryPrice<=0.0 case (a phantom-fill artifact where
+   //--- trade.Buy/Sell reports success but the position object reads back
+   //--- a 0 open price) but this function didn't, so the "adverse" move
+   //--- below would be computed against a price of 0 and look like a
+   //--- massive loss, closing the position on a bad read rather than a
+   //--- real one.
+   if(InpMaxLossATR <= 0.0 || g_entryATR <= 0.0 || g_entryPrice <= 0.0) return(false);
    // 2026-09-06 (Opus deep-dive review): this used to `return` inside the
    // loop on the first matching position regardless of the adverse-move
    // check's result, so any position after it (if the one-at-a-time
@@ -2603,7 +2644,12 @@ void OnTick()
          if((haveLong && sv >= hi) || (haveShort && sv <= lo))
            { ClosePosition("STOCH"); return; }
         }
-      if(g_entryBarCount >= InpMaxBars) { ClosePosition("MAXBARS"); return; }
+      //--- 2026-10-04 fresh-audit fix: the input's own comment says
+      //--- "0 = off" but the bare >= check made InpMaxBars=0 close the
+      //--- trade on literally its first managed bar instead - the opposite
+      //--- of off. Same input-semantics bug class found in Aurelius's
+      //--- InpVwapConfirmBars/InpPrice21ConfirmBars today.
+      if(InpMaxBars > 0 && g_entryBarCount >= InpMaxBars) { ClosePosition("MAXBARS"); return; }
       return;                                  // one position at a time
      }
 
