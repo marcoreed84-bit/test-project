@@ -210,8 +210,31 @@
 //|  real test. REJECTED. Stays false. See Aurelius_EA.mq5 v1.52's header,                  |
 //|  research/aurelius/vanguard_giveback_event_driven_test.py.                               |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.07: InpUseH4TrendFilter - the first entry-side fix for this EA   |
+//|  that actually passed. Require the last CLOSED H4 bar's close to    |
+//|  agree with the trade direction vs its own 50-period EMA, added on   |
+//|  top of the existing trendline+VWAP+S/R logic. Python-validated      |
+//|  (research/aurelius/vanguard_m5_h4_trend_filter_oos_test.py, K=1):    |
+//|  on genuinely untouched 2014-06-13->2022-07-01 GOLD M5 data, baseline|
+//|  Vanguard (no H4 filter) sits at 87.8th percentile vs random timing  |
+//|  (p=0.12, not distinguishable from luck - the standing verdict). +H4 |
+//|  filter: 100.0th percentile, p=0.0000 (0/600 random draws matched    |
+//|  it), n=1662->805, %PF 1.019->1.560. That result survived fixing a   |
+//|  real lookahead bug found in the TEST ITSELF (an M5 bar landing      |
+//|  exactly on an H4 bar's open matched that still-forming bar instead  |
+//|  of the prior completed one - affected 2.24% of events, barely moved |
+//|  the result once fixed). Also checked on Vanguard's own 2026 tuning  |
+//|  window (vanguard_m5_h4_filter_2026_check.py) so this isn't a fix     |
+//|  that only works on old data: %PF 1.751->2.167, n=158->72. Roughly   |
+//|  halves trade frequency both ends - fewer, better signals, not more. |
+//|  NOT YET real-MT5-validated - this is the first time this filter has |
+//|  run anywhere outside the Python simulator. Per CLAUDE.md, a real    |
+//|  MT5 backtest of this build must be bar-matched against the Python   |
+//|  result above before this is trusted the way Aurelius M5/H&S are.    |
+//+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.06"
+#property version   "1.07"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -221,6 +244,30 @@ input group "=== Signal: diagonal trendline breakout ==="
 input int    InpFractalK          = 100;     // bars on each side to confirm a swing point
 input int    InpSRDays            = 3;       // trailing completed D1 bars checked for the nearest level
 input double InpMinSRDistATR      = 0.50;    // reject entries this close (xATR) to that level
+
+input group "=== Entry filter: H4 trend alignment (v1.07) ==="
+input bool   InpUseH4TrendFilter  = true;    // Require the LAST CLOSED H4 bar's close to be on the
+                                              // same side of its own InpH4EMAPeriod EMA as the trade
+                                              // direction (buy needs H4 close > H4 EMA, sell the
+                                              // mirror) - Python-validated (research/aurelius/
+                                              // vanguard_m5_h4_trend_filter_oos_test.py, K=1, one
+                                              // pre-specified filter): on genuinely untouched
+                                              // 2014-06-13->2022-07-01 GOLD M5 data this turns
+                                              // Vanguard's entry from indistinguishable-from-random
+                                              // (87.8th pctile, p=0.12) into a real edge (100.0th
+                                              // pctile, p=0.0000, survived fixing a lookahead bug in
+                                              // the test itself - re-run gave n=810->805, %PF
+                                              // 1.582->1.560, same conclusion). Also checked on
+                                              // Vanguard's own 2026 tuning window, not just old data:
+                                              // %PF 1.751->2.167 (n=158->72) - a real improvement
+                                              // both ends, not a fix that only "works" on history.
+                                              // Roughly halves trade frequency - fewer, better
+                                              // signals. NOT YET bar-matched against a real MT5 log
+                                              // (brand new, never run live) - this backtest is step
+                                              // one of validating it for real money, not the final
+                                              // word; CLAUDE.md's bar-match rule still applies before
+                                              // trusting it.
+input int    InpH4EMAPeriod       = 50;      // EMA period on H4 - fixed, not swept (K=1 discipline)
 
 input group "=== Exit ==="
 input double InpSafetyStopATR     = 4.0;     // validated best cell - see header
@@ -355,6 +402,11 @@ double   g_vwapValue  = 0.0;
 
 //--- manual Wilder ATR (see header - NOT iATR)
 double   g_atrBuf[];
+
+//--- H4 trend-alignment filter (v1.07) - one indicator handle, created in
+//--- OnInit(), released in OnDeinit(), same lifecycle as this project's
+//--- other EAs' iMA() handles (see Aurelius_EA.mq5).
+int      g_h4EmaHandle = INVALID_HANDLE;
 
 //--- diagonal trendline state: last TWO confirmed swing highs (for the
 //--- descending/lower-highs line) and last TWO confirmed swing lows
@@ -562,6 +614,39 @@ double SRDistance(bool isBuy, double atrVal)
    if(!GetSRLevels(hi, lo)) return(-1.0);
    double close1 = iClose(_Symbol, PERIOD_M5, 1);
    return isBuy ? MathAbs(hi - close1) / atrVal : MathAbs(close1 - lo) / atrVal;
+  }
+//+------------------------------------------------------------------+
+//| CopyBuffer helper for g_h4EmaHandle - shift 1 = the last CLOSED    |
+//| H4 bar, matching this project's MA() convention (Aurelius_EA.mq5). |
+//+------------------------------------------------------------------+
+bool H4EMA(const int shift, double &out)
+  {
+   double b[];
+   ArraySetAsSeries(b, true);
+   if(CopyBuffer(g_h4EmaHandle, 0, shift, 1, b) < 1) return(false);
+   out = b[0];
+   return(true);
+  }
+//+------------------------------------------------------------------+
+//| True only when the LAST CLOSED H4 bar's close sits on the isBuy    |
+//| side of its own InpH4EMAPeriod EMA - see InpUseH4TrendFilter's      |
+//| header for what this buys (Python-validated, K=1). Both iClose()   |
+//| and the EMA handle use shift 1, so this always reads the most       |
+//| recent FULLY FORMED H4 bar, never the one still building - MT5's    |
+//| own HTF-alignment handles that for free, so (unlike the Python      |
+//| research reproduction, which had to align M5->H4 by hand and had    |
+//| a real off-by-one bug there) there's no equivalent lookahead risk    |
+//| here. False (blocks entry) if H4 history isn't ready yet - same      |
+//| fail-closed convention as GetATR()/GetSRLevels() above.              |
+//+------------------------------------------------------------------+
+bool H4TrendAgrees(bool isBuy)
+  {
+   double ema;
+   if(!H4EMA(1, ema)) return(false);
+   double h4Close = iClose(_Symbol, PERIOD_H4, 1);
+   if(h4Close <= 0.0) return(false);
+   bool h4Up = h4Close > ema;
+   return isBuy ? h4Up : !h4Up;
   }
 //+------------------------------------------------------------------+
 //| Reads Aurelius_EA.mq5's real, broadcast position direction (v1.03 |
@@ -1124,12 +1209,13 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
    //--- discipline as Aurelius's own derivation (it found a real off-by-
    //--- one doing this by guesswork instead): every PSection/PRow call
    //--- advances ty by rh (ROWS) and every section boundary adds a
-   //--- further +6 (GAPS). In-position: a0 + s1+g1-g3 + s2+c1-c5 (v1.03
-   //--- added c5, Aurelius position) + s3+d1-d4 + s4+p1-p4 + s5+q1-q4 =
-   //--- 26 rh-rows, 10 gap-boundaries. Flat: identical through s4, but
-   //--- p4 there only advances +6 (no rh) - one row shorter (25), same
-   //--- 10 gap-boundaries (p4's +6 and s5's own gap both still happen).
-   const int ROWS = (haveLong || haveShort) ? 26 : 25, GAPS = 10;
+   //--- further +6 (GAPS). In-position: a0 + s1+g1-g3 + s2+c1-c6 (v1.03
+   //--- added c5, Aurelius position; v1.07 added c6, H4 trend) + s3+d1-d4
+   //--- + s4+p1-p4 + s5+q1-q4 = 27 rh-rows, 10 gap-boundaries. Flat:
+   //--- identical through s4, but p4 there only advances +6 (no rh) - one
+   //--- row shorter (26), same 10 gap-boundaries (p4's +6 and s5's own gap
+   //--- both still happen).
+   const int ROWS = (haveLong || haveShort) ? 27 : 26, GAPS = 10;
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    int bodyH  = hdr + 10 + ROWS * rh + GAPS * 6 + 12;
    int guard = 0;
@@ -1219,7 +1305,18 @@ void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim)
       aurState = (g_barLastBreakoutDir != 0 && g_lastAurDir != g_barLastBreakoutDir) ? 0 : 1;
    PRow("c5", x, ty, w, "Aurelius position",
         !InpUseAureliusFilter ? "filter off" : (g_lastAurDir > 0 ? "LONG" : g_lastAurDir < 0 ? "SHORT" : "flat/absent"),
-        aurState); ty += rh + 6;
+        aurState); ty += rh;
+   //--- same "neutral unless a breakout actually fired this bar"
+   //--- convention as srState above - shows the raw H4 state always, but
+   //--- only colours it against whichever side this bar's breakout is on.
+   double h4EmaVal; bool haveH4 = InpUseH4TrendFilter && H4EMA(1, h4EmaVal);
+   double h4Close1 = haveH4 ? iClose(_Symbol, PERIOD_H4, 1) : 0.0;
+   int h4State = -1;
+   if(InpUseH4TrendFilter && haveH4 && g_barLastBreakoutDir != 0)
+      h4State = H4TrendAgrees(g_barLastBreakoutDir > 0) ? 1 : 0;
+   PRow("c6", x, ty, w, "H4 trend (vs EMA" + (string)InpH4EMAPeriod + ")",
+        !InpUseH4TrendFilter ? "filter off" : (haveH4 ? (h4Close1 > h4EmaVal ? "up" : "down") : "-"),
+        h4State); ty += rh + 6;
 
    //--- strategy ------------------------------------------------------
    PSection("s3", x, ty, w, rh, "STRATEGY"); ty += rh + 6;
@@ -1469,6 +1566,8 @@ void CheckForEntry(int breakoutDir)
    double sr = SRDistance(isBuy, atr);
    if(sr >= 0.0 && sr < InpMinSRDistATR) return;
 
+   if(InpUseH4TrendFilter && !H4TrendAgrees(isBuy)) return;
+
    if(AureliusBlocksEntry(breakoutDir)) return;
 
    double px = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -1512,6 +1611,13 @@ int OnInit()
    //--- see its header note.
    g_aurGVarName = "AURELIUS_POSDIR_M5_" + _Symbol;
 
+   g_h4EmaHandle = iMA(_Symbol, PERIOD_H4, InpH4EMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_h4EmaHandle == INVALID_HANDLE)
+     {
+      Print("Vanguard EA: failed to create H4 EMA handle. Error ", GetLastError());
+      return(INIT_FAILED);
+     }
+
    SeedVWAP();
    SyncPositionState();
    g_lastBarTime = 0;
@@ -1551,6 +1657,8 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_pm);
    ObjectsDeleteAll(0, g_pl);
    ChartRedraw(0);
+
+   if(g_h4EmaHandle != INVALID_HANDLE) IndicatorRelease(g_h4EmaHandle);
   }
 //+------------------------------------------------------------------+
 void OnTick()
