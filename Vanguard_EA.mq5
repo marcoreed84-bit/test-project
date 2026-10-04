@@ -273,8 +273,70 @@
 //|  live (and a backtest's first days) closer to the simulators, not     |
 //|  further. Not yet re-run through MT5 Strategy Tester.                 |
 //+------------------------------------------------------------------+
+//|  v1.11 (2026-10-04 audit, fresh/unprimed): three more live-vs-        |
+//|  simulator gaps fixed, one judged acceptable as documented behavior.  |
+//|  (1) g_entryATR lives only in memory and v1.10's stale-exit guard     |
+//|  (`g_entryATR > 0.0`) was meant only as a divide-by-zero/bad-data     |
+//|  safeguard, but because nothing ever recomputed g_entryATR after a    |
+//|  restart it stayed 0.0 for a restored position's ENTIRE remaining    |
+//|  life, silently and permanently disabling the stale exit for that    |
+//|  trade (with the default InpStaleMinProfitATR=0.0 the ATR value      |
+//|  doesn't even change the stale decision - only whether the division  |
+//|  happens at all). OnInit() now calls RecomputeEntryATR() when a      |
+//|  position is already open at attach, using the new ATRAtShift() to   |
+//|  read the Wilder ATR as it stood at the entry bar - same general     |
+//|  pattern as Aurelius_EA.mq5's own v1.54 ATRAtShift() restart fix,     |
+//|  adapted to this file's own ComputeWilderATR() signature (kept       |
+//|  separate from g_atrBuf, which the live per-tick GetATR() owns). If  |
+//|  history isn't fully synced yet at the moment of attach, the same    |
+//|  recompute is retried on every new bar (g_entryATRRestorePending)    |
+//|  until it succeeds - the same retry-until-ready shape                |
+//|  WarmUpSwingState() already uses below for g_swingWarm.              |
+//|  (2) Swing/trendline state could go stale for days if ticks simply   |
+//|  stopped arriving for more than one bar WITHOUT a restart (a VPS     |
+//|  network blip or broker feed drop) - UpdateSwingsAndCheckBreakout()  |
+//|  only ever evaluates the single newly-closed bar, so any swing point |
+//|  that would have formed during the skipped bars was lost for good    |
+//|  until two fresh swings confirmed natively (InpFractalK bars each,   |
+//|  often days). IsNewBar() now detects a >1-bar gap since the last bar |
+//|  this EA actually processed (iBarShift of the previous               |
+//|  g_lastBarTime) and sets g_swingWarm=false, so OnTick's EXISTING     |
+//|  WarmUpSwingState() call rebuilds the whole swing/trendline state     |
+//|  from history on the very next bar - the identical mechanism v1.10   |
+//|  already uses for a restart, just triggered by a gap instead of an   |
+//|  attach. Matches this project's established disconnect-catch-up      |
+//|  template (UpdateVWAP()'s own v1.10 "sum every closed same-day bar   |
+//|  newer than g_vwapLastBar, not just bar 1" loop above).              |
+//|  (3) CONSIDERED, LEFT AS DOCUMENTED BEHAVIOR: the first tick after a |
+//|  restart (WarmUpSwingState() + the live bar-1 evaluation right after |
+//|  it) re-evaluates the just-closed bar's breakout, which a previous   |
+//|  instance may already have acted on (blocked by the spread check,   |
+//|  or closed by hand) seconds earlier - a restart within the same     |
+//|  5-minute bar can enter that breakout late, partway through the     |
+//|  bar. A clean fix needs genuinely new persistent state (e.g.         |
+//|  recording which exact breakout bar/price was already acted on,     |
+//|  surviving a restart in STORAGE, not just RAM) with real complexity |
+//|  and its own new failure modes, for what the 2026-10-04 audit       |
+//|  called a minor edge case on the M15 sibling - judged not worth a   |
+//|  rushed, possibly-half-correct fix here. Left exactly as-is;        |
+//|  flagged so it is never mistaken for an oversight.                  |
+//|  (4) The S/R filter's comment claimed missing daily S/R data BLOCKS |
+//|  entry (fail-closed), but the code (SRDistance() returning -1.0,    |
+//|  which fails the `sr >= 0.0` test in CheckForEntry()) has always    |
+//|  let the entry through WITHOUT the S/R check in that case - fail-   |
+//|  OPEN. Checked against Meridian_EA.mq5, which this file's           |
+//|  SRDistance()/GetSRLevels() is reused verbatim from: Meridian's own |
+//|  comment ("not enough D1 history yet - SRDistance fails open here") |
+//|  documents this exact behavior as the project's established,       |
+//|  already-validated convention for this filter - every real/Python- |
+//|  validated number in this file's own header was produced running   |
+//|  this fail-open code, unchanged. CODE IS THEREFORE UNCHANGED; the   |
+//|  comment was wrong and is now fixed to say so honestly, instead of  |
+//|  changing live trading behavior to match a comment that was never   |
+//|  actually how this filter ran.                                     |
+//+------------------------------------------------------------------+
 #property copyright "Vanguard_EA"
-#property version   "1.10"
+#property version   "1.11"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -508,7 +570,13 @@ string   g_aurGVarName = "";
 int      g_lastAurDir = 0;   // cosmetic only - the panel's "Aurelius position" row, refreshed every new bar
 double   g_entryATR = 0.0;   // ATR at entry, remembered for the stale-exit profit threshold (v1.04) - matches
                               // the Python validation's exact semantics (profit measured in ENTRY-bar ATR
-                              // units, not current ATR, same convention as the safety stop's own distance)
+                              // units, not current ATR, same convention as the safety stop's own distance).
+                              // v1.11: this lives only in memory, so OnInit() recomputes it via
+                              // RecomputeEntryATR()/ATRAtShift() whenever a position is ALREADY open at
+                              // attach (restart/recompile/input change) - see header bug (1).
+bool     g_entryATRRestorePending = false;   // v1.11: true after OnInit found an open position but history
+                              // wasn't ready to recompute g_entryATR yet - retried each new bar until it
+                              // succeeds (same retry-until-ready shape as g_swingWarm below).
 
 //--- forward declarations: OnInit draws the panel before DrawPanel is defined
 void DrawPanel(const bool haveLong, const bool haveShort, const bool reclaim = true);
@@ -519,12 +587,37 @@ void UpdateSignalLines();
 void UpdateVWAPLine();
 void UpdateLevelLines();
 void CheckForEntry(int breakoutDir);   // v1.10: called from RetryReversalClose(), defined below it
+void RecomputeEntryATR();              // v1.11: called from OnInit()/OnTick(), defined after ATRAtShift()
 
 //+------------------------------------------------------------------+
 bool IsNewBar()
   {
    datetime t = iTime(_Symbol, PERIOD_M5, 0);
    if(t == g_lastBarTime) return(false);
+   //--- v1.11: detect a gap of more than one bar since the last bar this EA
+   //--- actually processed (e.g. ticks stopped for a while - VPS network
+   //--- blip, broker feed drop - WITHOUT a restart; see header bug (2)).
+   //--- UpdateSwingsAndCheckBreakout() only ever evaluates the single
+   //--- newly-closed bar, so any swing point that would have formed during
+   //--- the skipped bars is otherwise lost for good. g_swingWarm=false
+   //--- makes the existing WarmUpSwingState() call in OnTick rebuild the
+   //--- whole swing/trendline state from history on this same new bar -
+   //--- the identical mechanism v1.10 already uses after a restart/attach,
+   //--- just triggered here by a gap instead. g_lastBarTime==0 is the
+   //--- genuine first-ever call (right after OnInit already set
+   //--- g_swingWarm=false for the normal attach case) - skip the check
+   //--- then, there is nothing to have "skipped" yet.
+   if(g_lastBarTime != 0)
+     {
+      int skipped = iBarShift(_Symbol, PERIOD_M5, g_lastBarTime, false);
+      if(skipped > 1)
+        {
+         PrintFormat("Vanguard EA: detected a %d-bar gap since the last bar this EA processed "
+                     "(ticks stopped without a restart) - rebuilding swing/trendline state from history",
+                     skipped);
+         g_swingWarm = false;
+        }
+     }
    g_lastBarTime = t;
    return(true);
   }
@@ -591,6 +684,82 @@ bool GetATR(double &value)
    ComputeWilderATR(g_atrBuf, InpATRPeriod);
    value = g_atrBuf[0];
    return(value > 0.0);
+  }
+//+------------------------------------------------------------------+
+//| v1.11 - Wilder ATR as of an arbitrary historical shift, NOT just    |
+//| the live shift-1 that ComputeWilderATR()/GetATR() above always      |
+//| read. Same construction as ComputeWilderATR(), parameterized by      |
+//| the CopyRates starting shift instead of a hardcoded 1, so `out[0]`    |
+//| here is the ATR as it stood with THAT shift playing the role of       |
+//| "shift 1" (i.e. the last closed bar at that point in time). Returns    |
+//| straight to a double rather than touching g_atrBuf, which the live     |
+//| per-tick GetATR() owns - this is only ever used to reconstruct a        |
+//| historical value (see RecomputeEntryATR() below), never the live one.   |
+//| Used for the same restart-ATR-recovery purpose as Aurelius_EA.mq5's      |
+//| own v1.54 ATRAtShift(), adapted to this file's own ComputeWilderATR()     |
+//| signature (this file computes true range/seed inline rather than off      |
+//| a caller-supplied rates array, so the body is reproduced here rather        |
+//| than shared).                                                                |
+//+------------------------------------------------------------------+
+double ATRAtShift(const int shift, const int period)
+  {
+   if(shift < 0) return(0.0);
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   int got = CopyRates(_Symbol, PERIOD_M5, shift, MathMax(period * 3, 200), r);
+   if(got < period + 2) return(0.0);
+   double tr[];
+   ArrayResize(tr, got);
+   for(int i = 0; i < got - 1; i++)
+     {
+      double hi = r[i].high, lo = r[i].low, pc = r[i + 1].close;
+      tr[i] = MathMax(hi - lo, MathMax(MathAbs(hi - pc), MathAbs(lo - pc)));
+     }
+   int lastIdx = got - period - 1;
+   if(lastIdx < 0) return(0.0);
+   double seed = 0.0;
+   for(int k = lastIdx; k < lastIdx + period; k++) seed += tr[k];
+   seed /= period;
+   double prev = seed;
+   for(int k = lastIdx - 1; k >= 0; k--)
+      prev = (prev * (period - 1) + tr[k]) / period;
+   return(prev);
+  }
+//+------------------------------------------------------------------+
+//| v1.11 - recomputes g_entryATR for a position that was ALREADY open  |
+//| when this EA instance started (terminal/VPS restart, recompile,      |
+//| input change) - see header bug (1). Nothing else ever sets           |
+//| g_entryATR in that case, so without this it stays at its 0.0          |
+//| initializer for that trade's entire remaining life, silently and       |
+//| permanently disabling the stale exit (ManageOpenPosition()'s             |
+//| `g_entryATR > 0.0` guard exists only to avoid a divide-by-zero on a        |
+//| genuinely bad/cold ATR read, not to skip the check forever). The ATR       |
+//| that mattered at entry was read with shift=1 relative to the entry          |
+//| tick's own "now" - i.e. the bar immediately before the entry bar, which      |
+//| is shift (entryShift+1) relative to the current tick, where entryShift       |
+//| is the entry bar's own shift now (iBarShift of its POSITION_TIME). If          |
+//| history isn't fully synced yet at the moment of attach (CopyRates returns       |
+//| too few bars), g_entryATRRestorePending is left true and OnTick retries           |
+//| this on every subsequent new bar until it succeeds - the same retry-until-         |
+//| ready shape WarmUpSwingState() already uses for g_swingWarm.                        |
+//+------------------------------------------------------------------+
+void RecomputeEntryATR()
+  {
+   g_entryATRRestorePending = false;
+   if(g_ticket == 0 || !PositionSelectByTicket(g_ticket)) return;
+   datetime opTime = (datetime)PositionGetInteger(POSITION_TIME);
+   int entryShift = iBarShift(_Symbol, PERIOD_M5, opTime, false);
+   if(entryShift < 0) { g_entryATRRestorePending = true; return; }   // history not ready yet - retry next bar
+   double atrAtEntry = ATRAtShift(entryShift + 1, InpATRPeriod);
+   if(atrAtEntry > 0.0)
+     {
+      g_entryATR = atrAtEntry;
+      PrintFormat("Vanguard EA: restored open position #%I64u on restart - entry-bar ATR recomputed as "
+                  "%.5f (opened %s, %d bars ago)",
+                  g_ticket, g_entryATR, TimeToString(opTime), entryShift);
+     }
+   else
+      g_entryATRRestorePending = true;   // not enough history yet - retry next bar
   }
 //+------------------------------------------------------------------+
 //| Session VWAP - identical construction to Meridian_EA.mq5.         |
@@ -677,7 +846,17 @@ bool GetSRLevels(double &hi, double &lo)
 //+------------------------------------------------------------------+
 //| Distance (xATR) from the last closed bar's close to the nearer of |
 //| the last InpSRDays COMPLETED daily highs/lows - identical to       |
-//| Meridian_EA.mq5's SRDistance(), reused verbatim.                   |
+//| Meridian_EA.mq5's SRDistance(), reused verbatim. FAILS OPEN: -1.0   |
+//| (bad ATR, or GetSRLevels() couldn't get enough D1 history) is a     |
+//| sentinel CheckForEntry() treats as "no S/R opinion" and lets the    |
+//| entry through WITHOUT this filter, not as a block (v1.11 - checked  |
+//| against Meridian_EA.mq5, whose own comment calls this exact case    |
+//| "SRDistance fails open here" - an already-established, already-     |
+//| validated convention in this project, not something introduced or   |
+//| changed here). In practice this is a real condition only in the     |
+//| first InpSRDays after a genuinely fresh EA attach, before D1        |
+//| history is fully cached - every real/Python-validated number in     |
+//| this file's header was produced running this exact fail-open code.  |
 //+------------------------------------------------------------------+
 double SRDistance(bool isBuy, double atrVal)
   {
@@ -709,7 +888,13 @@ bool H4EMA(const int shift, double &out)
 //| research reproduction, which had to align M5->H4 by hand and had    |
 //| a real off-by-one bug there) there's no equivalent lookahead risk    |
 //| here. False (blocks entry) if H4 history isn't ready yet - same      |
-//| fail-closed convention as GetATR()/GetSRLevels() above.              |
+//| fail-closed convention as GetATR() above (whose own failure also      |
+//| blocks entry, via CheckForEntry()'s `if(!GetATR(atr)...) return;`).    |
+//| v1.11: GetSRLevels()/SRDistance() are NOT part of that same           |
+//| convention - they deliberately FAIL OPEN (see SRDistance()'s own       |
+//| comment) - this header previously claimed otherwise, which was wrong    |
+//| and is now corrected; nothing about SRDistance()'s actual behavior      |
+//| changed.                                                                  |
 //+------------------------------------------------------------------+
 bool H4TrendAgrees(bool isBuy)
   {
@@ -1762,11 +1947,20 @@ void ManageOpenPosition(int breakoutDir)
    //--- stale exit (v1.04, see header): cut a trade loose - at whatever
    //--- it's currently worth - if it's shown no real progress after
    //--- InpStaleBars, rather than waiting for the full safety stop.
-   //--- g_entryATR <= 0.0 means this session never saw the entry (e.g.
-   //--- a terminal/EA restart while the position was already open) -
-   //--- skips the check rather than risk a wrong threshold; the resting
-   //--- stop-loss order still protects the position regardless. No
-   //--- PositionSelectByTicket() here - SyncPositionState() at the top
+   //--- g_entryATR <= 0.0 is now ONLY a divide-by-zero/bad-data guard, not
+   //--- a "restart disables this forever" gap: v1.11 made OnInit() (and,
+   //--- if history wasn't synced yet, OnTick's g_entryATRRestorePending
+   //--- retry) recompute g_entryATR from history via RecomputeEntryATR()/
+   //--- ATRAtShift() whenever a position was ALREADY open at attach - see
+   //--- header bug (1). Before that fix, g_entryATR stayed at its 0.0
+   //--- initializer for the position's entire remaining life after ANY
+   //--- restart/recompile/input change, silently and permanently disabling
+   //--- this stale exit for that trade even though the default
+   //--- InpStaleMinProfitATR=0.0 means the ATR value itself never actually
+   //--- changed the decision below - only whether it got made at all. The
+   //--- resting stop-loss order still protects the position regardless of
+   //--- this check either way. No PositionSelectByTicket() here -
+   //--- SyncPositionState() at the top
    //--- of this function already selected g_ticket, and nothing between
    //--- there and here re-selects anything else (found redundant in
    //--- review).
@@ -1814,6 +2008,10 @@ void CheckForEntry(int breakoutDir)
    if(!GetATR(atr) || atr <= 0.0) return;
 
    double sr = SRDistance(isBuy, atr);
+   //--- v1.11: sr<0.0 (missing D1 history) deliberately falls through here
+   //--- and lets the entry proceed - fail-OPEN, matching SRDistance()'s own
+   //--- header comment and this project's established Meridian_EA.mq5
+   //--- convention, not a bug (see that header and v1.11's changelog item 4).
    if(sr >= 0.0 && sr < InpMinSRDistATR) return;
 
    if(InpUseH4TrendFilter && !H4TrendAgrees(isBuy)) return;
@@ -1873,6 +2071,15 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingWarm = false;   // v1.10: rebuild swing state from history on the first new bar (WarmUpSwingState())
    ClearReversalRetry();
+
+   //--- v1.11 (header bug 1): a position already open at attach (restart/
+   //--- recompile/input change) needs g_entryATR recomputed from history -
+   //--- nothing else ever sets it in that case. RecomputeEntryATR() itself
+   //--- leaves g_entryATRRestorePending=true (retried from OnTick) if the
+   //--- needed history isn't synced yet.
+   g_entryATR = 0.0;
+   g_entryATRRestorePending = false;
+   if(g_ticket != 0) RecomputeEntryATR();
 
    //--- visuals (v1.02) - same performance guard as Aurelius: skip every
    //--- cosmetic draw entirely in a non-visual Strategy Tester pass,
@@ -1951,6 +2158,9 @@ void OnTick()
    //--- bar until history is available), so bar 1 below is processed
    //--- against the same swing state a never-restarted EA would hold.
    if(!g_swingWarm) g_swingWarm = WarmUpSwingState();
+   //--- v1.11: retry the entry-ATR restore (header bug 1) until history was
+   //--- ready for it, same retry-until-ready shape as g_swingWarm above.
+   if(g_entryATRRestorePending) RecomputeEntryATR();
    int breakoutDir = UpdateSwingsAndCheckBreakout();
    g_barLastBreakoutDir = breakoutDir;
 
