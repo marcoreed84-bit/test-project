@@ -960,7 +960,23 @@
 //|  would have done, instead of just the Price21/VWAP streaks the original audit                                                    |
 //|  description focused on.                                                                                                           |
 //+------------------------------------------------------------------+
-#property version   "1.56"
+//+------------------------------------------------------------------+
+//| v1.57 (2026-10-05): user observed a real live SELL enter just      |
+//| above a support level - the S/R proximity filter (InpUseSRDist,      |
+//| real-MT5-confirmed at InpMinSRDistATR=1.50) should have blocked it.   |
+//| Root cause found by reading the code: the filter used to silently     |
+//| SKIP ENTIRELY (letting the entry through with zero S/R screening)      |
+//| whenever GetATR() failed or SRDistanceATR() couldn't read all           |
+//| InpSRDays D1 bars yet - "unknown distance" was treated as "assume it's   |
+//| fine", backwards for a risk filter. Now fails CLOSED instead: if the      |
+//| real distance can't be confirmed, the entry is blocked, not waved         |
+//| through blind. A real MT5 Strategy Tester run never exercises this         |
+//| path (D1 history is already loaded for the whole run before bar 1), so     |
+//| this does not change InpMinSRDistATR's own real-MT5-confirmed backtest      |
+//| numbers - only live behaviour during the startup/restart window this        |
+//| filter could never be backtested against.                                    |
+//+------------------------------------------------------------------+
+#property version   "1.57"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -3880,13 +3896,29 @@ void OnTick()
      }
    if(InpUseSRDist)
      {
+      //--- 2026-10-05 fresh finding (user's own observed live trade - a SELL
+      //--- that entered just above a support level, the exact side this
+      //--- filter is supposed to check for a sell): this used to silently
+      //--- SKIP the whole S/R check (letting the entry through unfiltered)
+      //--- whenever GetATR() failed or SRDistanceATR() couldn't read all
+      //--- InpSRDays D1 bars yet (SRLevels() returns false, e.g. right
+      //--- after a restart/attach before D1 history syncs) - "unknown
+      //--- distance" was treated as "assume it's fine", backwards for a
+      //--- risk filter. Now fails CLOSED: if the real distance can't be
+      //--- confirmed, block the entry instead of letting it through blind.
+      //--- A real MT5 Strategy Tester run never exercises this path (D1
+      //--- history is already loaded for the whole run before bar 1), so
+      //--- this does not change InpMinSRDistATR's own real-MT5-confirmed
+      //--- backtest numbers - only live behavior during the startup/
+      //--- restart window this filter could never be backtested against.
       double atrTmp;
-      if(GetATR(atrTmp))
-        {
-         double sd = SRDistanceATR(up, atrTmp);
-         if(sd >= 0.0 && sd < InpMinSRDistATR)
-           { if(InpVerbose) Print("Skipped: on a level, ", DoubleToString(sd,2), " ATR"); return; }
-        }
+      if(!GetATR(atrTmp))
+        { if(InpVerbose) Print("Skipped: S/R check unavailable (ATR not ready)"); return; }
+      double sd = SRDistanceATR(up, atrTmp);
+      if(sd < 0.0)
+        { if(InpVerbose) Print("Skipped: S/R check unavailable (D1 history not ready)"); return; }
+      if(sd < InpMinSRDistATR)
+        { if(InpVerbose) Print("Skipped: on a level, ", DoubleToString(sd,2), " ATR"); return; }
      }
 
    //--- size and stop

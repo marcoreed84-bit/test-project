@@ -912,7 +912,23 @@
 //| a bug in either side on its own, and is left documented rather than "fixed"                  |
 //| out of either file.                                                                            |
 //+------------------------------------------------------------------+
-#property version   "1.60"
+//+------------------------------------------------------------------+
+//| v1.61 (2026-10-05): user observed a real live SELL enter just      |
+//| above a support level - the S/R proximity filter (InpUseSRDist,      |
+//| real-MT5-confirmed at InpMinSRDistATR=1.50) should have blocked it.   |
+//| Same root cause and fix as Aurelius_EA.mq5 v1.57: the filter used to  |
+//| silently SKIP ENTIRELY whenever GetATR() failed or SRDistanceATR()     |
+//| couldn't read all InpSRDays D1 bars yet - now fails CLOSED instead.     |
+//| Does not change InpMinSRDistATR's own real-MT5-confirmed backtest        |
+//| numbers (a continuous Tester run never hits this path), only live        |
+//| behaviour during the startup/restart window. NOT fixed in this same       |
+//| pass: InpUseSlopeSRBlock's own GetATR()/SRDistanceATR() call a few         |
+//| lines below has the identical shape, but that filter is still Python-      |
+//| only (not yet real-MT5-confirmed) and is a compound AND condition, not      |
+//| a pure distance threshold - left as a known, smaller follow-up rather        |
+//| than bundled into this fix.                                                   |
+//+------------------------------------------------------------------+
+#property version   "1.61"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -3972,13 +3988,29 @@ void OnTick()
      }
    if(InpUseSRDist)
      {
+      //--- 2026-10-05 fresh finding (user's own observed live trade - a SELL
+      //--- that entered just above a support level, the exact side this
+      //--- filter is supposed to check for a sell): this used to silently
+      //--- SKIP the whole S/R check (letting the entry through unfiltered)
+      //--- whenever GetATR() failed or SRDistanceATR() couldn't read all
+      //--- InpSRDays D1 bars yet (SRLevels() returns false, e.g. right
+      //--- after a restart/attach before D1 history syncs) - "unknown
+      //--- distance" was treated as "assume it's fine", backwards for a
+      //--- risk filter. Now fails CLOSED: if the real distance can't be
+      //--- confirmed, block the entry instead of letting it through blind.
+      //--- A real MT5 Strategy Tester run never exercises this path (D1
+      //--- history is already loaded for the whole run before bar 1), so
+      //--- this does not change InpMinSRDistATR's own real-MT5-confirmed
+      //--- backtest numbers - only live behavior during the startup/
+      //--- restart window this filter could never be backtested against.
       double atrTmp;
-      if(GetATR(atrTmp))
-        {
-         double sd = SRDistanceATR(up, atrTmp);
-         if(sd >= 0.0 && sd < InpMinSRDistATR)
-           { if(InpVerbose) Print("Skipped: on a level, ", DoubleToString(sd,2), " ATR"); return; }
-        }
+      if(!GetATR(atrTmp))
+        { if(InpVerbose) Print("Skipped: S/R check unavailable (ATR not ready)"); return; }
+      double sd = SRDistanceATR(up, atrTmp);
+      if(sd < 0.0)
+        { if(InpVerbose) Print("Skipped: S/R check unavailable (D1 history not ready)"); return; }
+      if(sd < InpMinSRDistATR)
+        { if(InpVerbose) Print("Skipped: on a level, ", DoubleToString(sd,2), " ATR"); return; }
      }
    //--- combined slope x S/R block (2026-09-16, Python-only, see
    //--- InpUseSlopeSRBlock's own comment) - a real, distinct bad-signal
