@@ -38,6 +38,24 @@ instead of CheckForEntry(), and by the bar after that the cross is no longer
 fresh. Net effect: a 21/50 cross on the first bar after an SL stop-out is
 never traded. Modeled by stale_ticket_bar=True (the EA's real behavior).
 
+v1.12 HOUR-0 REVERSAL-CLOSE RETRY (2026-10-04): the EA's RetryReversalClose()
+now retries a failed hour-0 REVERSAL close on every tick (ArmReversalRetry()/
+InpReversalRetryMinutes, default 60) until it succeeds or the window runs
+out. A fresh audit found this actually changes real outcomes: of 5 real
+hour-0 REVERSAL-close rejections in 2023-2026, 3 now close at 01:00 (the
+first bar once server hour advances past 0) instead of riding open to the
+next opposite cross or the safety stop. Modeled by rev_retry_minutes=60 (the
+EA's shipped default): a rejected hour-0 reversal is now closed at the open
+of the first subsequent bar whose hour != 0, as long as that happens within
+rev_retry_minutes of the original rejection - exactly RetryReversalClose()'s
+own give-up timeout. rev_retry_minutes=0 reproduces the pre-v1.12 EA (the
+close is simply never retried - position rides to the next opposite cross or
+the safety stop, same as today's hour0_reject=True branch always did before
+this fix). This is a bar-level approximation (real retries are tick-level,
+so a close that in practice lands seconds after 01:00:00 is modeled as
+landing exactly at that bar's open) - adequate for the ~$16 / 3-trade effect
+size the audit measured, not claimed to be tick-exact.
+
 P/L is USD per 0.01 lot (1 oz).
 """
 import sys
@@ -66,7 +84,13 @@ class MP:
     sr_days: int = 3
     min_sr: float = 0.50
     stop_atr: float = 2.5
-    max_spread: int = 60
+    max_spread: int = 60   # KNOWN MISMATCH (2026-10-04 audit, documented not fixed): 0 here means
+                            # "spread filter off" (both uses below are guarded by `max_spread > 0`),
+                            # but 0 means "block every entry" in Meridian_EA.mq5's own
+                            # CheckForEntry() (no such guard there - see its own comment). Default
+                            # is 60 everywhere it's been validated, so this never actually binds;
+                            # flagged so nobody trusts a max_spread=0 run here as representative of
+                            # InpMaxSpreadPoints=0 live.
     fri_close: int = 22
     use_vwap: bool = True
     entry_from_min: int = 65            # no real entry in any of the four reports before 01:05 server time -
@@ -90,13 +114,19 @@ class MP:
     hour0_reject: bool = True                   # GOLD# session quirk (hour-0 bars sit outside the broker session
                                                 # table, so a REVERSAL close there is rejected). False for a symbol
                                                 # whose hour-0 bars are normal trading (e.g. 24/7 BTCUSD)
+    rev_retry_minutes: int = 60                 # v1.12: mirrors InpReversalRetryMinutes - how long a rejected
+                                                # hour-0 REVERSAL close keeps being retried before giving up (0 =
+                                                # no retry, pre-v1.12 EA behaviour) - see module docstring
     entry_fn: Optional[Callable] = None         # random-timing null: f(ctx, t) -> +1/-1/0 REPLACES the cross +
                                                 # confirm-MA + VWAP + S/R decision; every gate after it (spread,
                                                 # entry filter) and every exit rule is unchanged
 
 
 V102 = MP()                                           # shipped v1.02 = Backtest_2
-BT1_BINARY = MP(pconf=150, conf="ema", use_sr=False)  # what Backtest_1's stale binary actually ran (see validate.py)
+BT1_BINARY = MP(pconf=150, conf="ema", use_sr=False, rev_retry_minutes=0)
+# ^ what Backtest_1's stale binary actually ran (see validate.py) - that binary
+# pre-dates v1.12's reversal-close retry, so rev_retry_minutes=0 reproduces its
+# real (no-retry) behaviour rather than the current default.
 
 
 def _ma(x, n, kind):
@@ -156,16 +186,18 @@ def simulate(ctx, p=V102, start=WIN_START, end=WIN_END):
     rng = np.random.default_rng(p.seed)
     trades, pos = [], None
     since_sl = 10 ** 9
+    pending_rev_arm_t = None   # v1.12: bar index a rejected hour-0 REVERSAL close was armed at, or None - see module docstring
     stats = dict(crosses=0, blk_conf=0, blk_sr=0, blk_filter=0, blk_spread=0, blk_reverse_bar=0)
 
     def fri(t):
         return (not p.no_friday) and ctx["dow"][t] == 5 and ctx["hour"][t] >= p.fri_close
 
     def close(t, px, reason):
-        nonlocal pos
+        nonlocal pos, pending_rev_arm_t
         pos.update(exit_i=t, exit=px, pnl=(px - pos["entry"]) * pos["dir"], reason=reason, exit_time=t64[t])
         trades.append(pos)
         pos = None
+        pending_rev_arm_t = None   # position is gone either way - any pending retry is moot
 
     def try_entry(t, sp):
         nonlocal pos
@@ -223,12 +255,28 @@ def simulate(ctx, p=V102, start=WIN_START, end=WIN_END):
         sp = spread[t] * point
         if pos is not None and fri(t):
             close(t, o[t] if pos["dir"] > 0 else o[t] + sp, "FRIDAY")
+        if pos is not None and pending_rev_arm_t is not None:
+            # v1.12: RetryReversalClose() retries on every tick until it succeeds
+            # or InpReversalRetryMinutes runs out - see module docstring. Model:
+            # close the moment server hour advances past 0, as long as that
+            # happens inside the retry window; otherwise give up exactly like
+            # the pre-v1.12 EA (ride to the next opposite cross or the stop).
+            if ctx["hour"][t] != 0:
+                close(t, o[t] if pos["dir"] > 0 else o[t] + sp, "REVERSAL_RETRY")
+                stats["reversal_retry_closed"] = stats.get("reversal_retry_closed", 0) + 1
+            elif p.rev_retry_minutes > 0:
+                waited_min = (t64[t] - t64[pending_rev_arm_t]) / np.timedelta64(1, "m")
+                if waited_min >= p.rev_retry_minutes:
+                    stats["reversal_retry_gaveup"] = stats.get("reversal_retry_gaveup", 0) + 1
+                    pending_rev_arm_t = None
         if pos is not None:
             pos["bars"] += 1
             d = pos["dir"]
             s = t - 1
             if above[s] != above[s - 1] and (1 if above[s] else -1) != d and p.hour0_reject and ctx["hour"][t] == 0:
-                stats["lost_reversal"] = stats.get("lost_reversal", 0) + 1   # close rejected, cross stale next bar
+                stats["lost_reversal"] = stats.get("lost_reversal", 0) + 1   # close rejected this bar
+                if p.rev_retry_minutes > 0 and pending_rev_arm_t is None:
+                    pending_rev_arm_t = t   # v1.12: arm the retry - see RetryReversalClose()
             elif above[s] != above[s - 1] and (1 if above[s] else -1) != d:
                 close(t, o[t] if d > 0 else o[t] + sp, "REVERSAL")
                 if p.stop_and_reverse and not fri(t):

@@ -827,8 +827,63 @@
 //|  wall-clock seconds/300 (wrong across weekends/overnight gaps) - now     |
 //|  iBarShift(). Display only.                                             |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.13 (2026-10-04, fresh unprimed audit of v1.12's own new code) - two  |
+//|  real bugs, both fixed:                                                  |
+//|                                                                          |
+//|  BUG 1 - OnInit() wiped valid partial-scale-out state on a cold start.   |
+//|  v1.12's own restore logic (above) had an else-branch that called        |
+//|  PartialClearState() any time PartialLoadStateIfMatchingTicket(g_ticket) |
+//|  failed - including when it failed only because g_ticket was still 0:   |
+//|  on a terminal/VPS restart, OnInit() can run before the account/position|
+//|  sync completes, so it transiently sees no open position and deleted     |
+//|  the real saved partial-scale-out progress for a trade that showed up    |
+//|  moments later - nothing ever reloaded it, silently skipping the        |
+//|  feature on that trade for the rest of its life. HeadShoulders_EA.mq5's  |
+//|  SyncPosition() has the same shape of state (RunnerClearState()) and     |
+//|  never has this bug: it only clears on a CONFIRMED nonzero->zero         |
+//|  transition it itself observed, never on a sync call that never saw the |
+//|  position open in the first place. Fixed the same way: OnInit() now     |
+//|  only deletes the saved state immediately if a position IS already      |
+//|  confirmed open and genuinely doesn't match it; otherwise it defers      |
+//|  (g_partialRestorePending) to ResolvePendingPartialRestore(), run from   |
+//|  ManageOpenPosition()/CheckForEntry() the first time this run actually   |
+//|  confirms the real ticket. SyncPositionState() itself was also tightened |
+//|  to the same "only clear on a confirmed open->gone transition" rule       |
+//|  (covers a broker-side SL stop-out, which never goes through             |
+//|  CloseCurrentPosition()); CloseCurrentPosition() clears the state         |
+//|  immediately on its own successful (EA-initiated) closes. No input,     |
+//|  signal, entry or exit-rule change.                                      |
+//|                                                                          |
+//|  BUG 2 - msim.py (research/meridian/msim.py), Python-only, no EA change: |
+//|  v1.12's reversal-close retry (above) is REAL new EA behavior the        |
+//|  simulator didn't model - a fresh audit found 3 of 5 real hour-0         |
+//|  REVERSAL-close rejections (2023-2026) now close at 01:00 on retry        |
+//|  instead of failing outright, net P&L +/-~$16, trade count 2317->2320.   |
+//|  msim.py's hour0_reject branch now models the retry-and-succeed-at-01:00 |
+//|  behavior (new MP.rev_retry_minutes, default 60 = InpReversalRetryMinutes|
+//|  default) so the two stay in sync for any future bar-match/random-timing |
+//|  check; re-run on the full real window reproduces the audit's numbers    |
+//|  almost exactly (2317->2320 trades, net -$16.48 vs the audit's ~$16).    |
+//|                                                                          |
+//|  LOWER-PRIORITY ITEMS FROM THE SAME AUDIT, LEFT AS-IS (documented, not   |
+//|  code changes - each carries its own comment at the cited line):        |
+//|   - Half-lot rounding (PositionClosePartial sizing) is float-noise-      |
+//|     sensitive AT THE EXACT 0.5-step midpoint only (e.g. 0.29 lots), a     |
+//|     coin-flip of at most one lot step, not the Ratchet/Aurelius-style     |
+//|     always-wrong-direction bug - see its own comment at InpUsePartial-   |
+//|     ScaleOut's OnTick() block. InpUsePartialScaleOut is off by default.  |
+//|   - InpMaxSpreadPoints=0 means "block every entry" here but "filter off" |
+//|     in msim.py - see the comment at CheckForEntry()'s spread check.      |
+//|   - A restart inside a bar re-checks that bar's cross, which could in     |
+//|     principle open the opposite trade right after a same-bar REVERSAL    |
+//|     close on a restart - see the comment at OnTick()'s dispatch.         |
+//|   - Partial target is set unconditionally right after Buy()/Sell()       |
+//|     returns via SyncPositionState()+PositionSelectByTicket(), not        |
+//|     trade.ResultOrder() - see the comment right after Buy()/Sell().      |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.12"
+#property version   "1.13"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -974,6 +1029,14 @@ bool     g_partialDone   = false;   // whether the partial close has already bee
 double   g_partialTP     = 0.0;     // this trade's partial-target price, set once at entry (CheckForEntry)
 //--- v1.12: all three persisted to terminal GlobalVariables (PartialSaveState())
 //--- and restored in OnInit() - see PartialGVPrefix()'s comment.
+//--- v1.13 (2026-10-04 bugfix): true when OnInit() found no live position YET
+//--- and so could not confirm whether the saved partial-scale-out state is
+//--- stale or genuinely belongs to a position that just hasn't synced into
+//--- PositionsTotal() yet (a terminal/VPS restart can run OnInit() before the
+//--- account/position sync completes) - see OnInit()'s own comment. Resolved
+//--- the first time a position is CONFIRMED open (ManageOpenPosition() or
+//--- CheckForEntry() seeing g_ticket != 0), never speculatively at OnInit.
+bool     g_partialRestorePending = false;
 
 //--- v1.12 failed-REVERSAL-close retry (see RetryReversalClose()) - 0 = none pending
 ulong    g_revRetryTicket  = 0;
@@ -1068,6 +1131,7 @@ bool FindOwnPosition(ulong &ticket)
 void SyncPositionState()
   {
    ulong tk;
+   ulong oldTicket = g_ticket;   // v1.13: see the clear-on-CONFIRMED-close comment below
    if(FindOwnPosition(tk))
      {
       g_ticket = tk;
@@ -1078,6 +1142,20 @@ void SyncPositionState()
      {
       g_ticket = 0;
       g_posDir = 0;
+      //--- v1.13 bugfix: only clear persisted partial-scale-out state on a
+      //--- CONFIRMED close - this function itself previously saw oldTicket
+      //--- open (g_ticket != 0, set by an earlier successful sync, never by
+      //--- OnInit()'s own starting value) and now finds it gone (broker SL,
+      //--- manual close, etc. - anything not already handled by
+      //--- CloseCurrentPosition()'s own clear). Never clear just because
+      //--- THIS call found no match - at OnInit() after a restart, oldTicket
+      //--- is still its cold-start 0, so this never fires there, no matter
+      //--- how many times FindOwnPosition() comes up empty while the account/
+      //--- position sync is still catching up. See header bug 1 and
+      //--- HeadShoulders_EA.mq5's SyncPosition(), which only calls
+      //--- RunnerClearState() on this exact nonzero->zero transition.
+      if(oldTicket != 0)
+         PartialClearState();
      }
   }
 //+------------------------------------------------------------------+
@@ -1254,10 +1332,16 @@ bool IsFridayFlattenTime()
 void CloseCurrentPosition(const string reason)
   {
    if(!PositionSelectByTicket(g_ticket)) { g_ticket = 0; g_posDir = 0; return; }
+   ulong tk = g_ticket;
    if(trade.PositionClose(g_ticket))
      {
       g_ticket = 0;
       g_posDir = 0;
+      //--- v1.13 bugfix: this IS a confirmed close event - safe to drop the
+      //--- partial-scale-out state right here rather than waiting for the
+      //--- next SyncPositionState() call to notice. See its own comment.
+      if(tk == g_partialTicket)
+         PartialClearState();
      }
    else
       PrintFormat("Meridian EA: %s close FAILED for ticket %I64u, retcode %d (%s) - will retry next tick",
@@ -1373,6 +1457,25 @@ bool PartialLoadStateIfMatchingTicket(const ulong ticket)
    return(true);
   }
 //+------------------------------------------------------------------+
+//| v1.13 bugfix - completes a restore OnInit() had to DEFER because no |
+//| position was visible yet (see g_partialRestorePending's own comment |
+//| and header bug 1). Called from ManageOpenPosition()/CheckForEntry() |
+//| right after SyncPositionState() has CONFIRMED g_ticket != 0 - the   |
+//| first point this run can actually tell "stale key" apart from       |
+//| "sync just hadn't caught up yet". No-op unless a restore is really   |
+//| pending.                                                             |
+//+------------------------------------------------------------------+
+void ResolvePendingPartialRestore()
+  {
+   if(!g_partialRestorePending || g_ticket == 0) return;
+   g_partialRestorePending = false;
+   if(PartialLoadStateIfMatchingTicket(g_ticket))
+      PrintFormat("Meridian EA: partial scale-out state restored for ticket %I64u on first confirmed sync after startup (done=%s, target=%s)",
+                  g_ticket, g_partialDone ? "yes" : "no", DoubleToString(g_partialTP, _Digits));
+   else
+      PartialClearState();   // ticket now CONFIRMED - genuinely doesn't match, safe to drop
+  }
+//+------------------------------------------------------------------+
 //| Detects the raw 21/50 cross on the bar that JUST closed (shift 1  |
 //| vs shift 2) - used for both entry (with confirmation) and exit    |
 //| (unconfirmed, per the validated design).                          |
@@ -1394,6 +1497,11 @@ void ManageOpenPosition()
    SyncPositionState();
    if(g_ticket == 0) return;
 
+   //--- v1.13 bugfix: this is the first CONFIRMED-open sighting of a position
+   //--- since this (re)start - complete any partial-scale-out restore OnInit()
+   //--- had to defer. See ResolvePendingPartialRestore()/header bug 1.
+   ResolvePendingPartialRestore();
+
    if(IsFridayFlattenTime()) { CloseCurrentPosition("FRIDAY"); return; }
 
    int dir;
@@ -1411,9 +1519,32 @@ void ManageOpenPosition()
 void CheckForEntry()
   {
    SyncPositionState();
-   if(g_ticket != 0) return;
+   if(g_ticket != 0)
+     {
+      //--- v1.13 bugfix: a position turned out to already be open (this bar
+      //--- dispatched here on a stale g_ticket==0 from before the account/
+      //--- position sync had caught up - see OnInit()'s own comment and
+      //--- header bug 1) - resolve any deferred partial-scale-out restore
+      //--- right now rather than waiting for the next bar's
+      //--- ManageOpenPosition() call.
+      ResolvePendingPartialRestore();
+      return;
+     }
    if(IsFridayFlattenTime()) return;
 
+   //--- KNOWN MISMATCH (2026-10-04 audit, documented not fixed - not confident
+   //--- which side is "correct" and the shipped default is 60, never 0, so this
+   //--- never actually binds): InpMaxSpreadPoints=0 means "block every entry"
+   //--- HERE (any real spread, always > 0, fails this check) but "spread filter
+   //--- OFF" in research/meridian/msim.py (its max_spread field is guarded by
+   //--- `> 0`). Some sibling EAs (Ratchet_EA.mq5, Aurelius_M15_EA.mq5,
+   //--- HeadShoulders_EA.mq5, RoundingBottom_EA.mq5) use msim.py's "0 = off"
+   //--- convention; others (Fulcrum_EA.mq5, MSG_Trader_EA.mq5, Zenith_EA.mq5,
+   //--- Vanguard_EA.mq5/_M15, and this file) use this one. No commit/CLAUDE.md
+   //--- note settles which Meridian itself was validated against at 0 - the
+   //--- validated backtest always used the default (60). If InpMaxSpreadPoints
+   //--- is ever intentionally set to 0 live, know that this EA will then trade
+   //--- NOTHING, while msim.py would model it trading with no spread filter.
    long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(spreadPts > InpMaxSpreadPoints) return;
 
@@ -1459,6 +1590,17 @@ void CheckForEntry()
       //--- (cheap) so flipping the input on mid-run still has a valid target
       //--- for the next trade; the OnTick() check itself still gates on the
       //--- input being on.
+      //--- KNOWN GAP (2026-10-04 audit, documented not fixed): g_partialTicket
+      //--- is taken from g_ticket right here, immediately after Buy()/Sell()
+      //--- returns - if SyncPositionState() hasn't yet seen the new position
+      //--- (a real send/sync race, not confirmed to happen in practice),
+      //--- g_ticket is still 0, so g_partialTicket=0 too and this trade's
+      //--- partial never gets armed even once the ticket does show up a tick
+      //--- later. g_partialTP itself is still recorded below either way.
+      //--- trade.ResultOrder() (the actual order ticket MT5 just filled,
+      //--- independent of SyncPositionState()'s own timing) would close this
+      //--- gap; not applied here to avoid widening this fix pass without a
+      //--- compiler to check it against.
       g_partialTicket = g_ticket;
       g_partialDone   = false;
       g_partialTP     = partialTP;
@@ -2446,15 +2588,47 @@ int OnInit()
    SeedVWAP();
    SyncPositionState();   // restart with a position already open - see header
    g_lastBarTime = 0;     // force IsNewBar() true on the first tick
+   //--- KNOWN GAP (2026-10-04 audit, documented not fixed - low probability,
+   //--- narrow window): forcing IsNewBar() true here means the first tick
+   //--- after ANY restart re-runs OnTick()'s dispatch for the CURRENTLY
+   //--- forming bar's shift-1 cross as if it were fresh. If a REVERSAL close
+   //--- happened on that exact same bar moments before the restart (the
+   //--- restart has to land inside that same ~5-minute M5 bar), g_ticket is
+   //--- now 0, so CheckForEntry() - not ManageOpenPosition() - runs and could
+   //--- open the OPPOSITE trade on the very cross that just closed the last
+   //--- one, contradicting this file's own "never stops-and-reverses" design
+   //--- (see OnTick()'s dispatch comment). A safe guard would need to check
+   //--- recent trade history at startup to tell "a REVERSAL just closed here"
+   //--- apart from an ordinary flat restart - not done here (restart timing
+   //--- this exact is rare, and misreading history on a live account to skip
+   //--- a legitimate entry would be its own new risk) - left as a known,
+   //--- disclosed gap rather than a speculative fix.
 
    //--- v1.12: restore InpUsePartialScaleOut state for a position that was
-   //--- already open before this (re)start - see PartialGVPrefix(). No live
-   //--- match = stale keys from an already-closed trade, deleted.
+   //--- already open before this (re)start - see PartialGVPrefix().
+   //--- v1.13 BUGFIX (2026-10-04): the original "no live match = stale keys,
+   //--- delete them" else-branch here was wrong - on a terminal/VPS restart,
+   //--- OnInit() can run before the account/position sync completes, so
+   //--- g_ticket==0 right here can be transient (sync not caught up yet), not
+   //--- a genuine "the position is gone". That eagerly wiped perfectly valid
+   //--- saved partial-scale-out progress for a trade that was about to show
+   //--- up moments later, silently skipping the feature for that trade's
+   //--- entire remaining life (see header bug 1). Now: only delete here if a
+   //--- position IS already confirmed open (g_ticket != 0) and it genuinely
+   //--- doesn't match the saved ticket - that really is stale, safe to drop
+   //--- immediately. If no position is visible yet, defer instead of
+   //--- guessing - g_partialRestorePending is resolved the first time
+   //--- ManageOpenPosition()/CheckForEntry() CONFIRMS the real position
+   //--- (ResolvePendingPartialRestore()), which also covers the fully-offline
+   //--- "really did close while this was down" case via SyncPositionState()'s
+   //--- own confirmed-close clear.
    if(PartialLoadStateIfMatchingTicket(g_ticket))
       PrintFormat("Meridian EA: partial scale-out state restored for ticket %I64u (done=%s, target=%s)",
                   g_ticket, g_partialDone ? "yes" : "no", DoubleToString(g_partialTP, _Digits));
+   else if(g_ticket != 0)
+      PartialClearState();     // a real, different position is open now - the saved state is genuinely stale
    else
-      PartialClearState();
+      g_partialRestorePending = true;   // no position visible YET - could be a startup sync race, defer (see above)
 
    //--- v1.03 visuals - skipped entirely in a non-visual Tester run. Drawn
    //--- the moment it attaches (Fulcrum v2.08's lesson: don't wait for the
@@ -2606,7 +2780,20 @@ void OnTick()
          double step    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
          double minVol  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
          double half    = fullVol * InpPartialFraction;
-         if(step > 0.0) half = MathRound(half / step) * step;
+         //--- v1.13 bugfix (2026-10-04 audit): bare MathRound(half/step) is a
+         //--- float-noise coin-flip exactly AT a half-step tie (e.g. 0.29 lots
+         //--- / 0.01 step is mathematically 14.5 steps, but the float division
+         //--- lands at 14.499999999999998 - rounds DOWN - while other inputs'
+         //--- own noise lands just above .5 and rounds UP; neither direction is
+         //--- a deliberate choice, it's whichever side representation error
+         //--- happens to fall on). Different from the Ratchet/Aurelius lot-
+         //--- rounding bug (always wrong the same direction) - this is at most
+         //--- one lot step off, and only exactly at a tie. Fixed the same way
+         //--- as any float half-step tie: add a small epsilon (bigger than the
+         //--- float noise here, far smaller than a real fraction) before
+         //--- flooring, so a genuine tie always rounds the SAME way (up) no
+         //--- matter which side the noise originally landed on.
+         if(step > 0.0) half = MathFloor(half / step + 0.5 + 0.0000001) * step;
          //--- if the broker's min lot step won't allow a valid partial at
          //--- this position size (e.g. 0.01 lot / 0.01 step -> half=0.005
          //--- rounds to 0.0 or to the full position), skip rather than send
