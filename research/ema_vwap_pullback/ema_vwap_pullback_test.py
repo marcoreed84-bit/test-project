@@ -38,25 +38,36 @@ SESSION VWAP: identical definition to research/meridian/msim.py's
 build_ctx() - cumulative (typical price x tick volume) / cumulative tick
 volume, reset at each new calendar day. Not a new VWAP definition.
 
+STOP LOSS (2026-10-06 correction, user's own instruction - the first cut
+of this test used an ATR distance from entry and was wrong): the stop is
+STRUCTURAL, not ATR-from-entry - it sits SL_BUFFER_ATR x ATR beyond
+whichever of the 21/50 EMA is closer to price at the fill bar (below the
+lower one for a long, above the higher one for a short). The moving
+averages themselves are what this setup trades off of, so the stop
+belongs there, not at an arbitrary ATR multiple from the entry price. A
+fill where price is already past its own would-be stop (entry beyond the
+MA) is skipped as degenerate, not force-placed with a negative-risk stop.
+
 EXIT - four separate, independently-tested options, each run against the
-SAME entries (own K for the entry construction is 1; comparing 4 exit
-options against it is an honest K=4 comparison, Sidak-corrected below -
-not reported as 4 independent single-shot results):
-  TRAIL:     initial stop STOP_ATR_INIT x entry ATR. Once floating profit
-             reaches TRAIL_TRIGGER_ATR x entry ATR, the stop trails behind
-             the peak favorable price by TRAIL_GIVEBACK_ATR x entry ATR
-             (only ever tightens). No fixed target - rides until trailed
-             out or the time-stop.
-  FIXED_PTS: initial stop STOP_ATR_INIT x entry ATR (unchanged
-             throughout), fixed target FIXED_TP price units away - a
-             single pre-specified distance, not swept.
-  EMA_BREAK: initial stop STOP_ATR_INIT x entry ATR as a hard backstop
-             only; the live exit is the trend itself breaking - close
-             back below the 21 EMA OR the 50 EMA (long; mirrored for
-             short). No fixed target.
-  ATR_STOP:  plain bracket - stop STOP_ATR_INIT x entry ATR, target
-             ATR_STOP_RR x that same stop distance. This project's usual
-             un-tuned structural default.
+SAME entries and the SAME structural stop above (own K for the entry
+construction is 1; comparing 4 exit options against it is an honest K=4
+comparison, Sidak-corrected below - not reported as 4 independent
+single-shot results):
+  TRAIL:     once floating profit reaches TRAIL_TRIGGER_ATR x entry ATR,
+             the stop trails behind the peak favorable price by
+             TRAIL_GIVEBACK_ATR x entry ATR (only ever tightens, starting
+             from the structural stop above). No fixed target - rides
+             until trailed out or the time-stop.
+  FIXED_PTS: structural stop unchanged throughout, fixed target FIXED_TP
+             price units away - a single pre-specified distance, not
+             swept.
+  EMA_BREAK: structural stop as a hard backstop only; the live exit is
+             the trend itself breaking - close back below the 21 EMA OR
+             the 50 EMA (long; mirrored for short). No fixed target.
+  ATR_STOP:  plain bracket - structural stop, target ATR_STOP_RR x that
+             trade's own structural stop DISTANCE (so the target still
+             scales with how far price was from the MAs at entry, not a
+             fixed ATR multiple).
 All four share MAX_BARS as a final time-stop backstop, real spread on
 entry, one trade at a time, and stop-takes-priority-over-target on a
 same-bar double-touch (this project's standing convention).
@@ -79,7 +90,7 @@ POINT = B.POINT
 SEP_LOOKBACK = 20
 SEP_MIN_ATR = 0.50
 PULLBACK_MAX_BARS = 24
-STOP_ATR_INIT = 1.5
+SL_BUFFER_ATR = 0.15   # small buffer beyond the MA itself, so the stop isn't a dead-exact touch
 MAX_BARS = 288
 
 TRAIL_TRIGGER_ATR = 1.0
@@ -181,9 +192,16 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, entries_by_bar, start_i, end_i, e
         if pos is None and t in entries_by_bar and start_i <= t < end_i:
             d, a = entries_by_bar[t]
             entry = o[t] + sp if d > 0 else o[t]
-            sl = entry - d * STOP_ATR_INIT * a
+            # structural stop: below (long) / above (short) the 21/50 EMAs
+            # themselves at the fill bar, not an ATR distance from entry -
+            # the MAs ARE the support/resistance this setup trades off of.
+            sl = (min(ema21[t], ema50[t]) - SL_BUFFER_ATR * a) if d > 0 else \
+                 (max(ema21[t], ema50[t]) + SL_BUFFER_ATR * a)
+            if (d > 0 and sl >= entry) or (d < 0 and sl <= entry):
+                continue   # degenerate: price already past its own stop at fill - skip
+            risk = abs(entry - sl)
             if exit_mode == "ATR_STOP":
-                tp = entry + d * ATR_STOP_RR * STOP_ATR_INIT * a
+                tp = entry + d * ATR_STOP_RR * risk
             elif exit_mode == "FIXED_PTS":
                 tp = entry + d * FIXED_TP
             else:
