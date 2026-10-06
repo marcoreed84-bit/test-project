@@ -882,8 +882,56 @@
 //|     returns via SyncPositionState()+PositionSelectByTicket(), not        |
 //|     trade.ResultOrder() - see the comment right after Buy()/Sell().      |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v1.14: InpUseEarlyExitBreak added, DEFAULT ON. Origin: user       |
+//|  watched a real live trade enter already extended from the 21/50  |
+//|  EMAs (real screenshot, account 382043238) and asked whether       |
+//|  waiting for a retest-and-bounce before entering would help -       |
+//|  tested first (research/meridian/retest_entry_test.py), rejected:   |
+//|  waiting for entry confirmation trades FEWER setups and nets LESS    |
+//|  (OOS net +2612.60->+1192.14 at a loose 2h window, worse still at     |
+//|  a tight 3-bar confirmed-bounce window) - a real post-entry             |
+//|  classification (same file) found why: a strong move that never         |
+//|  retests at all is the BEST bucket (PF 3.775), so gating ENTRY on         |
+//|  a retest throws away exactly the best trades. The user's own next        |
+//|  idea, tested properly instead: keep the entry exactly as-is, but          |
+//|  cut the trade EARLY once a post-entry retest of the 21/50 zone            |
+//|  fails (breaks through instead of bouncing) - this is                       |
+//|  InpUseEarlyExitBreak, research/meridian/early_exit_break_test.py.           |
+//|  Real, Python-validated on msim.py (this file's own already-bar-              |
+//|  matched EA-faithful simulator, same real exit machinery - reversal           |
+//|  close, Friday flatten, hour0 retry, the works): full real GOLD M5             |
+//|  history, walk-forward 70/30 split, OOS PF 1.493->1.779 (+19%),                 |
+//|  net +2612.60->+3454.88 (+32%), win% 28.0->29.0. Random-timing null              |
+//|  (OOS only, 2000 draws, matched trade count/direction, same exit                  |
+//|  machinery including this rule) - real PF sits at the 100.0th                      |
+//|  percentile, p=0.0005. The SAME rule, same thresholds (not re-tuned),                |
+//|  was also checked on every sibling EA that night (user's own request,                 |
+//|  "check this on the others too"): real win on Ratchet too (smaller,                    |
+//|  OOS net +1001.04->+1111.05), a wash on both Aurelius variants (M5                      |
+//|  slightly negative, M15 slightly positive), and a REAL LOSS on                           |
+//|  Vanguard and HeadShoulders (both of which already enter AT/ON a                          |
+//|  retest of their own structural level - a second check mostly just                         |
+//|  clips winners there, not the same shape as Meridian's problem) - this                      |
+//|  result does NOT generalize automatically to this project's other EAs,                       |
+//|  each would need its own real test before shipping the same change.                           |
+//|  A related idea tried the same night - also requiring the 21/50 cross                          |
+//|  itself to have a "nice running distance" beforehand (reject crosses                            |
+//|  born out of a choppy/crisscrossing pocket) - was tested ON TOP of this                          |
+//|  rule and made it WORSE (OOS net +3454.88->+2031.40): NOT implemented,                            |
+//|  mentioned here only so it isn't silently re-tried later.                                          |
+//|  CAVEAT: this is Python-validated (an EA-faithful simulator already                                 |
+//|  bar-matched to real MT5 reports), not yet confirmed by a dedicated real                             |
+//|  MT5 Strategy Tester A/B run the way Ratchet_EA.mq5's own                                              |
+//|  InpUseBreakeven was before shipping default-on - recommend running one                                |
+//|  before fully trusting live results, same discipline as every other                                     |
+//|  real-money change in this project. Shipped default ON anyway per the                                    |
+//|  user's own explicit, repeated instruction tonight ("implement the                                        |
+//|  early exit rule in meridian's live code") and the strength of the                                         |
+//|  Python result (p=0.0005 on the already-validated simulator).                                               |
+//+------------------------------------------------------------------+
 #property copyright "Meridian_EA"
-#property version   "1.13"
+#property version   "1.14"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -911,6 +959,10 @@ input group "=== Exit ==="
 input double InpSafetyStopATR   = 2.5;      // v1.01: tightened from 3.0 - see header (net AND drawdown both improved)
 input int    InpATRPeriod       = 14;
 input int    InpReversalRetryMinutes = 60;  // v1.12: how long a FAILED reversal close keeps being retried on ticks (0 = no retry, pre-v1.12 behaviour) - see header
+
+input group "=== Early exit on EMA re-break (v1.14, real-validated - see header) ==="
+input bool   InpUseEarlyExitBreak = true;   // Once price first retests either the 21 or 50 EMA after entry, the next bar must close back above/below BOTH EMAs or the trade exits now. msim.py (already bar-matched to real MT5 reports) OOS: PF 1.493->1.779, net +2612.60->+3454.88 (+32%), random-timing null p=0.0005. Default ON. See header and research/meridian/early_exit_break_test.py.
+input double InpEarlyExitTolATR   = 0.30;   // How close (xATR) to either EMA counts as a "touch" - matches the validated research construction, not swept/re-tuned for live.
 
 input group "=== Giveback-to-breakeven exit (v1.06 candidate, Python-only so far) ==="
 input bool   InpUseGivebackExit    = false;   // REJECTED (2026-09-25): the Python method was fixed (giveback check wired into msim.py's real exit_fn hook, using its own already-tracked pos['peak'], instead of a post-hoc swap on a fixed entry list) and re-run - net 3334.65->1894.09 (-43.2%), trades 2616->2674 (+2.2%), win% 25.8->30.9. Same cascade mechanism confirmed on Aurelius_EA.mq5 against a REAL MT5 A/B test (-64.3% real vs -63.9% corrected-Python, near-exact match) - this file's own corrected result is now trusted at that same level. Stays false. See Aurelius_EA.mq5 v1.52's header and research/aurelius/giveback_event_driven_test.py.
@@ -1021,6 +1073,13 @@ int      g_posDir  = 0;      // +1 long, -1 short, 0 flat
 //--- MT5, never reused, so a simple != is a safe "new position" test)
 ulong    g_gbTicket  = 0;
 double   g_gbPeakFav = 0.0;   // best floating profit (price units) seen so far this trade
+
+//--- InpUseEarlyExitBreak tracking - same ticket-keyed reset pattern as
+//--- the giveback tracking above, so a new position always starts with
+//--- a fresh touched/resolved pair
+ulong    g_eeTicket   = 0;
+bool     g_eeTouched  = false;   // price has come within InpEarlyExitTolATR of either EMA since entry
+bool     g_eeResolved = false;   // the first touch already bounced favorably - never check again this trade
 
 //--- InpUsePartialScaleOut tracking - same ticket-keyed reset pattern as
 //--- the giveback tracking above
@@ -1492,6 +1551,50 @@ bool DetectCross(int &direction)
    return(true);
   }
 //+------------------------------------------------------------------+
+//| v1.14: InpUseEarlyExitBreak - once price first retests either    |
+//| the 21 or 50 EMA after entry (no fixed window - checked every     |
+//| bar for the life of the trade), the bar that resolves that touch  |
+//| must close back on the favorable side of BOTH EMAs (a genuine     |
+//| bounce) or the trade exits now - the retest failed, don't wait    |
+//| for the safety stop or the next opposite cross. Real,              |
+//| Python-validated (msim.py, already bar-matched to real MT5         |
+//| reports, same real exit machinery this file itself uses): OOS      |
+//| PF 1.493->1.779, net +2612.60->+3454.88 (+32%), random-timing      |
+//| null p=0.0005. See research/meridian/early_exit_break_test.py.     |
+//| State is ticket-keyed (g_eeTicket) exactly like                    |
+//| InpUseGivebackExit's g_gbTicket above, so a new position always    |
+//| starts with a fresh touched/resolved pair.                         |
+//+------------------------------------------------------------------+
+void CheckEarlyExitBreak()
+  {
+   if(g_eeTicket != g_ticket)
+     {
+      g_eeTicket   = g_ticket;
+      g_eeTouched  = false;
+      g_eeResolved = false;
+     }
+   if(g_eeResolved) return;
+
+   double m21, m50;
+   if(!MA(h21, 1, m21) || !MA(h50, 1, m50)) return;
+   double atr;
+   if(!GetATR(atr) || atr <= 0.0) return;
+   double close1 = iClose(_Symbol, PERIOD_M5, 1);
+
+   bool isBuy = (g_posDir > 0);
+   if(!g_eeTouched)
+     {
+      double tol = InpEarlyExitTolATR * atr;
+      if(MathAbs(close1 - m21) <= tol || MathAbs(close1 - m50) <= tol)
+         g_eeTouched = true;
+      return;
+     }
+   bool bounced = isBuy ? (close1 > m21 && close1 > m50) : (close1 < m21 && close1 < m50);
+   bool broke   = isBuy ? (close1 < m21 && close1 < m50) : (close1 > m21 && close1 > m50);
+   if(bounced) { g_eeResolved = true; return; }
+   if(broke)   CloseCurrentPosition("EARLY_EXIT_BROKE");
+  }
+//+------------------------------------------------------------------+
 void ManageOpenPosition()
   {
    SyncPositionState();
@@ -1511,6 +1614,14 @@ void ManageOpenPosition()
       CloseCurrentPosition("REVERSAL");
       if(g_ticket != 0) ArmReversalRetry(tk);   // v1.12: failed - retried on ticks, see RetryReversalClose()
      }
+
+   //--- v1.14: checked AFTER the reversal close above (same priority order
+   //--- the validated Python test used - a reversal always takes it first)
+   //--- and only if the position is still open (the reversal close above
+   //--- may have just closed it).
+   if(InpUseEarlyExitBreak && g_ticket != 0)
+      CheckEarlyExitBreak();
+
    // safety stop is a real resting SL order on the position (set at
    // entry, see CheckForEntry) - the broker enforces it even if this
    // EA/terminal goes offline, so nothing further to do for it here.
