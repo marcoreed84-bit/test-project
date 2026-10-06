@@ -15,13 +15,22 @@ time - that earlier test built a brand new standalone construction;
 this one adds the SAME filter concept directly onto Meridian's existing,
 real, bar-matched entry.
 
-FILTER: before the cross confirms (cross bar s = t-1), require that at
-some point in the SEP_LOOKBACK bars before s, the 21/50 EMAs were
-separated by at least SEP_MIN_ATR x ATR (the MAXIMUM separation in that
-window - by definition the EMAs must converge right at the cross, so
-requiring separation held all the way up to it would reject every single
-crossover, same reasoning as the earlier test). Rejects crosses born out
-of a flat/choppy pocket with no real recent trend.
+FILTER (2026-10-06 revision - user's own sharper framing): the first cut
+of this filter used a fixed SEP_LOOKBACK=20-bar window before the cross,
+which could accidentally pick up separation from BEFORE the previous
+cross too if crosses happened closer together than 20 bars - diluting
+exactly the signal it was meant to catch. Fixed to measure CROSS TO
+CROSS instead: find the PREVIOUS 21/50 cross (whenever that actually
+was, no fixed window), and require that somewhere in the stretch between
+that prior cross and THIS one, the EMAs reached at least SEP_MIN_ATR x
+ATR of separation (the MAXIMUM in that stretch - they must converge
+right at the cross itself, so requiring it held throughout would reject
+every crossover). This directly rejects the user's "crossed and stayed
+mm apart before the next cross" case: two crosses close together in time
+leave the EMAs no room to travel far in between, so the max separation
+in that short stretch is small and the filter correctly rejects it -
+whereas the earlier fixed-window version could still pass if an EARLIER,
+unrelated bout of separation happened to fall inside the same 20 bars.
 
 Tested on TOP of the already-validated early-exit-on-break rule
 (research/meridian/early_exit_break_test.py, confirmed real: OOS
@@ -58,12 +67,18 @@ SEP_MIN_ATR = 0.50
 
 def make_crisscross_filter(ctx):
     m21, m50, atr = M.ma(ctx, 21, "ema"), M.ma(ctx, 50, "ema"), ctx["atr"]
+    sign = np.sign(m21 - m50)
+    # every bar where a 21/50 cross occurred, globally - s (this cross's own
+    # confirm bar) is itself one of these by construction (DetectCross's gate)
+    cross_idx = np.where((sign[1:] != sign[:-1]) & (sign[1:] != 0) & (sign[:-1] != 0))[0] + 1
 
     def fn(ctx_, t, d):
-        s = t - 1   # the cross-confirm bar
-        lo, hi = s - SEP_LOOKBACK, s - 1
-        if lo < 0:
-            return True   # not enough history - let the shipped checks decide, don't block
+        s = t - 1   # this cross's own confirm bar
+        pos = np.searchsorted(cross_idx, s, side="left") - 1
+        if pos < 0:
+            return True   # no earlier cross on record at all - not enough info, don't block
+        prev_cross = cross_idx[pos]
+        lo, hi = prev_cross, s - 1   # the stretch BETWEEN the two crosses, where they had to travel
         win_atr = atr[lo:hi + 1]
         if np.any(np.isnan(win_atr)) or np.any(win_atr <= 0):
             return True
@@ -111,7 +126,7 @@ if __name__ == "__main__":
     for stage_label, p in (
         ("1. SHIPPED V102 (baseline)", p_base),
         ("2. V102 + early-exit-on-break (already confirmed)", p_earlyexit),
-        ("3. V102 + early-exit-on-break + crisscross filter (NEW)", p_both),
+        ("3. V102 + early-exit-on-break + crisscross filter (REVISED: cross-to-cross distance)", p_both),
     ):
         print(f"{'='*92}\n{stage_label}\n{'='*92}")
         for label, start, end in (("IN-SAMPLE (first 70%)", full_start, cutoff_time),
