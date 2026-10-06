@@ -24,15 +24,24 @@ against what you meant before trusting the numbers):
    A bullish cross mirrors it into a SHORT setup. Both directions tested,
    not just the long side shown in the one screenshot.
 
-3. PULLBACK TO VWAP, THEN RECLAIM: scanning forward from the cross bar,
-   within PULLBACK_MAX_BARS bars: for the LONG setup, first find a bar
-   where the 21 EMA actually dips below session VWAP (confirms the
-   pullback reached VWAP, not just approached it) - then find the next
-   bar after that where the 21 EMA crosses back above VWAP. THAT crossing
-   bar is the signal; entry fills at the following bar's open, real
-   spread charged. Mirror for SHORT (21 EMA rises above VWAP, then
-   crosses back below it). If no reclaim happens within the window, no
-   trade - the cross is simply skipped, not retried.
+3. THE CROSS ITSELF MUST ALREADY BE BELOW/ABOVE VWAP (2026-10-06 fix,
+   user correction): VWAP resets at the start of every calendar day, so
+   right after a reset it sits near whatever price is doing RIGHT NOW,
+   regardless of where the 21/50 EMAs are. A 21/50 cross that happens to
+   be "below VWAP" in the few bars right after a reset can be purely an
+   artifact of that reset, not a real pullback that separated from VWAP.
+   So instead of scanning forward for a dip after the cross, the cross
+   bar itself must ALREADY have both EMAs on the wrong side of VWAP: for
+   the LONG setup (bearish cross), ema21 AND ema50 both below VWAP at the
+   cross bar. If the cross happens on the "right" side of VWAP (or
+   straddling it), it's not treated as a real setup and is skipped.
+
+4. RECLAIM: scanning forward from the cross bar, within
+   PULLBACK_MAX_BARS bars, find the first bar where the 21 EMA crosses
+   back above VWAP (LONG) / below VWAP (SHORT). THAT crossing bar is the
+   signal; entry fills at the following bar's open, real spread charged.
+   If no reclaim happens within the window, no trade - the cross is
+   simply skipped, not retried.
 
 4. EXTENSION FILTER (2026-10-06 fix, real bug the user caught by asking
    why trades were stopping out in 10-15 minutes): the trigger above is
@@ -154,13 +163,17 @@ def find_entries(ema21, ema50, vwap, atr, n):
         if not (a > 0):
             continue
         d = -1 if sign[t] > 0 else 1   # bullish cross(sign>0)->SHORT setup(-1); bearish cross->LONG setup(+1)
-        dipped = False
+        # the cross itself must already be on the wrong side of VWAP - not
+        # scanned for afterward - to rule out VWAP's own daily-reset
+        # artifact (see docstring point 3).
+        if d > 0:
+            if not (ema21[t] < vwap[t] and ema50[t] < vwap[t]):
+                continue
+        else:
+            if not (ema21[t] > vwap[t] and ema50[t] > vwap[t]):
+                continue
         signal_i = None
         for i in range(t + 1, min(t + 1 + PULLBACK_MAX_BARS, n - 1)):
-            if not dipped:
-                if (d > 0 and ema21[i] < vwap[i]) or (d < 0 and ema21[i] > vwap[i]):
-                    dipped = True
-                continue
             back_above = ema21[i - 1] <= vwap[i - 1] and ema21[i] > vwap[i]
             back_below = ema21[i - 1] >= vwap[i - 1] and ema21[i] < vwap[i]
             if (d > 0 and back_above) or (d < 0 and back_below):
