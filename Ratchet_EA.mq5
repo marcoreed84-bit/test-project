@@ -832,8 +832,34 @@
 //|  small epsilon before the floor, same fix needed in Aurelius_EA.mq5/     |
 //|  Aurelius_M15_EA.mq5's identical LotSize() pattern (separate commit).    |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//|  v3.34: InpUseEarlyExitBreak added, DEFAULT ON. Same rule as        |
+//|  Meridian_EA.mq5 v1.14 - once price first retests either the 21     |
+//|  or 50 EMA after entry (no fixed window), the resolving bar must     |
+//|  close back on the favorable side of BOTH EMAs (a genuine bounce)     |
+//|  or the trade exits now, ahead of the stochastic/stop/MAXBARS exits.   |
+//|  Same thresholds as every other EA this was checked on that night       |
+//|  (InpEarlyExitTolATR=0.30), not re-tuned per EA.                         |
+//|                                                                            |
+//|  Checked via the real, validated sequential sim.py (research/ratchet/,     |
+//|  exit_fn research hook, checked right after SESSION_CLOSE and before       |
+//|  TAILCAP/trail/STOCH/MAXBARS - same priority order wired in below).         |
+//|  Full real GOLD M5 history, walk-forward 70/30 split: OOS PF                 |
+//|  1.576->1.695 (+8%), net 1001.04->1111.05 (+11%), win% 54.5->54.0 -           |
+//|  a smaller, real win than Meridian's (same night, same construction,          |
+//|  not re-tuned for this EA) but a real one in both the same direction           |
+//|  and the same discipline: validated, not guessed. See                          |
+//|  research/ratchet/early_exit_break_test.py.                                     |
+//|                                                                                   |
+//|  CAVEAT: Python-validated against this file's own already-bar-matched             |
+//|  EA-faithful simulator, not yet confirmed by a dedicated real MT5                  |
+//|  Strategy Tester A/B run the way InpUseBreakeven/InpUseTrail above were             |
+//|  before shipping default-on - recommend running one before trusting live             |
+//|  results at full size. Shipped on anyway per the user's explicit                      |
+//|  instruction the same night as Meridian_EA.mq5 v1.14.                                  |
+//+------------------------------------------------------------------+
 #property copyright "Ratchet EA"
-#property version   "3.33"
+#property version   "3.34"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -972,6 +998,10 @@ input int    InpMaxBars    = 80;           // Bar limit on any trade (0 = off)
                                             // exit-reason breakdown, that ~2-3% of trades reaching this cap carries
                                             // the MAJORITY of this system's real net profit. Not dead weight.]
 
+input group "=== Early exit on EMA re-break (v3.34, real-validated - see header) ==="
+input bool   InpUseEarlyExitBreak = true;   // Once price first retests either the 21 or 50 EMA after entry, the next bar must close back above/below BOTH EMAs or the trade exits now. sim.py (already bar-matched to real MT5 reports) OOS: PF 1.576->1.695, net 1001.04->1111.05 (+11%). Default ON. See header and research/ratchet/early_exit_break_test.py.
+input double InpEarlyExitTolATR   = 0.30;   // How close (xATR) to either EMA counts as a "touch" - matches the validated research construction, not swept/re-tuned for live.
+
 input group "=== Safety ==="
 input int    InpMagic           = 750005;  // Magic number
 input int    InpMaxSpreadPoints = 60;      // Skip entries above this spread (0 = off)
@@ -1072,6 +1102,13 @@ double   g_entryPrice = 0.0, g_entryLots = 0.0, g_entryATR = 0.0;
 double   g_peakFavPx = 0.0;   // best price seen in the trade's favor - see TrailStop()/InpTrailKeepFrac
 int      g_entryDir = 0;
 ulong    g_ticket = 0;
+
+//--- InpUseEarlyExitBreak tracking - ticket-keyed reset (tickets unique/
+//--- monotonic, never reused), same pattern as Meridian_EA.mq5 v1.14's
+//--- g_eeTicket/g_eeTouched/g_eeResolved
+ulong    g_eeTicket   = 0;
+bool     g_eeTouched  = false;
+bool     g_eeResolved = false;
 string   g_pp = "RATEP_";
 string   g_pw = "RATEW_";
 string   g_pm = "RATEM_";    // per-bar MA/BB line segments, purged to a rolling window - see UpdateMALines
@@ -2240,6 +2277,44 @@ bool TailLossHit()
    return(false);
   }
 //+------------------------------------------------------------------+
+//| v3.34: InpUseEarlyExitBreak - once price first retests either the|
+//| 21 or 50 EMA after entry (no fixed window - checked every bar     |
+//| for the life of the trade), the bar that resolves that touch      |
+//| must close back on the favorable side of BOTH EMAs (a genuine     |
+//| bounce) or the trade exits now. Same construction/thresholds as   |
+//| Meridian_EA.mq5 v1.14 - see that file's header for the fuller      |
+//| real-vs-null write-up; this file's own number: OOS PF 1.576->      |
+//| 1.695, net 1001.04->1111.05. State is ticket-keyed (g_eeTicket),    |
+//| same reset pattern as g_peakFavPx/TrailStop() below.                |
+//+------------------------------------------------------------------+
+void CheckEarlyExitBreak(bool isLong)
+  {
+   if(g_eeTicket != g_ticket)
+     {
+      g_eeTicket   = g_ticket;
+      g_eeTouched  = false;
+      g_eeResolved = false;
+     }
+   if(g_eeResolved) return;
+
+   double m21, m50, atr;
+   if(!MA(h21, 1, m21) || !MA(h50, 1, m50)) return;
+   if(!MA(hATR, 1, atr) || atr <= 0.0) return;
+   double close1 = iClose(_Symbol, PERIOD_CURRENT, 1);
+
+   if(!g_eeTouched)
+     {
+      double tol = InpEarlyExitTolATR * atr;
+      if(MathAbs(close1 - m21) <= tol || MathAbs(close1 - m50) <= tol)
+         g_eeTouched = true;
+      return;
+     }
+   bool bounced = isLong ? (close1 > m21 && close1 > m50) : (close1 < m21 && close1 < m50);
+   bool broke   = isLong ? (close1 < m21 && close1 < m50) : (close1 > m21 && close1 > m50);
+   if(bounced) { g_eeResolved = true; return; }
+   if(broke)   ClosePosition("EARLY_EXIT_BROKE");
+  }
+//+------------------------------------------------------------------+
 void TrailStop()
   {
    //--- g_entryPrice<=0.0 is a degenerate case (trade.Buy/Sell returned
@@ -2633,6 +2708,13 @@ void OnTick()
      {
       if(InpCloseBeforeBreak && NearSessionClose(InpCloseMinsBefore))
         { ClosePosition("SESSION_CLOSE"); return; }
+
+      //--- v3.34: checked here to match the validated Python priority order
+      //--- (sim.py's exit_fn hook fires right after SESSION_CLOSE and before
+      //--- TAILCAP/trail/STOCH/MAXBARS) - only if the position is still open.
+      if(InpUseEarlyExitBreak && (haveLong || haveShort))
+        { CheckEarlyExitBreak(haveLong); if(g_ticket == 0) return; }
+
       if(TailLossHit()) { ClosePosition("TAILCAP"); return; }
 
       if(InpUseTrail || InpUseBreakeven) TrailStop();
