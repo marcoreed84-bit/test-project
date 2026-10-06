@@ -70,55 +70,35 @@ belongs there, not at an arbitrary ATR multiple from the entry price. A
 fill where price is already past its own would-be stop (entry beyond the
 MA) is skipped as degenerate, not force-placed with a negative-risk stop.
 
-EXIT - five separate, independently-tested options, each run against the
-SAME entries and the SAME structural stop above (own K for the entry
-construction is 1; comparing 5 exit options against it is an honest K=5
-comparison, Sidak-corrected below - not reported as 5 independent
-single-shot results):
-  TRAIL:     once floating profit reaches TRAIL_TRIGGER_ATR x entry ATR,
-             the stop trails behind the peak favorable price by
-             TRAIL_GIVEBACK_ATR x entry ATR (only ever tightens, starting
-             from the structural stop above). No fixed target - rides
-             until trailed out or the time-stop.
-  FIXED_PTS: structural stop unchanged throughout, fixed target FIXED_TP
-             price units away - a single pre-specified distance, not
-             swept.
-  EMA_RECROSS: structural stop as a hard backstop only; the live exit is
-             the trend structure itself reversing - the 21/50 EMAs
-             crossing back against the trade direction (the same
-             mechanism that triggered entry, mirrored). A normal retest
-             that merely touches or closes slightly past one MA is NOT an
-             exit by itself - only an actual EMA21/50 re-cross is. No
-             fixed target.
-  ATR_STOP:  plain bracket - structural stop, target ATR_STOP_RR x that
-             trade's own structural stop DISTANCE (so the target still
-             scales with how far price was from the MAs at entry, not a
-             fixed ATR multiple).
-  MA600_TARGET (2026-10-06, user's own idea from a second, cleaner chart
-             example): structural stop as above; target is the 600 EMA
-             itself - Aurelius's own next slower moving average above
-             (long) / below (short) price, which the user's example
-             showed price reacting to/rejecting. Exit fills AT the 600
-             EMA's own price the moment it's reached (h[t]>=ema600[t] for
-             a long, mirrored for a short) - a dynamic, price-level
-             target, not a fixed distance. 2026-10-06 fix: the 600 EMA is
-             NOT guaranteed to sit above entry for a long (unrelated,
-             independent, slow average) - first run showed a flat-out
-             impossible 0% win rate even on trades that "hit their own
-             target", traced to ~half the fills already having the 600
-             EMA on the wrong side at entry, so the "target" was already
-             passed and triggered near-instantly at a loss. Now skipped
-             entirely when the 600 EMA isn't a genuine forward target at
-             entry - this mode trades fewer entries than the other four
-             as a result, reported separately.
-All five share MAX_BARS as a final time-stop backstop, real spread on
-entry, one trade at a time, and stop-takes-priority-over-target on a
-same-bar double-touch (this project's standing convention).
+EXIT HISTORY: an earlier pass tested five exit mechanisms as separate,
+competing options (TRAIL, FIXED_PTS, EMA_RECROSS, ATR_STOP, MA600_TARGET -
+each described individually in git history) as an honest K=5 comparison;
+none survived. The user then clarified that wasn't the question - they
+were never asking "which exit wins", they were describing ONE combined
+rule using several of those pieces together. That's COMBINED below, the
+real, final construction, tested alone with its own honest K=1 (not
+folded into the earlier K=5 family, which is now superseded).
 
-Honest K for this whole test: K=5 (one entry construction, five exit
-variants compared against it). Sidak-corrected significance bar for
-"best of 5" = 1-(1-0.05)**(1/5) ~= 0.0102, not the usual 0.05 - stated
-again next to each result below.
+COMBINED EXIT (2026-10-06, the user's own final framing - "either/or
+exits, whichever comes first"): on every bar while a position is open,
+check all three and exit on whichever triggers first:
+  1. STOP: the structural stop above (below/above the 21/50 EMAs) - this
+     always takes priority if it coincides with either of the below on
+     the same bar (this project's standing "stop wins ties" convention).
+  2. MA600 TARGET: price reaching the 600 EMA (Aurelius's next slower
+     moving average), AT that EMA's own live price - but ONLY for trades
+     where the 600 EMA was actually ahead of price at entry (the fix
+     from the K=5 pass: about half of fills had the 600 EMA already
+     behind entry, which isn't a real target at all). A trade without a
+     valid 600 EMA target at entry simply can't exit via this leg - the
+     stop and the reversal exit below still apply to it normally.
+  3. REVERSAL: the 21/50 EMAs crossing back against the trade (the same
+     mechanism that triggered entry, mirrored) - a normal retest that
+     merely touches or closes slightly past one MA is NOT this; only an
+     actual EMA21/50 re-cross is.
+MAX_BARS remains a final time-stop backstop if none of the three ever
+fire. Real spread on entry, one trade at a time, same entry construction
+as above (unchanged).
 """
 import sys
 
@@ -142,9 +122,16 @@ TRAIL_GIVEBACK_ATR = 1.5
 FIXED_TP = 15.0
 ATR_STOP_RR = 2.0
 
-EXIT_MODES = ["TRAIL", "FIXED_PTS", "EMA_RECROSS", "ATR_STOP", "MA600_TARGET"]
-SIDAK_K = len(EXIT_MODES)
-SIDAK_ALPHA = 1.0 - (1.0 - 0.05) ** (1.0 / SIDAK_K)
+# 2026-10-06: the earlier 5-way exit comparison (TRAIL/FIXED_PTS/
+# EMA_RECROSS/ATR_STOP/MA600_TARGET, K=5, none survived) was exploratory -
+# the user then clarified they were never asking "which exit wins", but
+# describing ONE combined rule: SL, OR the 600 EMA target, OR a genuine
+# EMA21/50 reversal, whichever comes first. That's COMBINED below, tested
+# alone now as the one real, pre-specified construction - own honest K=1,
+# not folded into the earlier 5-way family.
+EXIT_MODES = ["COMBINED"]
+SIDAK_K = 1
+SIDAK_ALPHA = 0.05
 
 
 def build_vwap(df):
@@ -220,7 +207,7 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, entries_by_bar, start_i, 
             hit_sl = (l[t] <= pos["sl"]) if d > 0 else (h[t] + sp >= pos["sl"])
             hit_tp = pos["tp"] is not None and ((h[t] >= pos["tp"]) if d > 0 else (l[t] <= pos["tp"]))
             ema_recross = False
-            if exit_mode == "EMA_RECROSS":
+            if exit_mode in ("EMA_RECROSS", "COMBINED"):
                 # 2026-10-06 fix (user correction): a normal retest that
                 # TOUCHES or closes slightly past one MA is not a reversal -
                 # only exit when the 21/50 EMAs actually cross back against
@@ -228,17 +215,21 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, entries_by_bar, start_i, 
                 # mirrored). A bounce off either MA keeps the trade open.
                 ema_recross = (ema21[t] < ema50[t]) if d > 0 else (ema21[t] > ema50[t])
             ma600_hit = False
-            if exit_mode == "MA600_TARGET":
+            if exit_mode in ("MA600_TARGET", "COMBINED") and pos.get("has_ma600_target", True):
                 ma600_hit = (h[t] >= ema600[t]) if d > 0 else (l[t] <= ema600[t])
             timed_out = (t - pos["entry_i"]) >= MAX_BARS
+            # priority on a same-bar coincidence: stop first (risk always
+            # wins), then the profit target if reached, then the trend-
+            # reversal exit, then the time-stop - this project's standing
+            # "stop/then-favorable-outcome" convention.
             if hit_sl:
                 px, reason = pos["sl"], "SL"
             elif hit_tp:
                 px, reason = pos["tp"], "TP"
-            elif ema_recross:
-                px, reason = c[t], "EMA_RECROSS"
             elif ma600_hit:
                 px, reason = ema600[t], "MA600_TARGET"
+            elif ema_recross:
+                px, reason = c[t], "EMA_RECROSS"
             elif timed_out:
                 px, reason = c[t], "TIMEOUT"
             else:
@@ -287,7 +278,18 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, entries_by_bar, start_i, 
                 tp = None
             else:
                 tp = None
-            pos = dict(entry_i=t, dir=d, entry=entry, sl=sl, tp=tp, atr=a, peak_px=entry)
+            # COMBINED (2026-10-06, user's own framing): not a comparison of
+            # exit options, ONE rule - SL, the 600 EMA target (only when
+            # it's actually ahead of price, same fix as MA600_TARGET above),
+            # or a genuine EMA21/50 reversal (EMA_RECROSS) - whichever comes
+            # first. A trade is still taken even when the 600 EMA isn't a
+            # valid target yet (SL/EMA_RECROSS still apply); it just can't
+            # exit via that leg until/unless that stops being true.
+            has_ma600_target = True
+            if exit_mode == "COMBINED":
+                has_ma600_target = not ((d > 0 and ema600[t] <= entry) or (d < 0 and ema600[t] >= entry))
+            pos = dict(entry_i=t, dir=d, entry=entry, sl=sl, tp=tp, atr=a, peak_px=entry,
+                       has_ma600_target=has_ma600_target)
     return trades
 
 
@@ -336,8 +338,8 @@ if __name__ == "__main__":
     print(f"Walk-forward cutoff (70%): {m5['time'].iloc[cutoff]}")
     print(f"Entry: 21/50 EMA cross (min {SEP_MIN_ATR}xATR separation held for {SEP_LOOKBACK} bars before "
           f"the cross), then dip-to-VWAP + reclaim within {PULLBACK_MAX_BARS} bars.")
-    print(f"Honest K={SIDAK_K} ({SIDAK_K} exit variants vs the same entry) -> "
-          f"Sidak-corrected significance bar p<{SIDAK_ALPHA:.4f}, not p<0.05.\n")
+    print(f"Honest K={SIDAK_K} (one combined exit rule - SL / 600-EMA target / EMA reversal, whichever "
+          f"first) -> significance bar p<{SIDAK_ALPHA:.4f}.\n")
 
     entries = find_entries(ema21, ema50, vwap, atr, n)
     print(f"total triggered entries across full history: {len(entries)}\n")
