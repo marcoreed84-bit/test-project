@@ -101,7 +101,16 @@ single-shot results):
              showed price reacting to/rejecting. Exit fills AT the 600
              EMA's own price the moment it's reached (h[t]>=ema600[t] for
              a long, mirrored for a short) - a dynamic, price-level
-             target, not a fixed distance.
+             target, not a fixed distance. 2026-10-06 fix: the 600 EMA is
+             NOT guaranteed to sit above entry for a long (unrelated,
+             independent, slow average) - first run showed a flat-out
+             impossible 0% win rate even on trades that "hit their own
+             target", traced to ~half the fills already having the 600
+             EMA on the wrong side at entry, so the "target" was already
+             passed and triggered near-instantly at a loss. Now skipped
+             entirely when the 600 EMA isn't a genuine forward target at
+             entry - this mode trades fewer entries than the other four
+             as a result, reported separately.
 All five share MAX_BARS as a final time-stop backstop, real spread on
 entry, one trade at a time, and stop-takes-priority-over-target on a
 same-bar double-touch (this project's standing convention).
@@ -264,6 +273,18 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, entries_by_bar, start_i, 
                 tp = entry + d * ATR_STOP_RR * risk
             elif exit_mode == "FIXED_PTS":
                 tp = entry + d * FIXED_TP
+            elif exit_mode == "MA600_TARGET":
+                # 2026-10-06 fix (real bug found by investigating a 0% win
+                # rate on the trades that supposedly hit their own target):
+                # the 600 EMA is NOT guaranteed to sit above entry for a
+                # long (it's a slow, independent average, unrelated to the
+                # 21/50/VWAP entry logic) - about half the time it was
+                # already below entry, so "price rises to touch it" was
+                # satisfied almost immediately, at a LOSING price. Skip any
+                # trade where the 600 EMA isn't actually a forward target.
+                if (d > 0 and ema600[t] <= entry) or (d < 0 and ema600[t] >= entry):
+                    continue
+                tp = None
             else:
                 tp = None
             pos = dict(entry_i=t, dir=d, entry=entry, sl=sl, tp=tp, atr=a, peak_px=entry)
