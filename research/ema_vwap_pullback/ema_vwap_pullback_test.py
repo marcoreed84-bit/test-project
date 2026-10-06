@@ -34,6 +34,19 @@ against what you meant before trusting the numbers):
    crosses back below it). If no reclaim happens within the window, no
    trade - the cross is simply skipped, not retried.
 
+4. EXTENSION FILTER (2026-10-06 fix, real bug the user caught by asking
+   why trades were stopping out in 10-15 minutes): the trigger above is
+   defined purely on the EMA21 LINE crossing VWAP - both smoothed,
+   lagging series. Checking real examples directly showed raw PRICE is
+   often already 2+ ATR away from the EMAs by the time that lagging cross
+   confirms - i.e. the fill was chasing an already-extended move, not
+   entering near the reclaim, which is exactly when a quick pullback/
+   stop-out is likely. Fixed by rejecting any fill more than
+   EXTENSION_MAX_ATR x ATR away from the nearer of the two EMAs at the
+   fill bar. This cuts the raw signal count hard (805 -> 216 executed
+   trades) - most of the original "signals" were exactly this chasing
+   problem, not a small edge case.
+
 SESSION VWAP: identical definition to research/meridian/msim.py's
 build_ctx() - cumulative (typical price x tick volume) / cumulative tick
 volume, reset at each new calendar day. Not a new VWAP definition.
@@ -61,9 +74,13 @@ single-shot results):
   FIXED_PTS: structural stop unchanged throughout, fixed target FIXED_TP
              price units away - a single pre-specified distance, not
              swept.
-  EMA_BREAK: structural stop as a hard backstop only; the live exit is
-             the trend itself breaking - close back below the 21 EMA OR
-             the 50 EMA (long; mirrored for short). No fixed target.
+  EMA_RECROSS: structural stop as a hard backstop only; the live exit is
+             the trend structure itself reversing - the 21/50 EMAs
+             crossing back against the trade direction (the same
+             mechanism that triggered entry, mirrored). A normal retest
+             that merely touches or closes slightly past one MA is NOT an
+             exit by itself - only an actual EMA21/50 re-cross is. No
+             fixed target.
   ATR_STOP:  plain bracket - structural stop, target ATR_STOP_RR x that
              trade's own structural stop DISTANCE (so the target still
              scales with how far price was from the MAs at entry, not a
@@ -91,6 +108,7 @@ SEP_LOOKBACK = 20
 SEP_MIN_ATR = 0.50
 PULLBACK_MAX_BARS = 24
 SL_BUFFER_ATR = 0.15   # small buffer beyond the MA itself, so the stop isn't a dead-exact touch
+EXTENSION_MAX_ATR = 1.0   # max allowed price-to-MA distance at fill - reject chasing an already-extended move
 MAX_BARS = 288
 
 TRAIL_TRIGGER_ATR = 1.0
@@ -98,7 +116,7 @@ TRAIL_GIVEBACK_ATR = 1.5
 FIXED_TP = 15.0
 ATR_STOP_RR = 2.0
 
-EXIT_MODES = ["TRAIL", "FIXED_PTS", "EMA_BREAK", "ATR_STOP"]
+EXIT_MODES = ["TRAIL", "FIXED_PTS", "EMA_RECROSS", "ATR_STOP"]
 SIDAK_K = len(EXIT_MODES)
 SIDAK_ALPHA = 1.0 - (1.0 - 0.05) ** (1.0 / SIDAK_K)
 
@@ -171,17 +189,21 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, entries_by_bar, start_i, end_i, e
                             pos["sl"] = trail_sl
             hit_sl = (l[t] <= pos["sl"]) if d > 0 else (h[t] + sp >= pos["sl"])
             hit_tp = pos["tp"] is not None and ((h[t] >= pos["tp"]) if d > 0 else (l[t] <= pos["tp"]))
-            ema_break = False
-            if exit_mode == "EMA_BREAK":
-                ema_break = (c[t] < ema21[t] or c[t] < ema50[t]) if d > 0 else \
-                            (c[t] > ema21[t] or c[t] > ema50[t])
+            ema_recross = False
+            if exit_mode == "EMA_RECROSS":
+                # 2026-10-06 fix (user correction): a normal retest that
+                # TOUCHES or closes slightly past one MA is not a reversal -
+                # only exit when the 21/50 EMAs actually cross back against
+                # the trade (the same mechanism that triggered entry,
+                # mirrored). A bounce off either MA keeps the trade open.
+                ema_recross = (ema21[t] < ema50[t]) if d > 0 else (ema21[t] > ema50[t])
             timed_out = (t - pos["entry_i"]) >= MAX_BARS
             if hit_sl:
                 px, reason = pos["sl"], "SL"
             elif hit_tp:
                 px, reason = pos["tp"], "TP"
-            elif ema_break:
-                px, reason = c[t], "EMA_BREAK"
+            elif ema_recross:
+                px, reason = c[t], "EMA_RECROSS"
             elif timed_out:
                 px, reason = c[t], "TIMEOUT"
             else:
@@ -199,6 +221,18 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, entries_by_bar, start_i, end_i, e
                  (max(ema21[t], ema50[t]) + SL_BUFFER_ATR * a)
             if (d > 0 and sl >= entry) or (d < 0 and sl <= entry):
                 continue   # degenerate: price already past its own stop at fill - skip
+            # 2026-10-06 fix (user-identified bug): the entry trigger only
+            # checks the EMA21/VWAP cross - a LAGGING, smoothed condition -
+            # with no check on where raw PRICE actually is. By the time the
+            # smoothed cross confirms, price can already have run well past
+            # the MAs (seen directly in real examples: entries 2+ ATR away
+            # from both EMAs at fill), i.e. chasing an already-extended move
+            # right before its own pullback, not entering near the reclaim.
+            # Reject any fill too far from the MAs to still be "at the
+            # retest zone" the construction is supposed to be trading.
+            near_ma = min(ema21[t], ema50[t]) if d > 0 else max(ema21[t], ema50[t])
+            if abs(entry - near_ma) > EXTENSION_MAX_ATR * a:
+                continue
             risk = abs(entry - sl)
             if exit_mode == "ATR_STOP":
                 tp = entry + d * ATR_STOP_RR * risk
@@ -224,7 +258,7 @@ def report(label, trades):
     pnl = np.array([t["pnl"] for t in trades])
     print(f"    {label}: n={n:4d}  win%={100*(pnl>0).mean():5.1f}  PF={pf(pnl):6.3f}  "
           f"net={pnl.sum():9.2f}  avg={pnl.mean():7.3f}")
-    for r in ("TP", "SL", "EMA_BREAK", "TIMEOUT"):
+    for r in ("TP", "SL", "EMA_RECROSS", "TIMEOUT"):
         cnt = sum(1 for t in trades if t["reason"] == r)
         if cnt:
             print(f"        {r}: {cnt} ({100*cnt/n:.1f}%)")
