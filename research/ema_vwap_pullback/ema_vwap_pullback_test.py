@@ -61,10 +61,10 @@ belongs there, not at an arbitrary ATR multiple from the entry price. A
 fill where price is already past its own would-be stop (entry beyond the
 MA) is skipped as degenerate, not force-placed with a negative-risk stop.
 
-EXIT - four separate, independently-tested options, each run against the
+EXIT - five separate, independently-tested options, each run against the
 SAME entries and the SAME structural stop above (own K for the entry
-construction is 1; comparing 4 exit options against it is an honest K=4
-comparison, Sidak-corrected below - not reported as 4 independent
+construction is 1; comparing 5 exit options against it is an honest K=5
+comparison, Sidak-corrected below - not reported as 5 independent
 single-shot results):
   TRAIL:     once floating profit reaches TRAIL_TRIGGER_ATR x entry ATR,
              the stop trails behind the peak favorable price by
@@ -85,13 +85,21 @@ single-shot results):
              trade's own structural stop DISTANCE (so the target still
              scales with how far price was from the MAs at entry, not a
              fixed ATR multiple).
-All four share MAX_BARS as a final time-stop backstop, real spread on
+  MA600_TARGET (2026-10-06, user's own idea from a second, cleaner chart
+             example): structural stop as above; target is the 600 EMA
+             itself - Aurelius's own next slower moving average above
+             (long) / below (short) price, which the user's example
+             showed price reacting to/rejecting. Exit fills AT the 600
+             EMA's own price the moment it's reached (h[t]>=ema600[t] for
+             a long, mirrored for a short) - a dynamic, price-level
+             target, not a fixed distance.
+All five share MAX_BARS as a final time-stop backstop, real spread on
 entry, one trade at a time, and stop-takes-priority-over-target on a
 same-bar double-touch (this project's standing convention).
 
-Honest K for this whole test: K=4 (one entry construction, four exit
+Honest K for this whole test: K=5 (one entry construction, five exit
 variants compared against it). Sidak-corrected significance bar for
-"best of 4" = 1-(1-0.05)**(1/4) ~= 0.0127, not the usual 0.05 - stated
+"best of 5" = 1-(1-0.05)**(1/5) ~= 0.0102, not the usual 0.05 - stated
 again next to each result below.
 """
 import sys
@@ -116,7 +124,7 @@ TRAIL_GIVEBACK_ATR = 1.5
 FIXED_TP = 15.0
 ATR_STOP_RR = 2.0
 
-EXIT_MODES = ["TRAIL", "FIXED_PTS", "EMA_RECROSS", "ATR_STOP"]
+EXIT_MODES = ["TRAIL", "FIXED_PTS", "EMA_RECROSS", "ATR_STOP", "MA600_TARGET"]
 SIDAK_K = len(EXIT_MODES)
 SIDAK_ALPHA = 1.0 - (1.0 - 0.05) ** (1.0 / SIDAK_K)
 
@@ -163,7 +171,7 @@ def find_entries(ema21, ema50, vwap, atr, n):
     return entries
 
 
-def simulate(o, h, l, c, sp_pts, ema21, ema50, entries_by_bar, start_i, end_i, exit_mode):
+def simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, entries_by_bar, start_i, end_i, exit_mode):
     trades = []
     pos = None
     for t in range(start_i, end_i):
@@ -197,6 +205,9 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, entries_by_bar, start_i, end_i, e
                 # the trade (the same mechanism that triggered entry,
                 # mirrored). A bounce off either MA keeps the trade open.
                 ema_recross = (ema21[t] < ema50[t]) if d > 0 else (ema21[t] > ema50[t])
+            ma600_hit = False
+            if exit_mode == "MA600_TARGET":
+                ma600_hit = (h[t] >= ema600[t]) if d > 0 else (l[t] <= ema600[t])
             timed_out = (t - pos["entry_i"]) >= MAX_BARS
             if hit_sl:
                 px, reason = pos["sl"], "SL"
@@ -204,6 +215,8 @@ def simulate(o, h, l, c, sp_pts, ema21, ema50, entries_by_bar, start_i, end_i, e
                 px, reason = pos["tp"], "TP"
             elif ema_recross:
                 px, reason = c[t], "EMA_RECROSS"
+            elif ma600_hit:
+                px, reason = ema600[t], "MA600_TARGET"
             elif timed_out:
                 px, reason = c[t], "TIMEOUT"
             else:
@@ -258,7 +271,7 @@ def report(label, trades):
     pnl = np.array([t["pnl"] for t in trades])
     print(f"    {label}: n={n:4d}  win%={100*(pnl>0).mean():5.1f}  PF={pf(pnl):6.3f}  "
           f"net={pnl.sum():9.2f}  avg={pnl.mean():7.3f}")
-    for r in ("TP", "SL", "EMA_RECROSS", "TIMEOUT"):
+    for r in ("TP", "SL", "EMA_RECROSS", "MA600_TARGET", "TIMEOUT"):
         cnt = sum(1 for t in trades if t["reason"] == r)
         if cnt:
             print(f"        {r}: {cnt} ({100*cnt/n:.1f}%)")
@@ -281,6 +294,7 @@ if __name__ == "__main__":
     atr = B.wilder_atr(h, l, c, 14)
     ema21 = B.ema(c, 21)
     ema50 = B.ema(c, 50)
+    ema600 = B.ema(c, 600)
     vwap = build_vwap(m5)
     n = len(m5)
     cutoff = int(n * 0.70)
@@ -288,7 +302,7 @@ if __name__ == "__main__":
     print(f"Walk-forward cutoff (70%): {m5['time'].iloc[cutoff]}")
     print(f"Entry: 21/50 EMA cross (min {SEP_MIN_ATR}xATR separation held for {SEP_LOOKBACK} bars before "
           f"the cross), then dip-to-VWAP + reclaim within {PULLBACK_MAX_BARS} bars.")
-    print(f"Honest K={SIDAK_K} (4 exit variants vs the same entry) -> "
+    print(f"Honest K={SIDAK_K} ({SIDAK_K} exit variants vs the same entry) -> "
           f"Sidak-corrected significance bar p<{SIDAK_ALPHA:.4f}, not p<0.05.\n")
 
     entries = find_entries(ema21, ema50, vwap, atr, n)
@@ -299,11 +313,11 @@ if __name__ == "__main__":
 
     for mode in EXIT_MODES:
         print(f"{'='*92}\nEXIT MODE: {mode}\n{'='*92}")
-        is_trades = simulate(o, h, l, c, sp_pts, ema21, ema50, is_eb, 60, cutoff, mode)
+        is_trades = simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, is_eb, 60, cutoff, mode)
         print("  IN-SAMPLE (first 70%) - transparency only")
         report(mode, is_trades)
 
-        oos_trades = simulate(o, h, l, c, sp_pts, ema21, ema50, oos_eb, cutoff, n, mode)
+        oos_trades = simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, oos_eb, cutoff, n, mode)
         print("  OUT-OF-SAMPLE (last 30%, untouched) - this is the verdict")
         report(mode, oos_trades)
         n_oos = len(oos_trades)
@@ -321,7 +335,7 @@ if __name__ == "__main__":
         null_pfs = []
         for seed in range(NDRAWS):
             rb = random_entries_matched(oos_dl, cutoff, n, seed)
-            ntrades = simulate(o, h, l, c, sp_pts, ema21, ema50, rb, cutoff, n, mode)
+            ntrades = simulate(o, h, l, c, sp_pts, ema21, ema50, ema600, rb, cutoff, n, mode)
             pnl = [t["pnl"] for t in ntrades]
             null_pfs.append(pf(pnl) if pnl else 0.0)
         null_pfs = np.array(null_pfs)
