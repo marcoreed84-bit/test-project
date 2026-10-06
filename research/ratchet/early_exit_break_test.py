@@ -92,11 +92,11 @@ if __name__ == "__main__":
     print(f"{'='*92}\nSHIPPED Ratchet + early-exit-on-break rule (candidate)\n{'='*92}")
     for label, start, end in (("IN-SAMPLE (first 70%)", full_start, cutoff_time),
                                ("OUT-OF-SAMPLE (last 30%)", cutoff_time, full_end)):
-        trades = S.simulate(ctx, p_candidate, start=start, end=end)
+        trades, _ = S.simulate(ctx, p_candidate, start=start, end=end)
         report(label, trades)
 
     print(f"\n{'='*92}\nFor reference: shipped Ratchet (no early-exit rule)\n{'='*92}")
     for label, start, end in (("IN-SAMPLE (first 70%)", full_start, cutoff_time),
                                ("OUT-OF-SAMPLE (last 30%)", cutoff_time, full_end)):
-        trades = S.simulate(ctx, S.SHIPPED, start=start, end=end)
+        trades, _ = S.simulate(ctx, S.SHIPPED, start=start, end=end)
         report(label, trades)
