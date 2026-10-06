@@ -58,7 +58,9 @@ import msim as M      # noqa: E402
 
 POINT = B.POINT
 RETEST_TOL_ATR = 0.30
-RETEST_MAX_BARS = 24
+RETEST_MAX_BARS = 3   # 2026-10-06 (user correction): "the next couple candles", not a 2h window -
+                       # a retest that takes hours to show up has already lost whatever immediacy
+                       # made it a retest rather than just noise; tightened 24 -> 3 bars (15 min)
 
 
 def simulate_retest(ctx, p=M.V102, start=M.WIN_START, end=M.WIN_END):
