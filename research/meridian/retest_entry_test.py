@@ -23,21 +23,28 @@ reason vwap_cross_entry_test.py gives: the reversal-close logic shares the
 same `above` array as the entry trigger, and entry_fn's hook bypasses the
 S/R filter).
 
-SEQUENCE:
+SEQUENCE (2026-10-06 revised, user's second chart example: a touch that
+gets blown straight through, with no bounce, is a FAILED retest and "no
+trade should have been taken" - a mere touch is not enough):
   1. Cross+confirm gate fires at bar s=t-1 (same as shipped) - this ARMS a
      pending setup, direction d, but does NOT enter yet.
   2. Scanning forward from bar t, within RETEST_MAX_BARS bars: look for the
      first bar where price actually comes back within RETEST_TOL_ATR x ATR
      of EITHER the 21 or 50 EMA (close within that tolerance of either
-     line) - "price is now buying the 21/50 EMA" per the user's own words.
-  3. If an OPPOSING 21/50 cross happens before a retest is found, the setup
-     is invalidated (cancelled, not retried).
-  4. On finding the retest bar, enter at the FOLLOWING bar's open (signal-
-     then-fill, same convention as every other construction in this
-     project), real spread charged, stop = 2.5xATR (unchanged), S/R filter
-     re-checked at the entry bar (unchanged).
-  5. If no retest happens within the window, no trade - skipped, not
-     retried.
+     line) - the TOUCH.
+  3. CONFIRMATION: the very next bar must close back above BOTH EMAs
+     (long; mirrored for short) - a genuine bounce. If it instead closes
+     below BOTH EMAs (broke straight through), the retest FAILED and the
+     setup is invalidated - no trade. If it's ambiguous (between the two
+     EMAs), keep waiting within what's left of the window.
+  4. If an OPPOSING 21/50 cross happens at any point before entry, the
+     setup is invalidated (cancelled, not retried).
+  5. On confirmation, enter at the FOLLOWING bar's open (signal-then-fill,
+     same convention as every other construction in this project), real
+     spread charged, stop = 2.5xATR (unchanged), S/R filter re-checked at
+     the entry bar (unchanged).
+  6. If no confirmed bounce happens within the window, no trade - skipped,
+     not retried.
 
 Honest K=1 (single pre-specified construction, no threshold sweep). Full
 real GOLD M5 history (2022-07-04 onward, NOT the narrow 2026-01-01..09-21
@@ -121,14 +128,30 @@ def simulate_retest(ctx, p=M.V102, start=M.WIN_START, end=M.WIN_END):
             a = atr[s]
             if not (a > 0):
                 return
-            tol = RETEST_TOL_ATR * a
-            retested = (abs(c[s] - m21[s]) <= tol) or (abs(c[s] - m50[s]) <= tol)
-            if not retested:
+            if pending.get("touched_i") is None:
+                tol = RETEST_TOL_ATR * a
+                retested = (abs(c[s] - m21[s]) <= tol) or (abs(c[s] - m50[s]) <= tol)
+                if not retested:
+                    return
+                stats["retested"] += 1
+                pending["touched_i"] = s
+                return   # wait for the NEXT bar to confirm the bounce - a mere touch isn't a
+                         # successful retest (2026-10-06, user's own chart example: a touch that
+                         # gets blown straight through is a FAILED retest, not a trade signal)
+            # confirmation bar: did price actually bounce back above/below
+            # BOTH EMAs (long/short), or did it break straight through them?
+            bounced = (c[s] > m21[s] and c[s] > m50[s]) if d > 0 else (c[s] < m21[s] and c[s] < m50[s])
+            broke_through = (c[s] < m21[s] and c[s] < m50[s]) if d > 0 else (c[s] > m21[s] and c[s] > m50[s])
+            if broke_through:
+                stats["failed_retest"] = stats.get("failed_retest", 0) + 1
+                pending = None
                 return
-            stats["retested"] += 1
+            if not bounced:
+                return   # still ambiguous (between the two EMAs) - keep waiting within the window
+            stats["confirmed"] = stats.get("confirmed", 0) + 1
             # entry fires at THIS bar's open (bar t, the one right after the
-            # retest bar s closed) - same signal-bar-then-next-open fill
-            # convention used throughout this project.
+            # confirmation bar s closed) - same signal-bar-then-next-open
+            # fill convention used throughout this project.
             if p.max_spread > 0 and spread[t] > p.max_spread:
                 stats["blk_spread"] += 1
                 pending = None
@@ -142,6 +165,7 @@ def simulate_retest(ctx, p=M.V102, start=M.WIN_START, end=M.WIN_END):
             entry = o[t] + sp if d > 0 else o[t]
             sl = entry - d * p.stop_atr * a
             pos = dict(entry_i=t, entry_time=t64[t], dir=d, entry=entry, sl=sl, sl0=sl, atr=a, peak=entry, bars=0)
+            pending = None
             pending = None
 
     point = POINT if p.point is None else p.point
@@ -233,7 +257,9 @@ if __name__ == "__main__":
                                ("OUT-OF-SAMPLE (last 30%)", cutoff_time, full_end)):
         trades, stats = simulate_retest(ctx, M.V102, start=start, end=end)
         report(label, trades)
-        print(f"    armed={stats['armed']}  retested={stats['retested']}  invalidated={stats['invalidated']}  "
+        print(f"    armed={stats['armed']}  touched={stats['retested']}  "
+              f"confirmed(bounced)={stats.get('confirmed',0)}  failed_retest(broke_through)="
+              f"{stats.get('failed_retest',0)}  invalidated={stats['invalidated']}  "
               f"timed_out={stats['timed_out']}  blk_sr={stats['blk_sr']}")
 
     print(f"\n{'='*92}\nFor reference: shipped V102 (enters immediately, no retest) over the SAME splits\n{'='*92}")
