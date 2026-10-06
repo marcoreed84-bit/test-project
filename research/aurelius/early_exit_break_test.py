@@ -87,21 +87,21 @@ if __name__ == "__main__":
     h4 = E.load_h4()
     print(f"Real GOLD M5: {df['time'].iloc[0]} .. {df['time'].iloc[-1]}  ({len(df)} bars)")
     ctx = E.build_context(df, h4, P)
-    cutoff_time = df["time"].iloc[int(len(df) * 0.70)]
-    print(f"Walk-forward cutoff (70%): {cutoff_time}\n")
+    cutoff_i = int(len(df) * 0.70)
+    print(f"Walk-forward cutoff (70%): {df['time'].iloc[cutoff_i]}\n")
 
     real_trades = simulate(ctx)
     cand_trades = simulate(ctx, extra_exit=make_early_exit_fn(ctx), extra_exit_reason="EARLY_EXIT_BROKE")
     for t in real_trades + cand_trades:
         if "pnl" not in t:
-            t["pnl"] = t["exit_px"] - t["entry_px"] if t["dir"] > 0 else t["entry_px"] - t["exit_px"]
+            t["pnl"] = (t["exit_px"] - t["entry_px"]) * t["dir"]
 
     print(f"{'='*92}\nCANDIDATE: shipped v1.46 + early-exit-on-break rule\n{'='*92}")
-    for label, trs in (("IN-SAMPLE (first 70%)", [t for t in cand_trades if t["entry_time"] < cutoff_time]),
-                        ("OUT-OF-SAMPLE (last 30%)", [t for t in cand_trades if t["entry_time"] >= cutoff_time])):
+    for label, trs in (("IN-SAMPLE (first 70%)", [t for t in cand_trades if t["entry_i"] < cutoff_i]),
+                        ("OUT-OF-SAMPLE (last 30%)", [t for t in cand_trades if t["entry_i"] >= cutoff_i])):
         report(label, trs)
 
     print(f"\n{'='*92}\nFor reference: shipped v1.46 (no early-exit rule)\n{'='*92}")
-    for label, trs in (("IN-SAMPLE (first 70%)", [t for t in real_trades if t["entry_time"] < cutoff_time]),
-                        ("OUT-OF-SAMPLE (last 30%)", [t for t in real_trades if t["entry_time"] >= cutoff_time])):
+    for label, trs in (("IN-SAMPLE (first 70%)", [t for t in real_trades if t["entry_i"] < cutoff_i]),
+                        ("OUT-OF-SAMPLE (last 30%)", [t for t in real_trades if t["entry_i"] >= cutoff_i])):
         report(label, trs)
