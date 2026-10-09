@@ -44,6 +44,13 @@ def pf(pnl):
     return gw / gl if gl > 0 else float("inf")
 
 
+def max_drawdown(pnl):
+    equity = np.cumsum(pnl)
+    peak = np.maximum.accumulate(equity)
+    dd = peak - equity
+    return dd.max() if len(dd) else 0.0
+
+
 def report(label, trades):
     n = len(trades)
     if n == 0:
@@ -51,7 +58,7 @@ def report(label, trades):
         return
     pnl = np.array([t["pnl"] for t in trades])
     print(f"  {label}: n={n:4d}  win%={100*(pnl>0).mean():5.1f}  PF={pf(pnl):6.3f}  "
-          f"net={pnl.sum():9.2f}  avg={pnl.mean():7.3f}")
+          f"net={pnl.sum():9.2f}  max_dd={max_drawdown(pnl):9.2f}  avg={pnl.mean():7.3f}")
 
 
 def random_dirs_matched(dirs, eligible_bars, seed):
