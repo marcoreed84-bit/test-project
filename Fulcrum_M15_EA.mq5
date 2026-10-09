@@ -506,8 +506,43 @@
 //|  do not eliminate. Default 0.0 keeps v2.12 exactly; set 2.0 to test it for real.    |
 //+------------------------------------------------------------------+
 #property copyright "Fulcrum"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
+//+------------------------------------------------------------------+
+//|  v1.01 (2026-10-09): two real-validated changes from a research    |
+//|  pass on the shipped M15 defaults.                                  |
+//|                                                                      |
+//|  1. InpMinVolRatio 1.30 -> 1.10. Walk-forward search (9 thresholds,  |
+//|  1.0-2.0) ON IN-SAMPLE ONLY, then confirmed on untouched OOS: at     |
+//|  1.1x, OOS net 670.44 -> 940.16 (+40.2%), OOS PF 1.495 -> 1.559,     |
+//|  AND OOS max drawdown improves too (146.58 -> 109.17) - both sides   |
+//|  of the IS/OOS split and both profit and drawdown move the same      |
+//|  direction, the strongest kind of confirmation this project uses.    |
+//|  RSI-momentum and Stochastic entry filters were ALSO tested the      |
+//|  same night and found no real edge (RSI's best in-sample result      |
+//|  was identical to no filter at all; Stochastic %K/%D cross failed    |
+//|  in-sample outright) - not added.                                    |
+//|                                                                      |
+//|  2. NEW InpUseSellDipExit (default true). SELL trades only - real    |
+//|  diagnostic found SELL trades that close back above the 50-MA at     |
+//|  any point mid-trade are a real losing group (PF 0.405 letting it    |
+//|  ride vs PF 0.309 cut at the dip - a loss either way, just a         |
+//|  smaller one). Cutting immediately on the first such close: full-    |
+//|  history net 1235.04 -> 1411.84 (+14.3%), PF 1.483 -> 1.639, max     |
+//|  drawdown 150.27 -> 107.75 (-28.3%); sells alone: drawdown 332.24 -> |
+//|  189.74 (-42.9%). Confirmed on BOTH IS (+13.2% net) and OOS (+15.3%  |
+//|  net). Deliberately SELL-ONLY: the identical diagnostic on BUY       |
+//|  trades found the opposite shape - a brief 1-2 bar dip below the     |
+//|  50-MA is the bad signal, but a SUSTAINED 3+ bar dip is still net    |
+//|  positive (PF 1.926) - a blanket same-side rule would have clipped   |
+//|  that winning group, so this is not applied to buys.                 |
+//|                                                                      |
+//|  CAVEAT, same as every same-night change shipped across this         |
+//|  project tonight: Python-validated against the already bar-matched   |
+//|  sim.py, NOT YET confirmed by its own dedicated real MT5 Strategy     |
+//|  Tester A/B run. See research/fulcrum/sell_dip_exit_test.py and the   |
+//|  volume-threshold search in this session's own chat log.             |
+//+------------------------------------------------------------------+
 
 #include <Trade\Trade.mqh>
 
@@ -554,7 +589,7 @@ input double InpPullbackTolATR   = 0.25;    // how close to the 50 counts as "to
 input int    InpPullbackBars     = 10;      // lookback for the touch
 input bool   InpUseVolume        = true;
 input int    InpVolAvgBars       = 100;
-input double InpMinVolRatio      = 1.30;
+input double InpMinVolRatio      = 1.10;  // v1.01: was 1.30, walk-forward validated (see header)
 input bool   InpUseSRDist        = true;
 input int    InpSRDays           = 3;
 input double InpMinSRDistATR     = 0.50;
@@ -598,6 +633,10 @@ input double InpMinStopATR       = 0.0;     // M15 NOTE: kept at v2.13's default
                                              // the whole range beats the default; 2.0 is a mid-plateau pick, NOT
                                              // the grid maximum (that was 3.5, which is where a curve-fit would
                                              // have landed). RUN A REAL MT5 BACKTEST before trusting any of it.
+input bool   InpUseSellDipExit   = true;    // v1.01, real-validated, SELL trades only - see header. Exit a SELL
+                                             // immediately the first time price closes back above the MED MA
+                                             // (h50) while the position is open. NOT applied to buys (tested
+                                             // and found to hurt them - see header note).
 
 input group "=== Risk ==="
 input ENUM_LOTMODE InpLotMode    = LOT_FIXED;   // How the size is decided
@@ -1854,6 +1893,21 @@ void ManageOpenPosition()
    //--- WeekendStillOpen) - IsFridayCutoff here would just be dead weight
    //--- by the time a new bar completes, since the tick-level check
    //--- already caught it.
+
+   //--- v1.01 SELL DIP EXIT (real-validated, SELL only - see header).
+   //--- Checked on the same once-per-closed-bar cadence as everything
+   //--- else in this EA (ManageOpenPosition is only ever called from
+   //--- ProcessNewBar). close[1] is the bar that just completed.
+   if(InpUseSellDipExit && g_posDir < 0)
+     {
+      double m50;
+      if(MA(h50, 1, m50))
+        {
+         double close1 = iClose(_Symbol, PERIOD_CURRENT, 1);
+         if(close1 > m50)
+            CloseCurrentPosition("SELL_DIP_EXIT");
+        }
+     }
   }
 //+------------------------------------------------------------------+
 void ProcessNewBar()
