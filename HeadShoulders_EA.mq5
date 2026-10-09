@@ -252,6 +252,23 @@
 //|  dedups on the old key, and has no intrabar runner close. Update it and re-run the bar-match before trusting any new verdict built on v1.11 trades.         |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
+//|  v1.15 (2026-10-09): InpMaxSpreadPoints default 60 -> 50, real-        |
+//|  validated. User ran three real MT5 "ideal execution" A/B reports      |
+//|  (100% real ticks, no random-delay noise) at 50/55/60 over the same    |
+//|  window (2026-01-01 - 2026-10-08): 50 beat both 55 and 60 on EVERY     |
+//|  metric - net profit (11892.09 vs 10927.96 vs 10845.89), max drawdown  |
+//|  (17.08% vs 19.70% vs 19.69%), PF (1.608 vs 1.512 vs 1.507), win%       |
+//|  (47.69 vs 45.59 vs 45.59). Confirmed NOT a short-window artifact: full |
+//|  real 2014-2026 GOLD M15 history (research/trendbreaker/                |
+//|  hs_max_spread_filter_test.py) shows the same direction OOS - %PF       |
+//|  1.428->1.501, net% 38.34->41.46, both the best of the three tested.    |
+//|  55 is a near-total wash vs 60 in both tests - not worth using. No      |
+//|  other logic changed; purely a default-value update on an existing      |
+//|  input. Aurelius M5 was checked with the same 50/55/60 comparison the   |
+//|  same night and found the OPPOSITE (60 beats both tighter settings      |
+//|  there) - this is EA-specific, not a universal spread rule.             |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|  v1.12: AdvancePending() pending-pattern EXPIRY fix - same bug class as   |
 //|  v1.04's InpPullbackWindowBars fix, found in a different spot. The expiry  |
 //|  check measured a pattern's formation length and age in wall-clock          |
@@ -332,7 +349,7 @@
 //|  see CLAUDE.md's standing rule before reporting any verdict built on v1.14 trades.           |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.14"
+#property version   "1.15"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
@@ -372,7 +389,14 @@ input double InpRunnerTrailATR   = 0.5;    // Runner trail distance, x ATR
 input group "=== Trade management ==="
 input double InpLots             = 0.01;
 input int    InpMagic            = 20260925;
-input int    InpMaxSpreadPoints  = 60;     // Max spread to allow entry, points
+input int    InpMaxSpreadPoints  = 50;     // Max spread to allow entry, points (v1.15, real-validated:
+                                            // was 60, user's own real MT5 "ideal execution" A/B reports
+                                            // (2026-01-01 - 2026-10-08, all three of 50/55/60 tested)
+                                            // showed 50 beating both 55 and 60 on EVERY metric - net
+                                            // profit, max drawdown, PF, win% - confirmed on the full
+                                            // 2014-2026 real history too (OOS %PF 1.428->1.501, OOS
+                                            // net% 38.34->41.46). 55 is a near wash vs 60, not worth
+                                            // using. See research/trendbreaker/hs_max_spread_filter_test.py
 input int    InpSlippage         = 30;
 input int    InpEntryRetryMinutes = 60;    // Transient-failure entry retry, minutes (0 = off)
 
