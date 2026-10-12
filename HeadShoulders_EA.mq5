@@ -349,7 +349,7 @@
 //|  see CLAUDE.md's standing rule before reporting any verdict built on v1.14 trades.           |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.15"
+#property version   "1.16"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
@@ -383,8 +383,31 @@ input double InpPullbackTolATR   = 0.75;   // Retest tolerance, x ATR
 input int    InpPullbackWindowBars = 30;   // Retest window, bars
 
 input group "=== Trailing runner past target (real-MT5-confirmed default since v1.08) ==="
-input bool   InpUseRunner        = true;   // Trail stop past target, not fixed TP
+input bool   InpUseRunner        = true;   // Trail stop past target, not fixed TP (ignored if InpUseEma50Trail is on - see that input)
 input double InpRunnerTrailATR   = 0.5;    // Runner trail distance, x ATR
+
+input group "=== 50-EMA trail exit (v1.16 candidate, Python-validated both Gold+Silver) ==="
+input bool   InpUseEma50Trail    = true;    // REPLACES InpUseRunner/fixed target entirely when on (no broker TP
+                                             // either way, same as InpUseRunner - see CheckForEntry()). Real
+                                             // trade-off found testing the user's own idea (2026-10-12): instead
+                                             // of a fixed target + ATR-trail-after-target, trail the exit against
+                                             // the 50-EMA from bar one - close the trade the first time price
+                                             // closes back through it by more than InpEma50TrailBufferATR. Python-
+                                             // validated on BOTH real GOLD and SILVER M15 history (2014-2026,
+                                             // walk-forward IS/OOS): win% 43.5->52.2 (Gold) / 43.9->52.9 (Silver),
+                                             // PF 1.947->2.859 (Gold) / 1.882->2.985 (Silver) - both roughly
+                                             // double. BUT total net%, both instruments, is LOWER (Gold
+                                             // 223.96->179.93, Silver 361.62->295.99) - more frequent, smaller
+                                             // wins instead of fewer, bigger ones. Shipped ON because the much
+                                             // higher win rate/PF materially reduces losing-streak risk, which
+                                             // matters more than maximizing total return right now - but this is
+                                             // a real trade-off, not a strict improvement, and should be revisited
+                                             // once the account isn't under this kind of pressure. NOT YET
+                                             // confirmed by its own dedicated real MT5 Strategy Tester A/B run -
+                                             // see research/trendbreaker/hs_ema50_trail_test.py (Silver) and
+                                             // hs_ema50_trail_gold_test.py (Gold) in the research repo.
+input double InpEma50TrailBufferATR = 0.15; // Tolerance before the trail fires, x ATR (not swept, single pre-
+                                             // specified value both instruments were validated with)
 
 input group "=== Trade management ==="
 input double InpLots             = 0.01;
@@ -491,6 +514,11 @@ bool     g_skipCosmeticDraws = false;   // PERFORMANCE FIX (see header, and this
 datetime g_lastPanelDraw = 0;
 int      g_statTrades = 0, g_statWins = 0;
 int      g_rsiHandle = INVALID_HANDLE;   // InpUseRSIFilter - native iRSI(), not a manual port (see input comment)
+int      g_ema50TrailHandle = INVALID_HANDLE;   // InpUseEma50Trail - see that input's own comment
+bool     g_ema50TrailJustEntered = false;   // ManageEma50Trail() skips exactly one call right after entry - same
+                                             // bug class ManageRunner()'s own g_runnerJustArmed guards against:
+                                             // shift=1 on the entry bar's own OnTick pass is the pullback/retest
+                                             // touch bar, not a bar after entry.
 
 //--- InpUseRunner state - single-position EA, so one set of globals is enough (see ArmRunner()/ManageRunner())
 bool     g_runnerArmed = false;
@@ -657,6 +685,15 @@ int OnInit()
          return(INIT_FAILED);
         }
      }
+   if(InpUseEma50Trail)
+     {
+      g_ema50TrailHandle = iMA(_Symbol, PERIOD_CURRENT, 50, 0, MODE_EMA, PRICE_CLOSE);
+      if(g_ema50TrailHandle == INVALID_HANDLE)
+        {
+         Print("HeadShoulders_EA: iMA(50,EMA) handle creation failed for InpUseEma50Trail, error ", GetLastError());
+         return(INIT_FAILED);
+        }
+     }
    //--- InpUseRunner restart recovery (Opus review High finding, fixed
    //--- pre-first-MT5-run): a terminal restart/recompile/profile reload
    //--- while a runner trade is open would otherwise reset g_runnerArmed to
@@ -680,6 +717,7 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ReleaseInstanceLock();   // v1.11 - always; a chart/param change re-acquires it in the following OnInit()
    if(g_rsiHandle != INVALID_HANDLE) { IndicatorRelease(g_rsiHandle); g_rsiHandle = INVALID_HANDLE; }
+   if(g_ema50TrailHandle != INVALID_HANDLE) { IndicatorRelease(g_ema50TrailHandle); g_ema50TrailHandle = INVALID_HANDLE; }
    if(reason != REASON_CHARTCHANGE && reason != REASON_PARAMETERS)
      {
       ObjectsDeleteAll(0, g_pz);
@@ -1368,7 +1406,7 @@ int AttemptEntry(const int i, const int confirmShift)
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
    string cmt = P.top ? "H&S top" : "Inverse H&S";
-   double tp = InpUseRunner ? 0.0 : tgt;   // InpUseRunner replaces the fixed broker-side TP with ManageRunner()'s trailing stop - see its own input comment
+   double tp = (InpUseRunner || InpUseEma50Trail) ? 0.0 : tgt;   // InpUseRunner/InpUseEma50Trail both replace the fixed broker-side TP with their own trailing exit - see each input's own comment
    g_lastEntrySend = now;
    g_patterns[i].retryCount++;
    int sends = g_patterns[i].retryCount;
@@ -1392,7 +1430,8 @@ int AttemptEntry(const int i, const int confirmShift)
       if(sends > 1)
          PrintFormat("HeadShoulders_EA: %s entry FILLED at %s on send #%d (after transient retries).", cmt, DoubleToString(px, _Digits), sends);
       if(!g_skipCosmeticDraws) DrawEntryArrow(P, px);
-      if(InpUseRunner) ArmRunner(P, isBuy);
+      if(InpUseRunner && !InpUseEma50Trail) ArmRunner(P, isBuy);
+      if(InpUseEma50Trail) g_ema50TrailJustEntered = true;
       return(HS_ENTRY_FILLED);
      }
    if(rc == TRADE_RETCODE_PLACED || IsAmbiguousRetcode(rc))
@@ -1690,7 +1729,8 @@ void AdoptInflightFill(const bool posOpen)
    if(posOpen)
      {
       if(!g_skipCosmeticDraws) DrawEntryArrow(P, px);
-      if(InpUseRunner && !g_runnerArmed) ArmRunner(P, isBuy);
+      if(InpUseRunner && !InpUseEma50Trail && !g_runnerArmed) ArmRunner(P, isBuy);
+      if(InpUseEma50Trail) g_ema50TrailJustEntered = true;
       PrintFormat("HeadShoulders_EA: ambiguous %s entry DID fill - position #%I64u at %s ADOPTED%s.",
                   isBuy ? "BUY" : "SELL", g_ticket, DoubleToString(px, _Digits), InpUseRunner ? ", runner armed" : "");
      }
@@ -1766,6 +1806,41 @@ void ArmRunner(const HSPattern &P, const bool isBuy)
    g_runnerStop = P.stop;
    g_runnerJustArmed = true;   // ManageRunner() skips its very next call - see the note on that flag
    RunnerSaveState();
+  }
+//+------------------------------------------------------------------+
+//| v1.16 InpUseEma50Trail - see that input's own comment for the real |
+//| numbers. Checked once per new bar (called from the same place        |
+//| ManageRunner() is, OnTick()'s new-bar block), on the LAST CLOSED      |
+//| bar only (shift=1) - matches exactly how the Python research           |
+//| (hs_ema50_trail_test.py / hs_ema50_trail_gold_test.py) checked it:       |
+//| a bar-close comparison, not an intrabar/tick-level stop order, so a       |
+//| brief wick through the trail level without an actual close beyond it       |
+//| does not exit the trade. Active from bar one of the trade - unlike          |
+//| the runner, there is no "wait until target is first reached" gate.           |
+//+------------------------------------------------------------------+
+void ManageEma50Trail()
+  {
+   if(!InpUseEma50Trail || g_ticket == 0) return;
+   if(g_ema50TrailJustEntered) { g_ema50TrailJustEntered = false; return; }
+   if(!PositionSelectByTicket(g_ticket)) return;
+   bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+   double m50[];
+   ArraySetAsSeries(m50, true);
+   if(CopyBuffer(g_ema50TrailHandle, 0, 1, 1, m50) < 1) return;
+   double atrNow = CurrentATR();
+   if(atrNow <= 0.0) return;
+   double buf = InpEma50TrailBufferATR * atrNow;
+   double close1 = iClose(_Symbol, PERIOD_CURRENT, 1);
+   bool broke = isBuy ? (close1 < m50[0] - buf) : (close1 > m50[0] + buf);
+   if(!broke) return;
+   bool okc = trade.PositionClose(g_ticket, (ulong)InpSlippage);
+   uint rcc = trade.ResultRetcode();
+   if(okc && (rcc == TRADE_RETCODE_DONE || rcc == TRADE_RETCODE_DONE_PARTIAL))
+      PrintFormat("HeadShoulders_EA: InpUseEma50Trail - close[1] %s closed back through the 50-EMA %s (buffer %s), position #%I64u CLOSED.",
+                  DoubleToString(close1, _Digits), DoubleToString(m50[0], _Digits), DoubleToString(buf, _Digits), g_ticket);
+   else
+      PrintFormat("HeadShoulders_EA: InpUseEma50Trail close FAILED, retcode %u (%s) - will retry next bar, position #%I64u still open.",
+                  rcc, trade.ResultRetcodeDescription(), g_ticket);
   }
 void ManageRunner()
   {
@@ -2398,6 +2473,7 @@ void OnTick()
       AdvancePending();
       CheckForEntry();
       ManageRunner();
+      ManageEma50Trail();
       RefreshDrawings();
      }
    RunnerTick();               // finding #4 - tick-level re-try of a refused/clamped trail
