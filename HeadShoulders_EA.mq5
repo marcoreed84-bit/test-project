@@ -349,7 +349,7 @@
 //|  see CLAUDE.md's standing rule before reporting any verdict built on v1.14 trades.           |
 //+------------------------------------------------------------------+
 #property copyright "HeadShoulders_EA"
-#property version   "1.16"
+#property version   "1.17"
 #property description "Trades the real-validated H&S/Inverse H&S measured-move target (75%/69%/75% hit rate, M15/H4/D1) - stacked combo default since v1.08, tick-level transient-entry retry + execution hardening in v1.11"
 #property strict
 #include <Trade\Trade.mqh>
