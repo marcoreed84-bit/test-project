@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
     from hs_next_round_test import eval_pullback_and_runner
     real, missed_real = eval_pullback_and_runner(breakouts, h, l, c, STOP_BUFFER, RETEST_TOL, RETEST_WINDOW, 0.5)
-    real_pct = [dict(brk_q=r["brk_q"], top=r["top"], pnl_pct=r["pnl"] / c[max(0, r["brk_q"]-1)]) for r in real]
+    real_pct = [dict(brk_q=r["brk_q"], pnl_pct=r["pnl"] / c[max(0, r["brk_q"]-1)]) for r in real]
 
     cand, missed_cand = eval_ema50_trail(breakouts, h, l, c, m50, STOP_BUFFER, RETEST_TOL, RETEST_WINDOW, TRAIL_BUFFER_ATR)
 
