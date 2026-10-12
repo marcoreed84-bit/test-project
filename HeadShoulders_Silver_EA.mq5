@@ -534,7 +534,14 @@ datetime g_lastPanelDraw = 0;
 int      g_statTrades = 0, g_statWins = 0;
 int      g_rsiHandle = INVALID_HANDLE;   // InpUseRSIFilter - native iRSI(), not a manual port (see input comment)
 int      g_ema50TrailHandle = INVALID_HANDLE;   // InpUseEma50Trail - see that input's own comment
-bool     g_ema50TrailJustEntered = false;   // ManageEma50Trail() skips exactly one call right after entry - same
+datetime g_ema50TrailEntryBarTime = 0;   // bug fix (2026-10-12, real MT5 test): a plain "skip one call"
+                                          // bool flag only skips the SAME bar as entry - CopyBuffer's shift-1
+                                          // convention then makes the VERY NEXT call re-test the entry bar's
+                                          // OWN close (a bar only partially lived through, via the pullback/
+                                          // retest touch) against the 50-EMA, causing real 15-min (1-bar)
+                                          // closes with no real adverse move - this stores the entry bar's
+                                          // own open time so evaluation only starts once a bar strictly AFTER
+                                          // it has closed, regardless of how many ticks/calls occur in between.
                                              // bug class ManageRunner()'s own g_runnerJustArmed guards against:
                                              // shift=1 on the entry bar's own OnTick pass is the pullback/retest
                                              // touch bar, not a bar after entry.
@@ -1450,7 +1457,7 @@ int AttemptEntry(const int i, const int confirmShift)
          PrintFormat("HeadShoulders_EA: %s entry FILLED at %s on send #%d (after transient retries).", cmt, DoubleToString(px, _Digits), sends);
       if(!g_skipCosmeticDraws) DrawEntryArrow(P, px);
       if(InpUseRunner && !InpUseEma50Trail) ArmRunner(P, isBuy);
-      if(InpUseEma50Trail) g_ema50TrailJustEntered = true;
+      if(InpUseEma50Trail) g_ema50TrailEntryBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
       return(HS_ENTRY_FILLED);
      }
    if(rc == TRADE_RETCODE_PLACED || IsAmbiguousRetcode(rc))
@@ -1749,7 +1756,7 @@ void AdoptInflightFill(const bool posOpen)
      {
       if(!g_skipCosmeticDraws) DrawEntryArrow(P, px);
       if(InpUseRunner && !InpUseEma50Trail && !g_runnerArmed) ArmRunner(P, isBuy);
-      if(InpUseEma50Trail) g_ema50TrailJustEntered = true;
+      if(InpUseEma50Trail) g_ema50TrailEntryBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
       PrintFormat("HeadShoulders_EA: ambiguous %s entry DID fill - position #%I64u at %s ADOPTED%s.",
                   isBuy ? "BUY" : "SELL", g_ticket, DoubleToString(px, _Digits), InpUseRunner ? ", runner armed" : "");
      }
@@ -1840,7 +1847,8 @@ void ArmRunner(const HSPattern &P, const bool isBuy)
 void ManageEma50Trail()
   {
    if(!InpUseEma50Trail || g_ticket == 0) return;
-   if(g_ema50TrailJustEntered) { g_ema50TrailJustEntered = false; return; }
+   datetime closedBarTime = iTime(_Symbol, PERIOD_CURRENT, 1);
+   if(closedBarTime <= g_ema50TrailEntryBarTime) return;   // entry bar itself not evaluated yet
    if(!PositionSelectByTicket(g_ticket)) return;
    bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
    double m50[];
