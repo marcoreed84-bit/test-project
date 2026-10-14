@@ -18,7 +18,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -97,6 +97,7 @@ int      g_armSeconds = InpArmSeconds;   // live-adjustable from the panel's Arm
 
 bool g_dragging = false;
 int  g_dragOffX = 0, g_dragOffY = 0;
+ulong g_dragStartMs = 0;   // safety timeout - see OnTimer
 
 struct Ctrl { string name; int dx; int dy; };
 Ctrl g_ctrls[];
@@ -338,6 +339,70 @@ void CloseAll()
       if(trade.PositionClose(ticket, (ulong)InpSlippage)) closed++; else failed++;
      }
    PrintFormat("TradePanel: CLOSE ALL - %d closed, %d failed.", closed, failed);
+  }
+
+//+------------------------------------------------------------------+
+//| Applies a new SL (or TP) to every matched open position, keeping  |
+//| that position's OWN current TP (or SL) unchanged - trade.PositionModify()
+//| always sets both levels together, so the one not being edited here
+//| has to be re-read from the position and re-sent, or it would get
+//| wiped to 0 (no stop/target at all) rather than left alone.
+//+------------------------------------------------------------------+
+void SetSLForAll(double newSL)
+  {
+   int total = PositionsTotal();
+   int done = 0, failed = 0;
+   for(int i = total - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionMatches(ticket)) continue;
+      double tp = PositionGetDouble(POSITION_TP);
+      if(trade.PositionModify(ticket, newSL, tp)) done++; else failed++;
+     }
+   PrintFormat("TradePanel: Set SL=%s - %d position(s) updated, %d failed.",
+               DoubleToString(newSL, _Digits), done, failed);
+   if(failed > 0)
+      Alert("TradePanel: Set SL failed on ", failed, " position(s) - check Experts log (common cause: price too close to market, broker's stop level).");
+  }
+
+//+------------------------------------------------------------------+
+void SetTPForAll(double newTP)
+  {
+   int total = PositionsTotal();
+   int done = 0, failed = 0;
+   for(int i = total - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionMatches(ticket)) continue;
+      double sl = PositionGetDouble(POSITION_SL);
+      if(trade.PositionModify(ticket, sl, newTP)) done++; else failed++;
+     }
+   PrintFormat("TradePanel: Set TP=%s - %d position(s) updated, %d failed.",
+               DoubleToString(newTP, _Digits), done, failed);
+   if(failed > 0)
+      Alert("TradePanel: Set TP failed on ", failed, " position(s) - check Experts log (common cause: price too close to market, broker's stop level).");
+  }
+
+//+------------------------------------------------------------------+
+//| Fills the SL/TP edit fields from the first matched open position -|
+//| convenience so you can nudge an existing level instead of typing   |
+//| one from scratch. Multiple matched positions only fills from the   |
+//| first found; Set SL/Set TP still apply to ALL of them.             |
+//+------------------------------------------------------------------+
+void FillCurrentSLTP()
+  {
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionMatches(ticket)) continue;
+      double sl = PositionGetDouble(POSITION_SL);
+      double tp = PositionGetDouble(POSITION_TP);
+      ObjectSetString(0, PFX + "slEdit", OBJPROP_TEXT, DoubleToString(sl, _Digits));
+      ObjectSetString(0, PFX + "tpEdit", OBJPROP_TEXT, DoubleToString(tp, _Digits));
+      return;
+     }
+   Alert("TradePanel: no open position to read SL/TP from.");
   }
 
 //+------------------------------------------------------------------+
@@ -666,7 +731,20 @@ void BuildPanel()
    y += 38;
    MkButton("cAll", 12, y, w - 24, 30, "CLOSE ALL OPEN TRADES", C'150,40,40', clrWhite, 10);
 
-   y += 42;
+   y += 40;
+   MkLabel("sltpLbl", 12, y, "Manual SL / TP for current position(s):", InpTextColor, 10);
+   y += 22;
+   MkLabel("slLbl", 12, y + 3, "SL:", InpTextColor, 10);
+   MkEdit("slEdit", 50, y, 110, 24, "0.00");
+   MkButton("setSL", 168, y, 76, 24, "Set SL", C'70,70,78', clrWhite, 10);
+   y += 30;
+   MkLabel("tpLbl", 12, y + 3, "TP:", InpTextColor, 10);
+   MkEdit("tpEdit", 50, y, 110, 24, "0.00");
+   MkButton("setTP", 168, y, 76, 24, "Set TP", C'70,70,78', clrWhite, 10);
+   y += 30;
+   MkButton("fillCur", 12, y, w - 24, 22, "Fill fields with current SL/TP", C'55,55,62', clrSilver, 9);
+
+   y += 36;
    MkLabel("statLbl", 12, y, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver, 10);
 
    y += 24;
@@ -700,11 +778,15 @@ void RebuildPanel()
   {
    string lotText = ObjectGetString(0, PFX + "lotEdit", OBJPROP_TEXT);
    string cntText = ObjectGetString(0, PFX + "cntEdit", OBJPROP_TEXT);
+   string slText  = ObjectGetString(0, PFX + "slEdit", OBJPROP_TEXT);
+   string tpText  = ObjectGetString(0, PFX + "tpEdit", OBJPROP_TEXT);
    ObjectsDeleteAll(0, PFX);
    g_nCtrls = 0;
    BuildPanel();
    ObjectSetString(0, PFX + "lotEdit", OBJPROP_TEXT, lotText);
    ObjectSetString(0, PFX + "cntEdit", OBJPROP_TEXT, cntText);
+   ObjectSetString(0, PFX + "slEdit", OBJPROP_TEXT, slText);
+   ObjectSetString(0, PFX + "tpEdit", OBJPROP_TEXT, tpText);
    UpdateExposureLabel();
    UpdateMarketLabel();
    ChartRedraw(0);
@@ -713,12 +795,16 @@ void RebuildPanel()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   BuildPanel();
    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
 
    ApplyTheme();
    SetupMAs();
+   //--- backfill BEFORE building the panel - otherwise the whole historical
+   //--- MA/VWAP backfill gets created AFTER the panel and buries it from the
+   //--- moment of attach, not just until the first new bar's RebuildPanel()
+   //--- call (same creation-order reasoning as RebuildPanel's own header).
    BackfillOverlayLines();
+   BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
    EventSetTimer(1);
@@ -756,6 +842,14 @@ void OnTimer()
    UpdateMarketLabel();
    if(g_armed && TimeCurrent() >= g_armedUntil)
       SetArmed(false);
+   //--- safety net: if the mouse button was released outside the chart
+   //--- entirely, no further CHARTEVENT_MOUSE_MOVE fires here and the drag
+   //--- (and the CHART_MOUSE_SCROLL=false lock) could otherwise get stuck.
+   if(g_dragging && GetTickCount64() - g_dragStartMs > 5000)
+     {
+      g_dragging = false;
+      ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
+     }
    ChartRedraw(0);
   }
 
@@ -800,11 +894,20 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          g_dragging = true;
          g_dragOffX = mx - g_panelX;
          g_dragOffY = my - g_panelY;
+         //--- MT5's native left-drag-to-scroll is still live underneath this
+         //--- handler and would pan the chart at the same time the panel
+         //--- moves - suspend it for the duration of the drag, restore on
+         //--- release below.
+         ChartSetInteger(0, CHART_MOUSE_SCROLL, false);
+         g_dragStartMs = GetTickCount64();
         }
       if(g_dragging)
         {
          if(!leftDown)
+           {
             g_dragging = false;
+            ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
+           }
          else
             DragPanel(mx - g_dragOffX, my - g_dragOffY);
         }
@@ -847,5 +950,24 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    if(sparam == PFX + "c50") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.50); UpdateStats(); return; }
    if(sparam == PFX + "c75") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.75); UpdateStats(); return; }
    if(sparam == PFX + "cAll") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); CloseAll(); UpdateStats(); return; }
+   if(sparam == PFX + "slEdit" || sparam == PFX + "tpEdit") return;
+   if(sparam == PFX + "setSL")
+     {
+      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      SetSLForAll(StringToDouble(ObjectGetString(0, PFX + "slEdit", OBJPROP_TEXT)));
+      return;
+     }
+   if(sparam == PFX + "setTP")
+     {
+      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      SetTPForAll(StringToDouble(ObjectGetString(0, PFX + "tpEdit", OBJPROP_TEXT)));
+      return;
+     }
+   if(sparam == PFX + "fillCur")
+     {
+      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      FillCurrentSLTP();
+      return;
+     }
   }
 //+------------------------------------------------------------------+
