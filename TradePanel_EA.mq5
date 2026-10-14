@@ -7,9 +7,10 @@
 //|  Run this on its OWN chart window (MT5 allows only one EA per   |
 //|  chart) - open a second chart of the same symbol/timeframe next |
 //|  to whatever strategy EA is already running, and attach this   |
-//|  one there. It manages positions by SYMBOL (see                 |
-//|  InpManageOnlyOwnMagic below), so it can partial-close a trade  |
-//|  opened by a different EA on the same chart/symbol.             |
+//|  one there. It manages ONLY positions it opened itself (matched |
+//|  by InpMagic) - the stats row, CLOSE ALL, 25/50/75% partial     |
+//|  close, and Set SL/Set TP all act exclusively on this panel's   |
+//|  own trades, never on a strategy EA's live position.            |
 //|                                                                   |
 //|  SAFETY: placing a NEW batch of trades (the "PLACE xN" buttons) |
 //|  requires ARM then a second click within InpArmSeconds - a      |
@@ -18,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.06"
+#property version   "1.07"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -26,10 +27,8 @@
 #include <Trade/Trade.mqh>
 
 input group "=== Trade buttons ==="
-input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens
-input bool   InpManageOnlyOwnMagic = false;      // false: close-buttons act on ALL open positions for
-                                                  // this symbol (e.g. your strategy EA's own trade too).
-                                                  // true: close-buttons only touch trades this panel opened.
+input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens -
+                                                  // stats/close/SL-TP are always scoped to this magic only
 input int    InpArmSeconds         = 5;          // ARM auto-expires after this many seconds unused -
                                                   // starting value only, adjustable live from the panel
                                                   // itself now (Arm delay row) via g_armSeconds
@@ -303,7 +302,7 @@ bool PositionMatches(ulong ticket)
   {
    if(!PositionSelectByTicket(ticket)) return false;
    if(PositionGetString(POSITION_SYMBOL) != _Symbol) return false;
-   if(InpManageOnlyOwnMagic && PositionGetInteger(POSITION_MAGIC) != InpMagic) return false;
+   if(PositionGetInteger(POSITION_MAGIC) != InpMagic) return false;
    return true;
   }
 
@@ -658,7 +657,7 @@ void SetupMAs()
 //+------------------------------------------------------------------+
 void BuildPanel()
   {
-   g_panelW = 320;
+   g_panelW = 340;
    int w = g_panelW;
    ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -763,7 +762,7 @@ void BuildPanel()
    ObjectSetString(0, PFX + "light", OBJPROP_FONT, "Wingdings");
    MkLabel("lightLbl", 34, y + 2, "OK TO TRADE (spread within limit)", clrLimeGreen, 10);
 
-   g_panelH = y + 34;
+   g_panelH = y + 44;   // extra bottom margin so the last row never sits flush with the edge
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, g_panelH);
 
    UpdateExposureLabel();
