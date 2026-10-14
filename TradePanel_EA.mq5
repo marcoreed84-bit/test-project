@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -48,7 +48,7 @@ input int            InpMA200     = 200;
 input color          InpCol21     = clrYellow;        // same colour family as the other EAs' MA21
 input color          InpCol50     = C'255,140,0';     // neon orange - same family as the other EAs' MA50
 input color          InpCol200    = C'191,0,255';     // neon purple
-input int            InpMAHistoryBars = 300;          // rolling window of drawn MA history, PER LINE -
+input int            InpMAHistoryBars = 150;          // rolling window of drawn MA history, PER LINE -
                                                        // 2500 (the old default) meant 2500 x 3 lines =
                                                        // 7500 chart objects, which is what was actually
                                                        // behind the general chart hang and the panel taking
@@ -819,7 +819,8 @@ int OnInit()
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   EventSetTimer(1);
+   EventSetTimer(2);   // was 1s - halving the poll frequency on top of no
+                        // longer force-redrawing every tick (see OnTimer)
    ChartRedraw(0);
    return(INIT_SUCCEEDED);
   }
@@ -866,7 +867,14 @@ void OnTimer()
       g_dragging = false;
       ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
      }
-   ChartRedraw(0);
+   //--- NOT calling ChartRedraw() here unconditionally anymore - this ran
+   //--- every single second, forcing MT5 to repaint the whole chart
+   //--- (including every background MA/VWAP object) regardless of whether
+   //--- anything actually changed. ObjectSetString/ObjectSetInteger changes
+   //--- still show up on the terminal's own natural paint cycle (driven by
+   //--- ticks); an explicit redraw is only needed right after a batch
+   //--- change the user is actively looking at - RebuildPanel(), SetArmed(),
+   //--- and the button click handlers already call it where it matters.
   }
 
 //+------------------------------------------------------------------+
@@ -960,18 +968,25 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
      }
    if(id != CHARTEVENT_OBJECT_CLICK) return;
 
+   //--- OnTimer no longer force-redraws every second (that was the real
+   //--- cause of the general lag, including clicks feeling slow - the chart
+   //--- was busy redrawing ~1300 background objects every single second
+   //--- regardless of whether anything changed). Every button/edit handler
+   //--- below still needs its own immediate visible update though, so
+   //--- redraw once here, right after whichever one of them ran.
    if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit")
      {
       UpdateExposureLabel();
+      ChartRedraw(0);
       return;
      }
-   if(sparam == PFX + "delayEdit") { SyncArmSecondsFromEdit(); return; }
-   if(sparam == PFX + "lotMinus") { AdjustLot(-SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); return; }
-   if(sparam == PFX + "lotPlus")  { AdjustLot(+SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); return; }
-   if(sparam == PFX + "cntMinus") { AdjustCount(-1); return; }
-   if(sparam == PFX + "cntPlus")  { AdjustCount(+1); return; }
-   if(sparam == PFX + "delayMinus") { AdjustArmSeconds(-1); return; }
-   if(sparam == PFX + "delayPlus")  { AdjustArmSeconds(+1); return; }
+   if(sparam == PFX + "delayEdit") { SyncArmSecondsFromEdit(); ChartRedraw(0); return; }
+   if(sparam == PFX + "lotMinus") { AdjustLot(-SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
+   if(sparam == PFX + "lotPlus")  { AdjustLot(+SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
+   if(sparam == PFX + "cntMinus") { AdjustCount(-1); ChartRedraw(0); return; }
+   if(sparam == PFX + "cntPlus")  { AdjustCount(+1); ChartRedraw(0); return; }
+   if(sparam == PFX + "delayMinus") { AdjustArmSeconds(-1); ChartRedraw(0); return; }
+   if(sparam == PFX + "delayPlus")  { AdjustArmSeconds(+1); ChartRedraw(0); return; }
    if(sparam == PFX + "armBtn")
      {
       SetArmed(!g_armed);
@@ -982,6 +997,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       PlaceBatch(true);
       UpdateStats();
+      ChartRedraw(0);
       return;
      }
    if(sparam == PFX + "sellBtn")
@@ -989,29 +1005,33 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       PlaceBatch(false);
       UpdateStats();
+      ChartRedraw(0);
       return;
      }
-   if(sparam == PFX + "c25") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.25); UpdateStats(); return; }
-   if(sparam == PFX + "c50") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.50); UpdateStats(); return; }
-   if(sparam == PFX + "c75") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.75); UpdateStats(); return; }
-   if(sparam == PFX + "cAll") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); CloseAll(); UpdateStats(); return; }
+   if(sparam == PFX + "c25") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.25); UpdateStats(); ChartRedraw(0); return; }
+   if(sparam == PFX + "c50") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.50); UpdateStats(); ChartRedraw(0); return; }
+   if(sparam == PFX + "c75") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.75); UpdateStats(); ChartRedraw(0); return; }
+   if(sparam == PFX + "cAll") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); CloseAll(); UpdateStats(); ChartRedraw(0); return; }
    if(sparam == PFX + "slEdit" || sparam == PFX + "tpEdit") return;
    if(sparam == PFX + "setSL")
      {
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       SetSLForAll(StringToDouble(ObjectGetString(0, PFX + "slEdit", OBJPROP_TEXT)));
+      ChartRedraw(0);
       return;
      }
    if(sparam == PFX + "setTP")
      {
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       SetTPForAll(StringToDouble(ObjectGetString(0, PFX + "tpEdit", OBJPROP_TEXT)));
+      ChartRedraw(0);
       return;
      }
    if(sparam == PFX + "fillCur")
      {
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       FillCurrentSLTP();
+      ChartRedraw(0);
       return;
      }
   }
