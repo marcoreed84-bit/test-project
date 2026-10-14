@@ -18,7 +18,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -150,7 +150,7 @@ void MkButton(string name, int dx, int dy, int w, int h, string text, color bg, 
 //+------------------------------------------------------------------+
 double GetLot()
   {
-   double lot = StringToDouble(ObjectGetString(0, PFX + "lotEdit", 0));
+   double lot = StringToDouble(ObjectGetString(0, PFX + "lotEdit", OBJPROP_TEXT));
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(lot < minLot) lot = minLot;
@@ -161,7 +161,7 @@ double GetLot()
 //+------------------------------------------------------------------+
 int GetCount()
   {
-   int n = (int)StringToInteger(ObjectGetString(0, PFX + "cntEdit", 0));
+   int n = (int)StringToInteger(ObjectGetString(0, PFX + "cntEdit", OBJPROP_TEXT));
    if(n < 1) n = 1;
    if(n > 50) n = 50;   // hard safety cap regardless of what's typed in - real money, no fat-finger "500"
    return n;
