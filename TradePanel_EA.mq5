@@ -18,13 +18,14 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
 
 #include <Trade/Trade.mqh>
 
+input group "=== Trade buttons ==="
 input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens
 input bool   InpManageOnlyOwnMagic = false;      // false: close-buttons act on ALL open positions for
                                                   // this symbol (e.g. your strategy EA's own trade too).
@@ -37,7 +38,34 @@ input color  InpArmedColor         = clrOrangeRed;
 input color  InpBuyColor           = C'30,120,60';
 input color  InpSellColor          = C'150,40,40';
 
+input group "=== Moving averages (hand-drawn in the project's own colours, same idiom as the other EAs) ==="
+input bool          InpShowMAs     = true;
+input ENUM_MA_METHOD InpMAMethod   = MODE_EMA;    // MODE_EMA = exponential, MODE_SMA = simple
+input int            InpMA21      = 21;
+input int            InpMA50      = 50;
+input int            InpMA200     = 200;
+input color          InpCol21     = clrYellow;        // same colour family as the other EAs' MA21
+input color          InpCol50     = C'255,140,0';     // neon orange - same family as the other EAs' MA50
+input color          InpCol200    = C'191,0,255';     // neon purple
+input int            InpMAHistoryBars = 2500;         // rolling window of drawn MA history (bounded,
+                                                       // so a long-running chart doesn't accumulate objects forever)
+
+input group "=== Session VWAP (MT5 has no built-in VWAP - drawn manually, same construction as Aurelius_EA.mq5) ==="
+input bool   InpShowVWAP           = true;
+input color  InpColVWAP            = C'0,255,255';    // neon aqua - same family as the other EAs' VWAP
+input int    InpVwapHistoryBars    = 400;
+
+input group "=== Chart theme (same family-standard blue/white candles as the other EAs) ==="
+input bool   InpApplyTheme         = true;
+input color  InpChartBg            = clrBlack;
+input color  InpBullCol            = C'0,150,255';    // neon blue - family standard
+input color  InpBearCol            = clrWhite;        // neon white - family standard
+
 CTrade trade;
+
+int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
+string g_pm = "TPNL_MA_";   // per-bar MA/VWAP trend-line segments, purged to a rolling window
+datetime g_lastBarTime = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -260,15 +288,218 @@ void UpdateStats()
   }
 
 //+------------------------------------------------------------------+
+void UpdateMarketLabel()
+  {
+   long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   long vol1 = iVolume(_Symbol, PERIOD_CURRENT, 1);   // last CLOSED bar's tick volume -
+                                                       // bar 0 is still forming and understates it
+   string txt = StringFormat("Spread: %d pts   |   Volume (last bar): %d", (int)spreadPts, (int)vol1);
+   ObjectSetString(0, PFX + "mktLbl", OBJPROP_TEXT, txt);
+  }
+
+//+------------------------------------------------------------------+
+//| Chart theme - identical convention to the other EAs in this     |
+//| project (InpBullCol/InpBearCol/InpChartBg, same ChartSetInteger  |
+//| set) so a chart running this panel looks consistent with one     |
+//| running HeadShoulders/Aurelius/etc.                               |
+//+------------------------------------------------------------------+
+void ApplyTheme()
+  {
+   if(!InpApplyTheme) return;
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND,  InpChartBg);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND,  C'138,152,178');
+   ChartSetInteger(0, CHART_COLOR_GRID,        C'20,26,40');
+   ChartSetInteger(0, CHART_COLOR_CHART_UP,    InpBullCol);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  InpBearCol);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpBullCol);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpBearCol);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE,  C'138,152,178');
+   ChartSetInteger(0, CHART_SHOW_GRID,   false);
+   ChartSetInteger(0, CHART_MODE,        CHART_CANDLES);
+  }
+
+//+------------------------------------------------------------------+
+//| Session VWAP - MT5 has no built-in VWAP indicator, so this is the|
+//| exact same construction already validated in Aurelius_EA.mq5's   |
+//| SessionVWAP(): typical-price*volume accumulated from midnight,   |
+//| one bulk CopyTime/CopyHigh/.../CopyTickVolume per call rather    |
+//| than per-bar iTime/iHigh/... lookups (that was the real slow     |
+//| part when this was first built, not "repainting").               |
+//+------------------------------------------------------------------+
+double SessionVWAP(const int shift)
+  {
+   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, shift);
+   if(barTime == 0) return(0.0);
+   MqlDateTime dt; TimeToStruct(barTime, dt);
+   dt.hour = 0; dt.min = 0; dt.sec = 0;
+   datetime dayStart = StructToTime(dt);
+
+   datetime tArr[]; double hArr[], lArr[], cArr[]; long vArr[];
+   ArraySetAsSeries(tArr, true); ArraySetAsSeries(hArr, true);
+   ArraySetAsSeries(lArr, true); ArraySetAsSeries(cArr, true);
+   ArraySetAsSeries(vArr, true);
+   int got = CopyTime(_Symbol, PERIOD_CURRENT, shift, 400, tArr);
+   if(got <= 0) return(0.0);
+   if(CopyHigh(_Symbol, PERIOD_CURRENT, shift, got, hArr) <= 0) return(0.0);
+   if(CopyLow(_Symbol, PERIOD_CURRENT, shift, got, lArr) <= 0) return(0.0);
+   if(CopyClose(_Symbol, PERIOD_CURRENT, shift, got, cArr) <= 0) return(0.0);
+   if(CopyTickVolume(_Symbol, PERIOD_CURRENT, shift, got, vArr) <= 0) return(0.0);
+
+   double cumPV = 0.0, cumV = 0.0;
+   for(int s = 0; s < got; s++)
+     {
+      if(tArr[s] < dayStart) break;
+      double typical = (hArr[s] + lArr[s] + cArr[s]) / 3.0;
+      cumPV += typical * (double)vArr[s];
+      cumV  += (double)vArr[s];
+     }
+   if(cumV <= 0.0) return(0.0);
+   return(cumPV / cumV);
+  }
+
+//+------------------------------------------------------------------+
+bool DifferentSession(const int shiftA, const int shiftB)
+  {
+   datetime tA = iTime(_Symbol, PERIOD_CURRENT, shiftA);
+   datetime tB = iTime(_Symbol, PERIOD_CURRENT, shiftB);
+   if(tA == 0 || tB == 0) return(true);
+   MqlDateTime dA, dB; TimeToStruct(tA, dA); TimeToStruct(tB, dB);
+   return(dA.day != dB.day || dA.mon != dB.mon || dA.year != dB.year);
+  }
+
+//+------------------------------------------------------------------+
+//| Generic per-bar trend-line segment, same idiom (and reasoning)   |
+//| as Aurelius_EA.mq5's DrawMASegment - hand-drawn rather than a     |
+//| native ChartIndicatorAdd plot because MT5 doesn't expose a        |
+//| per-instance colour override for a chart-added indicator handle,  |
+//| and these need the project's own "family standard" colours.      |
+//+------------------------------------------------------------------+
+void DrawSegment(const string tag, const datetime tOld, const double vOld,
+                  const datetime tNew, const double vNew, const color col)
+  {
+   string nm = g_pm + tag + "_" + IntegerToString((long)tNew);
+   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   ObjectCreate(0, nm, OBJ_TREND, 0, tOld, vOld, tNew, vNew);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+  }
+
+//+------------------------------------------------------------------+
+void PurgeOldSegments(const datetime latestBarTime, const int historyBars)
+  {
+   datetime cutoff = latestBarTime - (datetime)((long)historyBars * PeriodSeconds(PERIOD_CURRENT));
+   for(int i = ObjectsTotal(0, 0, OBJ_TREND) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, OBJ_TREND);
+      if(StringFind(nm, g_pm) != 0) continue;
+      datetime ot = (datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0);
+      if(ot < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+//+------------------------------------------------------------------+
+bool MAValue(int handle, int shift, double &out)
+  {
+   if(handle == INVALID_HANDLE) return(false);
+   double buf[];
+   ArraySetAsSeries(buf, true);
+   if(CopyBuffer(handle, 0, shift, 1, buf) < 1) return(false);
+   out = buf[0];
+   return(true);
+  }
+
+//+------------------------------------------------------------------+
+//| Called once per new bar - draws exactly one new segment per line |
+//| (MAs + VWAP), same as Aurelius's UpdateMALines.                  |
+//+------------------------------------------------------------------+
+void UpdateOverlayLines()
+  {
+   datetime tA = iTime(_Symbol, PERIOD_CURRENT, 2);
+   datetime tB = iTime(_Symbol, PERIOD_CURRENT, 1);
+   if(tA == 0 || tB == 0) return;
+   int maxHist = InpMAHistoryBars;
+   if(InpShowMAs)
+     {
+      double a21, b21, a50, b50, a200, b200;
+      if(MAValue(g_maHandle21, 2, a21) && MAValue(g_maHandle21, 1, b21))
+         DrawSegment("21", tA, a21, tB, b21, InpCol21);
+      if(MAValue(g_maHandle50, 2, a50) && MAValue(g_maHandle50, 1, b50))
+         DrawSegment("50", tA, a50, tB, b50, InpCol50);
+      if(MAValue(g_maHandle200, 2, a200) && MAValue(g_maHandle200, 1, b200))
+         DrawSegment("200", tA, a200, tB, b200, InpCol200);
+     }
+   if(InpShowVWAP && !DifferentSession(2, 1))
+     {
+      double vA = SessionVWAP(2), vB = SessionVWAP(1);
+      if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP);
+      if(InpMAHistoryBars < InpVwapHistoryBars) maxHist = InpVwapHistoryBars;
+     }
+   if(InpShowMAs || InpShowVWAP) PurgeOldSegments(tB, maxHist);
+  }
+
+//+------------------------------------------------------------------+
+//| Called once from OnInit - walks backward and draws the whole      |
+//| rolling window immediately, same reasoning as Aurelius's          |
+//| BackfillMALines (otherwise a fresh attach shows a 1-bar stub and  |
+//| takes the full history window to fill in).                        |
+//+------------------------------------------------------------------+
+void BackfillOverlayLines()
+  {
+   if(InpShowMAs)
+     {
+      int avail = Bars(_Symbol, PERIOD_CURRENT) - 2;
+      int n = MathMin(InpMAHistoryBars, avail);
+      double a, b;
+      for(int s = n; s >= 1; s--)
+        {
+         datetime tA = iTime(_Symbol, PERIOD_CURRENT, s + 1);
+         datetime tB = iTime(_Symbol, PERIOD_CURRENT, s);
+         if(tA == 0 || tB == 0) continue;
+         if(MAValue(g_maHandle21,  s + 1, a) && MAValue(g_maHandle21,  s, b)) DrawSegment("21",  tA, a, tB, b, InpCol21);
+         if(MAValue(g_maHandle50,  s + 1, a) && MAValue(g_maHandle50,  s, b)) DrawSegment("50",  tA, a, tB, b, InpCol50);
+         if(MAValue(g_maHandle200, s + 1, a) && MAValue(g_maHandle200, s, b)) DrawSegment("200", tA, a, tB, b, InpCol200);
+        }
+     }
+   if(InpShowVWAP)
+     {
+      int availV = Bars(_Symbol, PERIOD_CURRENT) - 2;
+      int nV = MathMin(InpVwapHistoryBars, availV);
+      for(int s = nV; s >= 1; s--)
+        {
+         if(DifferentSession(s + 1, s)) continue;
+         datetime tA = iTime(_Symbol, PERIOD_CURRENT, s + 1);
+         datetime tB = iTime(_Symbol, PERIOD_CURRENT, s);
+         if(tA == 0 || tB == 0) continue;
+         double vA = SessionVWAP(s + 1), vB = SessionVWAP(s);
+         if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP);
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+void SetupMAs()
+  {
+   if(!InpShowMAs) return;
+   g_maHandle21  = iMA(_Symbol, PERIOD_CURRENT, InpMA21,  0, InpMAMethod, PRICE_CLOSE);
+   g_maHandle50  = iMA(_Symbol, PERIOD_CURRENT, InpMA50,  0, InpMAMethod, PRICE_CLOSE);
+   g_maHandle200 = iMA(_Symbol, PERIOD_CURRENT, InpMA200, 0, InpMAMethod, PRICE_CLOSE);
+  }
+
+//+------------------------------------------------------------------+
 int OnInit()
   {
+   g_panelW = 280;
    int w = g_panelW;
    ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, g_panelX);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, g_panelY);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, 292);
+   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, 328);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_BGCOLOR, InpBgColor);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_COLOR, clrSilver);
@@ -301,9 +532,16 @@ int OnInit()
    MkButton("cAll", 10, 228, w - 20, 26, "CLOSE ALL OPEN TRADES", C'150,40,40');
 
    MkLabel("statLbl", 10, 262, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver);
+   MkLabel("mktLbl", 10, 284, "Spread: -   |   Volume (last bar): -", clrKhaki);
+
+   ApplyTheme();
+   SetupMAs();
+   BackfillOverlayLines();
 
    UpdateExposureLabel();
    UpdateStats();
+   UpdateMarketLabel();
+   g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
    EventSetTimer(1);
    ChartRedraw(0);
    return(INIT_SUCCEEDED);
@@ -314,12 +552,28 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
+   ObjectsDeleteAll(0, g_pm);
+   if(g_maHandle21  != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
+   if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
+   if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
+  }
+
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+   datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
+   if(t0 != g_lastBarTime)
+     {
+      g_lastBarTime = t0;
+      UpdateOverlayLines();
+     }
   }
 
 //+------------------------------------------------------------------+
 void OnTimer()
   {
    UpdateStats();
+   UpdateMarketLabel();
    if(g_armed && TimeCurrent() >= g_armedUntil)
       SetArmed(false);
    ChartRedraw(0);
