@@ -159,9 +159,9 @@ if __name__ == "__main__":
     oos_days = (df_oos["time"].iloc[-1] - df_oos["time"].iloc[0]).days
     full_days = (df["time"].iloc[-1] - df["time"].iloc[0]).days
 
-    print(f"{'='*100}\nIN-SAMPLE grid search (200-EMA touch + rejection, full day vs early-window)\n{'='*100}")
+    print(f"{'='*100}\nIN-SAMPLE grid search (200-EMA touch + rejection, early-window only)\n{'='*100}")
     grid = []
-    for window_bars in (None, 32):  # None = full trading day, 32 = early 8h only
+    for window_bars in (32,):  # early 8h window only - dropped full-day variant, too slow in pure python at this bar count, and the original observation was about session open anyway
         for approach_m in (0.5, 1.0):
             for touch_m in (0.15, 0.25):
                 for reject_m in (0.2, 0.3, 0.4):
@@ -169,12 +169,14 @@ if __name__ == "__main__":
                         res = classify_and_test_touch(df_is, approach_m, touch_m, reject_m, confirm_b, window_bars)
                         net = sum(r["pnl_pct"] for r in res) if res else -999
                         grid.append((approach_m, touch_m, reject_m, confirm_b, window_bars, len(res), net, pct_pf(res)))
+                        print(f"    approach={approach_m} touch={touch_m} reject={reject_m} confirm={confirm_b}:  "
+                              f"n={len(res):4d}  net%={100*net:7.2f}  PF={pct_pf(res):5.2f}  ~{len(res)/(is_days/30.44):.1f}/mo",
+                              flush=True)
 
     grid.sort(key=lambda g: g[6], reverse=True)
-    print("  Top 15 by net%:")
-    for g in grid[:15]:
-        wtxt = "full-day" if g[4] is None else f"{g[4]*0.25:.0f}h-window"
-        print(f"    approach={g[0]} touch={g[1]} reject={g[2]} confirm={g[3]} [{wtxt}]:  "
+    print("\n  Top 10 by net%:")
+    for g in grid[:10]:
+        print(f"    approach={g[0]} touch={g[1]} reject={g[2]} confirm={g[3]}:  "
               f"n={g[5]:4d}  net%={100*g[6]:7.2f}  PF={g[7]:5.2f}  ~{g[5]/(is_days/30.44):.1f}/mo")
 
     best = grid[0]
@@ -187,6 +189,7 @@ if __name__ == "__main__":
     full_res = classify_and_test_touch(df, best[0], best[1], best[2], best[3], best[4])
     report("200EMA touch/reject - FULL", full_res, full_days, split_dir=True)
 
-    print(f"\n\n  Honest K note: 2 x 2 x 2 x 3 x 2 = 48 combinations searched in this file.")
+    print(f"\n\n  Honest K note: 2 x 2 x 3 x 2 = 24 combinations searched in this file")
+    print(f"  (early-window only - the full-day variant was dropped, too slow in pure python).")
     print(f"  Combined with the 94 already searched earlier in this VWAP-open research")
     print(f"  line, the running total is K=142 if any of these numbers end up reported as a result.")
