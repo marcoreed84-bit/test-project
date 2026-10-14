@@ -18,7 +18,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -30,7 +30,9 @@ input int    InpMagic              = 20261014;   // magic tag applied to trades 
 input bool   InpManageOnlyOwnMagic = false;      // false: close-buttons act on ALL open positions for
                                                   // this symbol (e.g. your strategy EA's own trade too).
                                                   // true: close-buttons only touch trades this panel opened.
-input int    InpArmSeconds         = 5;          // ARM auto-expires after this many seconds unused
+input int    InpArmSeconds         = 5;          // ARM auto-expires after this many seconds unused -
+                                                  // starting value only, adjustable live from the panel
+                                                  // itself now (Arm delay row) via g_armSeconds
 input int    InpSlippage           = 30;
 input color  InpBgColor            = C'30,30,34';
 input color  InpTextColor          = clrWhite;
@@ -67,7 +69,9 @@ input bool   InpHideTradeMarks     = true;    // hide MT5's own open-position li
                                                // what this fixes
 
 input group "=== Trade condition light (green/red, same traffic-light idiom as the other EAs' panels) ==="
-input int    InpMaxSpreadPoints    = 50;      // light goes RED when live spread exceeds this - this is
+input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from this project's own research
+                                               // (research/trendbreaker/hs_silver_spread_threshold_test.py) -
+                                               // change this per instrument; light goes RED when live spread exceeds this - this is
                                                // the ONLY thing the light checks (spread only, not a
                                                // trade signal of any kind - this panel has no strategy)
 
@@ -83,6 +87,7 @@ int      g_panelW = 250;
 int      g_panelH = 0;
 bool     g_armed = false;
 datetime g_armedUntil = 0;
+int      g_armSeconds = InpArmSeconds;   // live-adjustable from the panel's Arm delay row
 
 #define PANEL_ZORDER 1000   // keeps every panel widget drawn above freshly-created MA/VWAP
                              // segments AND above MT5's own native trade arrows/levels, which
@@ -225,10 +230,29 @@ void AdjustCount(int delta)
   }
 
 //+------------------------------------------------------------------+
+void AdjustArmSeconds(int delta)
+  {
+   g_armSeconds += delta;
+   if(g_armSeconds < 1) g_armSeconds = 1;
+   if(g_armSeconds > 60) g_armSeconds = 60;
+   ObjectSetString(0, PFX + "delayEdit", OBJPROP_TEXT, IntegerToString(g_armSeconds));
+  }
+
+//+------------------------------------------------------------------+
+void SyncArmSecondsFromEdit()
+  {
+   int n = (int)StringToInteger(ObjectGetString(0, PFX + "delayEdit", OBJPROP_TEXT));
+   if(n < 1) n = 1;
+   if(n > 60) n = 60;
+   g_armSeconds = n;
+   ObjectSetString(0, PFX + "delayEdit", OBJPROP_TEXT, IntegerToString(g_armSeconds));
+  }
+
+//+------------------------------------------------------------------+
 void SetArmed(bool on)
   {
    g_armed = on;
-   g_armedUntil = on ? TimeCurrent() + InpArmSeconds : 0;
+   g_armedUntil = on ? TimeCurrent() + g_armSeconds : 0;
    string btn = PFX + "armBtn";
    if(on)
      {
@@ -249,7 +273,7 @@ void PlaceBatch(bool isBuy)
   {
    if(!g_armed)
      {
-      Alert("TradePanel: click ARM first, then PLACE, within ", InpArmSeconds, "s.");
+      Alert("TradePanel: click ARM first, then PLACE, within ", g_armSeconds, "s.");
       return;
      }
    double lot = GetLot();
@@ -549,10 +573,21 @@ void SetupMAs()
   }
 
 //+------------------------------------------------------------------+
-int OnInit()
+//+------------------------------------------------------------------+
+//| Builds every panel object fresh. MT5 paints chart objects in      |
+//| CREATION ORDER, not by OBJPROP_ZORDER (that property only decides |
+//| mouse-click priority, not paint order - a real mistake in v1.03). |
+//| The MA/VWAP trend segments get a brand-new object created every   |
+//| single new bar (UpdateOverlayLines), so they will always paint on |
+//| top of a panel that was only ever built once in OnInit. The only  |
+//| real fix is to rebuild the panel (so it becomes the newest set of |
+//| objects again) after every new-bar redraw - see RebuildPanel()    |
+//| and its call from OnTick. Same reasoning Aurelius_EA.mq5's own    |
+//| comments already describe for its UpdateMALines/DrawPanel order.  |
+//+------------------------------------------------------------------+
+void BuildPanel()
   {
    g_panelW = 320;
-   g_panelH = 420;
    int w = g_panelW;
    ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -608,6 +643,12 @@ int OnInit()
    MkLabel("expLbl", 12, y, "Exposure: -", clrKhaki, 10);
 
    y += 30;
+   MkLabel("delayLbl", 12, y + 3, "Arm delay (s):", InpTextColor, 10);
+   MkEdit("delayEdit", 150, y, 60, 24, IntegerToString(g_armSeconds));
+   MkButton("delayMinus", 216, y, 26, 24, "-", C'70,70,78', clrWhite, 12);
+   MkButton("delayPlus",  246, y, 26, 24, "+", C'70,70,78', clrWhite, 12);
+
+   y += 34;
    MkButton("armBtn", 12, y, w - 24, 28, "ARM (required before PLACE)", InpBgColor, clrSilver, 10);
 
    y += 38;
@@ -641,15 +682,44 @@ int OnInit()
    g_panelH = y + 34;
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, g_panelH);
 
+   UpdateExposureLabel();
+   UpdateStats();
+   UpdateMarketLabel();
+  }
+
+//+------------------------------------------------------------------+
+//| Rebuilds the panel so it becomes the newest (therefore topmost-   |
+//| painted) set of objects again - called once per new bar, right    |
+//| after UpdateOverlayLines() draws that bar's MA/VWAP segments.      |
+//| Preserves the lot/count/delay fields and the panel's current      |
+//| dragged-to position; does NOT preserve an in-progress ARM (it      |
+//| auto-expires in a few seconds anyway, and resetting it on rebuild  |
+//| is a safety positive, not a problem).                              |
+//+------------------------------------------------------------------+
+void RebuildPanel()
+  {
+   string lotText = ObjectGetString(0, PFX + "lotEdit", OBJPROP_TEXT);
+   string cntText = ObjectGetString(0, PFX + "cntEdit", OBJPROP_TEXT);
+   ObjectsDeleteAll(0, PFX);
+   g_nCtrls = 0;
+   BuildPanel();
+   ObjectSetString(0, PFX + "lotEdit", OBJPROP_TEXT, lotText);
+   ObjectSetString(0, PFX + "cntEdit", OBJPROP_TEXT, cntText);
+   UpdateExposureLabel();
+   UpdateMarketLabel();
+   ChartRedraw(0);
+  }
+
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   BuildPanel();
    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
 
    ApplyTheme();
    SetupMAs();
    BackfillOverlayLines();
 
-   UpdateExposureLabel();
-   UpdateStats();
-   UpdateMarketLabel();
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
    EventSetTimer(1);
    ChartRedraw(0);
@@ -675,6 +745,7 @@ void OnTick()
      {
       g_lastBarTime = t0;
       UpdateOverlayLines();
+      RebuildPanel();   // reclaims top paint order - see RebuildPanel's own header
      }
   }
 
@@ -746,10 +817,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       UpdateExposureLabel();
       return;
      }
+   if(sparam == PFX + "delayEdit") { SyncArmSecondsFromEdit(); return; }
    if(sparam == PFX + "lotMinus") { AdjustLot(-SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); return; }
    if(sparam == PFX + "lotPlus")  { AdjustLot(+SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); return; }
    if(sparam == PFX + "cntMinus") { AdjustCount(-1); return; }
    if(sparam == PFX + "cntPlus")  { AdjustCount(+1); return; }
+   if(sparam == PFX + "delayMinus") { AdjustArmSeconds(-1); return; }
+   if(sparam == PFX + "delayPlus")  { AdjustArmSeconds(+1); return; }
    if(sparam == PFX + "armBtn")
      {
       SetArmed(!g_armed);
