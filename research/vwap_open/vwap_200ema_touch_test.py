@@ -94,14 +94,22 @@ def classify_and_test_touch(df, approach_mult, touch_mult, reject_mult, confirm_
                         sc = spread[fill_i] * point
                         entry_px = close[fill_i] + (sc if direction > 0 else -sc)
 
+                        # exit anchored to the SAME level the entry is anchored to: a
+                        # close back through the 200-EMA invalidates the bounce.
+                        # (previously used a 50-EMA close-back exit carried over from
+                        # the VWAP constructions - diagnostic showed 55% of trades were
+                        # already on the "wrong" side of the 50-EMA at the fill bar,
+                        # since the 50-EMA sits far from price right after a 200-EMA
+                        # touch - that mismatch was stopping out trades before they
+                        # could develop at all. Fixed here.)
                         exit_i, exit_px, reason = None, None, None
                         hard_limit = min(fill_i + HOLD_BARS_TOUCH, n - 1)
                         for k in range(fill_i, hard_limit + 1):
-                            if np.isnan(m50[k]):
+                            if np.isnan(m200[k]):
                                 continue
-                            broke = (close[k] < m50[k]) if direction > 0 else (close[k] > m50[k])
+                            broke = (close[k] < m200[k]) if direction > 0 else (close[k] > m200[k])
                             if broke:
-                                exit_i, exit_px, reason = k, close[k], "EMA50"
+                                exit_i, exit_px, reason = k, close[k], "EMA200"
                                 break
                         if exit_i is None:
                             exit_i, exit_px, reason = hard_limit, close[hard_limit], "TIME"
