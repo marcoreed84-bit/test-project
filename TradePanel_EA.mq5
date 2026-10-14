@@ -29,7 +29,7 @@ input int    InpMagic              = 20261014;   // magic tag applied to trades 
 input bool   InpManageOnlyOwnMagic = false;      // false: close-buttons act on ALL open positions for
                                                   // this symbol (e.g. your strategy EA's own trade too).
                                                   // true: close-buttons only touch trades this panel opened.
-input int    InpArmSeconds         = 15;         // ARM auto-expires after this many seconds unused
+input int    InpArmSeconds         = 5;          // ARM auto-expires after this many seconds unused
 input int    InpSlippage           = 30;
 input color  InpBgColor            = C'30,30,34';
 input color  InpTextColor          = clrWhite;
@@ -268,7 +268,7 @@ int OnInit()
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, g_panelX);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, g_panelY);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, 262);
+   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, 292);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_BGCOLOR, InpBgColor);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_COLOR, clrSilver);
@@ -293,13 +293,14 @@ int OnInit()
    MkButton("sellBtn", 10 + (w - 30) / 2 + 10, 136, (w - 30) / 2, 30, "PLACE SELL xN", InpSellColor);
 
    MkLabel("closeLbl", 10, 176, "Partial close current position(s):", InpTextColor);
-   int cw = (w - 50) / 4;
+   int cw = (w - 40) / 3;
    MkButton("c25", 10, 198, cw, 24, "25%", C'70,70,78');
    MkButton("c50", 10 + (cw + 10), 198, cw, 24, "50%", C'70,70,78');
    MkButton("c75", 10 + 2 * (cw + 10), 198, cw, 24, "75%", C'70,70,78');
-   MkButton("cAll", 10 + 3 * (cw + 10), 198, cw, 24, "ALL", C'150,40,40');
 
-   MkLabel("statLbl", 10, 236, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver);
+   MkButton("cAll", 10, 228, w - 20, 26, "CLOSE ALL OPEN TRADES", C'150,40,40');
+
+   MkLabel("statLbl", 10, 262, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver);
 
    UpdateExposureLabel();
    UpdateStats();
