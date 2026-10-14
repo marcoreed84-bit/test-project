@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.07"
+#property version   "1.08"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -103,6 +103,7 @@ int      g_armSeconds = InpArmSeconds;   // live-adjustable from the panel's Arm
 bool g_dragging = false;
 int  g_dragOffX = 0, g_dragOffY = 0;
 ulong g_dragStartMs = 0;   // safety timeout - see OnTimer
+ulong g_lastDragUpdateMs = 0;   // throttle - see the mouse-move handler
 
 struct Ctrl { string name; int dx; int dy; };
 Ctrl g_ctrls[];
@@ -927,9 +928,27 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
            {
             g_dragging = false;
             ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
+            //--- reclaim top paint order THE MOMENT the drag ends, rather than
+            //--- waiting for the next new bar - otherwise, on a slower
+            //--- timeframe, the panel can sit buried under any MA/VWAP segment
+            //--- drawn in the gap (visibly cutting through it) for however long
+            //--- it takes the next bar to arrive.
+            RebuildPanel();
            }
          else
-            DragPanel(mx - g_dragOffX, my - g_dragOffY);
+           {
+            //--- throttled: CHARTEVENT_MOUSE_MOVE fires dozens of times a
+            //--- second while dragging, and this used to reposition ~30
+            //--- objects and force a full ChartRedraw() on EVERY one of them -
+            //--- that was the real cause of the chart hanging during a drag.
+            //--- ~30 updates/sec is still visually smooth and far cheaper.
+            ulong now = GetTickCount64();
+            if(now - g_lastDragUpdateMs >= 33)
+              {
+               g_lastDragUpdateMs = now;
+               DragPanel(mx - g_dragOffX, my - g_dragOffY);
+              }
+           }
         }
       return;
      }
