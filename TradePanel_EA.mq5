@@ -18,7 +18,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.05"
+#property version   "1.06"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -78,7 +78,13 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
-string g_pm = "TPNL_MA_";   // per-bar MA/VWAP trend-line segments, purged to a rolling window
+//--- NOT "TPNL_..." - PFX ("TPNL_") is used with ObjectsDeleteAll(0, PFX) in
+//--- RebuildPanel(), which matches by PREFIX. A "TPNL_MA_..." name would
+//--- have been swept by that call too, wiping every MA/VWAP line (including
+//--- the whole backfilled history) on every single new bar - exactly the
+//--- real bug that made them vanish entirely rather than just sit behind
+//--- the panel. Keep this prefix namespace-disjoint from PFX.
+string g_pm = "TPMA_";
 datetime g_lastBarTime = 0;
 
 string   PFX = "TPNL_";
@@ -831,7 +837,11 @@ void OnTick()
      {
       g_lastBarTime = t0;
       UpdateOverlayLines();
-      RebuildPanel();   // reclaims top paint order - see RebuildPanel's own header
+      //--- skip the rebuild while actively dragging - recreating the title
+      //--- bar object out from under an in-progress drag is asking for
+      //--- trouble. The next new bar after the drag ends reclaims paint
+      //--- order instead; one bar's delay is harmless.
+      if(!g_dragging) RebuildPanel();
      }
   }
 
@@ -856,6 +866,17 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void DragPanel(int newX, int newY)
   {
+   //--- clamp so the title bar always stays reachable - keeps at least
+   //--- TITLE_BAR_H of vertical room and 60px of horizontal room on screen,
+   //--- so a drag can never strand the panel somewhere it can't be dragged
+   //--- back from.
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   if(newX < 0) newX = 0;
+   if(newY < 0) newY = 0;
+   if(chartW > 0 && newX > chartW - 60) newX = chartW - 60;
+   if(chartH > 0 && newY > chartH - TITLE_BAR_H) newY = chartH - TITLE_BAR_H;
+
    int dx = newX - g_panelX;
    int dy = newY - g_panelY;
    g_panelX = newX;
