@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.08"
+#property version   "1.09"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -48,8 +48,14 @@ input int            InpMA200     = 200;
 input color          InpCol21     = clrYellow;        // same colour family as the other EAs' MA21
 input color          InpCol50     = C'255,140,0';     // neon orange - same family as the other EAs' MA50
 input color          InpCol200    = C'191,0,255';     // neon purple
-input int            InpMAHistoryBars = 2500;         // rolling window of drawn MA history (bounded,
-                                                       // so a long-running chart doesn't accumulate objects forever)
+input int            InpMAHistoryBars = 300;          // rolling window of drawn MA history, PER LINE -
+                                                       // 2500 (the old default) meant 2500 x 3 lines =
+                                                       // 7500 chart objects, which is what was actually
+                                                       // behind the general chart hang and the panel taking
+                                                       // minutes to reclaim top paint order after a drag -
+                                                       // every new bar has to scan/manage all of them.
+                                                       // 300 is still ~3 days of M15 history visible; raise
+                                                       // it only if you need more and accept the cost.
 
 input group "=== Session VWAP (MT5 has no built-in VWAP - drawn manually, same construction as Aurelius_EA.mq5) ==="
 input bool   InpShowVWAP           = true;
