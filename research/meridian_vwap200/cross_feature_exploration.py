@@ -177,6 +177,26 @@ def build_cross_dataset(df, symbol="GOLD"):
         adx_val = adx14[i]
         h4_aligned = 1 if (h4_trend_up[i] == (direction > 0)) else 0
 
+        # NEW per direct steer: is TODAY already behaving like a trend day
+        # by the time of the cross, not a property of the cross itself.
+        day_s = day_start_idx[d]
+        day_open_px = close[day_s]
+        day_high_so_far = high[day_s:i + 1].max()
+        day_low_so_far = low[day_s:i + 1].min()
+        day_range_so_far = day_high_so_far - day_low_so_far
+        net_move_so_far = direction * (close[i] - day_open_px)
+        day_directionality = net_move_so_far / day_range_so_far if day_range_so_far > 0 else np.nan
+        day_open_to_cross_pct = direction * (close[i] - day_open_px) / day_open_px * 100 if day_open_px > 0 else np.nan
+
+        # is this the FIRST 21/50 cross since the start of today's session?
+        is_first_cross_today = 1
+        for j in range(day_s + 1, i):
+            cu = m21[j - 1] <= m50[j - 1] and m21[j] > m50[j]
+            cd = m21[j - 1] >= m50[j - 1] and m21[j] < m50[j]
+            if cu or cd:
+                is_first_cross_today = 0
+                break
+
         fill_i = i + 1
         if fill_i >= n:
             continue
@@ -193,6 +213,8 @@ def build_cross_dataset(df, symbol="GOLD"):
                           dist_vwap_atr=dist_vwap_atr, dist_200ema_atr=dist_200ema_atr,
                           prior_day_ret_pct=prior_day_ret_pct, vol_ratio=vol_ratio, hour_of_day=hour[i],
                           adx14=adx_val, h4_trend_aligned=h4_aligned,
+                          day_directionality=day_directionality, day_open_to_cross_pct=day_open_to_cross_pct,
+                          is_first_cross_today=is_first_cross_today,
                           fwd_ret_6h=fwd_ret_6h, fwd_ret_rest=fwd_ret_rest))
     return pd.DataFrame(rows)
 
@@ -230,7 +252,8 @@ if __name__ == "__main__":
     print(f"Baseline win rate (fwd_ret_rest > 0): {100*(dfc['fwd_ret_rest']>0).mean():.1f}%")
 
     ALL_FEATS = ["cross_angle_atr", "gap_velocity_atr", "dist_vwap_atr", "dist_200ema_atr",
-                 "prior_day_ret_pct", "vol_ratio", "hour_of_day", "adx14"]
+                 "prior_day_ret_pct", "vol_ratio", "hour_of_day", "adx14",
+                 "day_directionality", "day_open_to_cross_pct"]
 
     print(f"\n{'='*100}\nFEATURE BREAKDOWN (quintiles, target = rest-of-session forward return)\n{'='*100}")
     for feat in ALL_FEATS:
@@ -252,3 +275,15 @@ if __name__ == "__main__":
         sub = dfc[dfc["adx14"] >= thresh]
         print(f"  ADX>={thresh}: n={len(sub):4d}  win%={100*(sub['fwd_ret_rest']>0).mean():5.1f}  "
               f"avg_fwd_ret_rest={sub['fwd_ret_rest'].mean():7.3f}%  avg_fwd_ret_6h={sub['fwd_ret_6h'].mean():7.3f}%")
+
+    print(f"\n\n{'='*100}\nFIRST CROSS OF DAY vs LATER CROSSES (binary)\n{'='*100}")
+    for target in ("fwd_ret_rest", "fwd_ret_6h"):
+        first = dfc[dfc["is_first_cross_today"] == 1][target]
+        later = dfc[dfc["is_first_cross_today"] == 0][target]
+        print(f"  {target}: FIRST cross avg={first.mean():7.3f}% (n={len(first)})   "
+              f"LATER cross avg={later.mean():7.3f}% (n={len(later)})")
+
+    print(f"\n\n{'='*100}\nDAY DIRECTIONALITY (how trend-like today already looks at the cross)\n{'='*100}")
+    for target in ("fwd_ret_rest", "fwd_ret_6h"):
+        report_feature(dfc, "day_directionality", target)
+        report_feature(dfc, "day_open_to_cross_pct", target)
