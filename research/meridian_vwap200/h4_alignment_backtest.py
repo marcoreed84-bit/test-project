@@ -59,9 +59,18 @@ def report(label, results, n_days=None, split_dir=False):
 
 def load_h4(symbol):
     path = os.path.join(DATA_DIR, f"{symbol}_H4.csv")
-    df = pd.read_csv(path, skiprows=1)
-    df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
-    close = df["close"].values
+    if os.path.exists(path):
+        df = pd.read_csv(path, skiprows=1)
+        df["time"] = pd.to_datetime(df["time"], format="%Y.%m.%d %H:%M:%S")
+        close = df["close"].values
+    else:
+        # no native H4 file for this symbol (SILVER) - derive H4 bars by
+        # standard OHLC resampling from the M15 data itself, 4h UTC buckets
+        m15, _ = load_m15(symbol)
+        m15 = m15.set_index("time")
+        h4 = m15["close"].resample("4h", origin="epoch").last().dropna()
+        df = pd.DataFrame({"time": h4.index, "close": h4.values})
+        close = df["close"].values
     ema50_h4 = ema(close, 50)
     return df["time"].values.astype("datetime64[s]").astype(np.int64), ema50_h4, close
 
