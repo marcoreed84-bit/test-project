@@ -122,7 +122,7 @@ if __name__ == "__main__":
     ctx = build_context(df, h4, params=P)
     time = ctx["time"]
 
-    print(f"Aurelius M5, GOLD, {time.iloc[0]} .. {time.iloc[-1]}\n")
+    print(f"Aurelius M5, GOLD, {time[0]} .. {time[-1]}\n")
     trades = sim.simulate(ctx)
     print(f"Baseline (shipped params): n={len(trades)} trades")
 
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     scaled_dd = max_drawdown(scaled_cum)
     scaled_cvar = cvar(scaled_pnl)
 
-    exit_times = time.iloc[[t["exit_i"] for t in trades]].values
+    exit_times = time[[t["exit_i"] for t in trades]]
     months = pd.to_datetime(exit_times).to_period("M")
     base_monthly = pd.Series(base_pnl, index=months).groupby(level=0).sum()
     scaled_monthly = pd.Series(scaled_pnl, index=months).groupby(level=0).sum()
