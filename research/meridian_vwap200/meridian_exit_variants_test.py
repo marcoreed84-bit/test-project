@@ -176,3 +176,79 @@ if __name__ == "__main__":
     print(f"\n\n  Honest K note: EMA21 exit=0 free params (K=1), EMA50 exit=0 free params (K=1),")
     print(f"  chandelier exit K={len(grid)}. Total K for this file: {len(grid)+2}. Same entry as")
     print(f"  Scenario A throughout - only the exit mechanism changes between these three tests.")
+
+
+#+--------------------------------------------------------------------+
+# EXIT 5 (added per direct request): Stochastic(21,5,5) momentum
+# exhaustion. Entry still Scenario A (buy only). Exit when the
+# stochastic, having reached overbought territory, rolls over - %K
+# crosses back below %D after both were above the overbought threshold.
+# This is the "leg wants to turn to come down again" signal described
+# directly - not a price-level or MA-based exit at all, a momentum
+# oscillator reading instead.
+#+--------------------------------------------------------------------+
+def stochastic(high, low, close, k_period=21, k_slow=5, d_period=5):
+    n = len(close)
+    lowest = pd.Series(low).rolling(k_period, min_periods=k_period).min().values
+    highest = pd.Series(high).rolling(k_period, min_periods=k_period).max().values
+    raw_k = np.full(n, np.nan)
+    rng = highest - lowest
+    valid = rng > 0
+    raw_k[valid] = 100.0 * (close[valid] - lowest[valid]) / rng[valid]
+    k_smoothed = pd.Series(raw_k).rolling(k_slow, min_periods=k_slow).mean().values
+    d = pd.Series(k_smoothed).rolling(d_period, min_periods=d_period).mean().values
+    return k_smoothed, d
+
+
+def classify_stoch_exit(df, overbought_level, point=GOLD_POINT):
+    entries, close, high, low, m21, m50, atr = _entries(df)
+    spread = df["spread"].values
+    n = len(df)
+    stoch_k, stoch_d = stochastic(high, low, close, 21, 5, 5)
+    results = []
+    for entry_i, fill_i in entries:
+        sc = spread[fill_i] * point
+        entry_px = close[fill_i] + sc
+        hard_limit = min(fill_i + TIME_CAP_BARS, n - 1)
+        exit_i, exit_px, reason = None, None, None
+        reached_overbought = False
+        for k in range(fill_i, hard_limit + 1):
+            if np.isnan(stoch_k[k]) or np.isnan(stoch_d[k]):
+                continue
+            if stoch_k[k] >= overbought_level:
+                reached_overbought = True
+            if reached_overbought and k > fill_i and stoch_k[k] < stoch_d[k]:
+                exit_i, exit_px, reason = k, close[k], "STOCH"
+                break
+        if exit_i is None:
+            exit_i, exit_px, reason = hard_limit, close[hard_limit], "TIME"
+        pnl_pct = (exit_px - entry_px) / entry_px
+        results.append(dict(entry_i=entry_i, exit_i=exit_i, pnl_pct=pnl_pct, reason=reason,
+                             hold_bars=exit_i - fill_i))
+    return results
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--stoch":
+    df = load_gold_m15()
+    n = len(df)
+    cutoff_i = int(n * 0.70)
+    cutoff_date = df["time"].iloc[cutoff_i].date()
+    df_is = df[df["time"].dt.date < cutoff_date].reset_index(drop=True)
+    df_oos = df[df["time"].dt.date >= cutoff_date].reset_index(drop=True)
+    is_days = (df_is["time"].iloc[-1] - df_is["time"].iloc[0]).days
+    oos_days = (df_oos["time"].iloc[-1] - df_oos["time"].iloc[0]).days
+    full_days = (df["time"].iloc[-1] - df["time"].iloc[0]).days
+
+    print(f"{'#'*100}\nEXIT 5: Stochastic(21,5,5) momentum exhaustion - exit when %K rolls\nover below %D after reaching overbought\n{'#'*100}")
+    grid = []
+    for ob in (70, 75, 80, 85):
+        res = classify_stoch_exit(df_is, ob)
+        net = sum(r["pnl_pct"] for r in res) if res else -999
+        grid.append((ob, len(res), net, pct_pf(res)))
+        print(f"  overbought={ob}:  n={len(res):4d}  net%={100*net:7.2f}  PF={pct_pf(res):5.2f}", flush=True)
+    best = max(grid, key=lambda g: g[2])
+    print(f"  IS winner: overbought={best[0]}  (K={len(grid)})")
+    oos_res = classify_stoch_exit(df_oos, best[0])
+    report("OOS", oos_res, oos_days)
+    full_res = classify_stoch_exit(df, best[0])
+    report("FULL", full_res, full_days)
