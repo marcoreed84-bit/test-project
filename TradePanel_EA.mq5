@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.10"
+#property version   "1.11"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -57,6 +57,15 @@ input int            InpMAHistoryBars = 150;          // rolling window of drawn
                                                        // 300 is still ~3 days of M15 history visible; raise
                                                        // it only if you need more and accept the cost.
 
+input group "=== 21/50 MA cross-proximity push alert (fires on PERIOD_CURRENT - attach this panel to the same chart/timeframe as whichever strategy EA you want warned about) ==="
+input bool   InpEnableCrossAlert   = true;
+input double InpCrossAlertATRMult  = 0.3;    // "near" threshold: alert once the 21/50 gap closes to
+                                              // within this many ATR - smaller = later/tighter warning,
+                                              // larger = earlier but noisier
+input int    InpCrossATRPeriod     = 14;
+input int    InpCrossAlertCooldownMin = 30;  // minimum minutes between alerts for the SAME approach,
+                                              // so a gap oscillating right at the threshold doesn't spam
+
 input group "=== Session VWAP (MT5 has no built-in VWAP - drawn manually, same construction as Aurelius_EA.mq5) ==="
 input bool   InpShowVWAP           = true;
 input color  InpColVWAP            = C'0,255,255';    // neon aqua - same family as the other EAs' VWAP
@@ -83,6 +92,11 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
+int g_atrHandleCross = INVALID_HANDLE;
+bool     g_crossAlerted = false;     // true while the current approach has already fired its one
+                                      // alert - cleared once the gap widens back out or the cross
+                                      // actually happens, so the NEXT approach can alert again
+datetime g_lastCrossAlertAt = 0;     // cooldown - see InpCrossAlertCooldownMin
 //--- NOT "TPNL_..." - PFX ("TPNL_") is used with ObjectsDeleteAll(0, PFX) in
 //--- RebuildPanel(), which matches by PREFIX. A "TPNL_MA_..." name would
 //--- have been swept by that call too, wiping every MA/VWAP line (including
@@ -643,10 +657,75 @@ void BackfillOverlayLines()
 //+------------------------------------------------------------------+
 void SetupMAs()
   {
-   if(!InpShowMAs) return;
+   //--- handles are needed for the cross-proximity alert even when the lines
+   //--- themselves aren't drawn (InpShowMAs only gates UpdateOverlayLines/
+   //--- BackfillOverlayLines, not these handles)
+   if(!InpShowMAs && !InpEnableCrossAlert) return;
    g_maHandle21  = iMA(_Symbol, PERIOD_CURRENT, InpMA21,  0, InpMAMethod, PRICE_CLOSE);
    g_maHandle50  = iMA(_Symbol, PERIOD_CURRENT, InpMA50,  0, InpMAMethod, PRICE_CLOSE);
    g_maHandle200 = iMA(_Symbol, PERIOD_CURRENT, InpMA200, 0, InpMAMethod, PRICE_CLOSE);
+   if(InpEnableCrossAlert)
+      g_atrHandleCross = iATR(_Symbol, PERIOD_CURRENT, InpCrossATRPeriod);
+  }
+
+//+------------------------------------------------------------------+
+//| Push-notification warning that the 21/50 MA gap is closing and a  |
+//| cross looks imminent, BEFORE it actually happens - not an alert   |
+//| on the cross itself. Checked once per new closed bar (same        |
+//| cadence as UpdateOverlayLines - no reason to re-check every tick, |
+//| the MA values for a closed bar don't change until the next one).  |
+//|                                                                     |
+//| Uses shift 1/2 (the last two CLOSED bars) rather than the forming  |
+//| bar 0 - same reasoning as this project's standard fix for H4-bar   |
+//| lookups elsewhere: an unclosed bar's MA value still moves as price |
+//| moves, which would fire (or un-fire) the alert on noise rather    |
+//| than a settled reading.                                            |
+//|                                                                     |
+//| "Likely to cross soon" = the 21/50 gap, measured in ATR, has both  |
+//| (a) narrowed versus the prior closed bar and (b) closed to within  |
+//| InpCrossAlertATRMult*ATR - not yet crossed (sign unchanged). Fires |
+//| once per approach (g_crossAlerted latches), resets once the gap    |
+//| widens back out past 1.5x the threshold or the cross actually      |
+//| happens, so the next approach can alert again.                     |
+//+------------------------------------------------------------------+
+void CheckCrossProximity()
+  {
+   if(!InpEnableCrossAlert) return;
+   if(g_maHandle21 == INVALID_HANDLE || g_maHandle50 == INVALID_HANDLE || g_atrHandleCross == INVALID_HANDLE) return;
+
+   double ma21_1, ma21_2, ma50_1, ma50_2, atr_1;
+   if(!MAValue(g_maHandle21, 1, ma21_1) || !MAValue(g_maHandle21, 2, ma21_2)) return;
+   if(!MAValue(g_maHandle50, 1, ma50_1) || !MAValue(g_maHandle50, 2, ma50_2)) return;
+   double atrBuf[];
+   ArraySetAsSeries(atrBuf, true);
+   if(CopyBuffer(g_atrHandleCross, 0, 1, 1, atrBuf) != 1 || atrBuf[0] <= 0.0) return;
+   atr_1 = atrBuf[0];
+
+   double gapNow  = ma21_1 - ma50_1;
+   double gapPrev = ma21_2 - ma50_2;
+   bool alreadyCrossed = (gapNow >= 0.0) != (gapPrev >= 0.0);
+   double threshold = InpCrossAlertATRMult * atr_1;
+
+   if(alreadyCrossed || MathAbs(gapNow) > threshold * 1.5)
+     {
+      g_crossAlerted = false;   // clear reset - diverged again, or the cross already happened
+      return;
+     }
+
+   bool narrowing = MathAbs(gapNow) < MathAbs(gapPrev);
+   bool near       = MathAbs(gapNow) <= threshold;
+   if(!narrowing || !near) return;
+   if(g_crossAlerted) return;   // already warned for this approach, waiting for a reset
+   if(TimeCurrent() - g_lastCrossAlertAt < InpCrossAlertCooldownMin * 60) return;
+
+   string dir = (gapNow > 0.0) ? "21 crossing DOWN through 50 (bearish)" : "21 crossing UP through 50 (bullish)";
+   string tf  = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);   // "PERIOD_M15" -> "M15"
+   string msg = StringFormat("%s %s: 21/50 MA gap closing, %s likely soon (gap %.1f%% of threshold)",
+                              _Symbol, tf, dir, 100.0 * MathAbs(gapNow) / threshold);
+   SendNotification(msg);
+   Print("CrossAlert: ", msg);
+   g_crossAlerted = true;
+   g_lastCrossAlertAt = TimeCurrent();
   }
 
 //+------------------------------------------------------------------+
@@ -834,6 +913,7 @@ void OnDeinit(const int reason)
    if(g_maHandle21  != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
+   if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
   }
 
 //+------------------------------------------------------------------+
@@ -844,6 +924,7 @@ void OnTick()
      {
       g_lastBarTime = t0;
       UpdateOverlayLines();
+      CheckCrossProximity();
       //--- skip the rebuild while actively dragging - recreating the title
       //--- bar object out from under an in-progress drag is asking for
       //--- trouble. The next new bar after the drag ends reclaims paint
