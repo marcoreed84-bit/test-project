@@ -37,11 +37,20 @@ def pct_pf(results):
     return gw / gl if gl > 0 else float("inf")
 
 
+def pct_pf_gross(results):
+    if not results:
+        return float("nan")
+    arr = np.array([r["gross_pnl_pct"] for r in results])
+    gw, gl = arr[arr > 0].sum(), -arr[arr <= 0].sum()
+    return gw / gl if gl > 0 else float("inf")
+
+
 def report(label, results, n_days=None, split_dir=False):
     if not results:
         print(f"  {label}: n=0")
         return
     arr = np.array([r["pnl_pct"] for r in results])
+    gross_arr = np.array([r["gross_pnl_pct"] for r in results])
     holds = np.array([r["hold_bars"] for r in results]) * 0.25
     reasons = {}
     for r in results:
@@ -49,7 +58,8 @@ def report(label, results, n_days=None, split_dir=False):
     rtxt = ", ".join(f"{k}:{v}" for k, v in reasons.items())
     pm = f"  (~{len(results)/(n_days/30.44):.1f}/mo)" if n_days else ""
     print(f"  {label}: n={len(results):4d}  win%={100*(arr>0).mean():5.1f}  %PF={pct_pf(results):6.3f}  "
-          f"net%={100*arr.sum():7.2f}  avg_hold={holds.mean():5.1f}h  [{rtxt}]{pm}")
+          f"net%={100*arr.sum():7.2f}  GROSS%={100*gross_arr.sum():7.2f}  gross_PF={pct_pf_gross(results):6.3f}  "
+          f"avg_hold={holds.mean():5.1f}h  [{rtxt}]{pm}")
     if split_dir:
         longs = [r for r in results if r["dir"] > 0]
         shorts = [r for r in results if r["dir"] < 0]
@@ -85,8 +95,13 @@ def classify_h4_filtered(df, symbol, point, exit_mode, trail_atr_mult=2.0):
 
     h4_time, h4_ema50, h4_close = load_h4(symbol)
     bar_times = df["time"].values.astype("datetime64[s]").astype(np.int64)
-    h4_bar_len = 4 * 3600
-    h4_idx = np.searchsorted(h4_time, bar_times + h4_bar_len, side="right") - 2
+    # FIX (Opus audit caught this): must add the M15 BAR'S OWN length (15 min),
+    # not h4_bar_len (4h) - adding 4h pushed the lookup into a later, still-
+    # forming H4 candle for ~90% of bars, reintroducing the exact lookahead
+    # bug this project already fixed once (see
+    # research/aurelius/vanguard_m15_h4_trend_filter_oos_test.py:71).
+    m15_bar_len = 15 * 60
+    h4_idx = np.searchsorted(h4_time, bar_times + m15_bar_len, side="right") - 2
     h4_idx = np.clip(h4_idx, 0, len(h4_time) - 1)
     h4_trend_up = h4_close[h4_idx] > h4_ema50[h4_idx]
 
@@ -142,8 +157,13 @@ def classify_h4_filtered(df, symbol, point, exit_mode, trail_atr_mult=2.0):
             exit_i, exit_px, reason = hard_limit, close[hard_limit], "TIME"
 
         pnl_pct = ((exit_px - entry_px) / entry_px) * direction
-        results.append(dict(entry_i=i, exit_i=exit_i, pnl_pct=pnl_pct, dir=direction,
-                             reason=reason, hold_bars=exit_i - fill_i))
+        # gross pnl (no spread) - reported alongside net, per Opus audit:
+        # Silver's spread is ~9x Gold's as a fraction of price, large enough
+        # to swamp the underlying directional signal on its own
+        gross_entry_px = close[fill_i]
+        gross_pnl_pct = ((exit_px - gross_entry_px) / gross_entry_px) * direction
+        results.append(dict(entry_i=i, exit_i=exit_i, pnl_pct=pnl_pct, gross_pnl_pct=gross_pnl_pct,
+                             dir=direction, reason=reason, hold_bars=exit_i - fill_i))
     return results
 
 

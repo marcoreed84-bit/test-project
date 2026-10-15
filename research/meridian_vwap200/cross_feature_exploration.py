@@ -120,13 +120,17 @@ def build_cross_dataset(df, symbol="GOLD"):
 
     h4_time, h4_ema50, h4_close = load_h4(symbol)
     bar_times = df["time"].values.astype("datetime64[s]").astype(np.int64)
-    h4_bar_len = 4 * 3600
-    # corrected H4-bar lookup, same convention fixed elsewhere in this project -
-    # a plain searchsorted(h4_time, t, side="left")-1 picks the still-FORMING
-    # H4 candle for any M15 bar not exactly on an H4 boundary, leaking future
-    # H4 price. This adds the bar's own length before searching so only a
-    # fully-closed H4 bar is ever referenced.
-    h4_idx = np.searchsorted(h4_time, bar_times + h4_bar_len, side="right") - 2
+    m15_bar_len = 15 * 60
+    # corrected H4-bar lookup, same convention established in
+    # research/aurelius/vanguard_m15_h4_trend_filter_oos_test.py:71 - a plain
+    # searchsorted(h4_time, t, side="left")-1 picks the still-FORMING H4
+    # candle for any M15 bar not exactly on an H4 boundary, leaking future H4
+    # price. FIX (caught by an Opus audit of this exact file): this originally
+    # added h4_bar_len (4h) instead of the M15 BAR'S OWN length (15 min) -
+    # that reintroduced the identical lookahead bug for ~90% of bars, since
+    # adding a full 4h pushes the search window into a LATER, still-forming
+    # H4 candle rather than just advancing past the current M15 bar's close.
+    h4_idx = np.searchsorted(h4_time, bar_times + m15_bar_len, side="right") - 2
     h4_idx = np.clip(h4_idx, 0, len(h4_time) - 1)
     h4_trend_up = h4_close[h4_idx] > h4_ema50[h4_idx]
 
