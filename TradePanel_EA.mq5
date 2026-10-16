@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.15"
+#property version   "1.16"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -975,6 +975,18 @@ bool AnyEditFocused()
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   //--- CHART_SHOW_TRADE_LEVELS is a per-CHART property, not per-EA - every
+   //--- strategy EA in this project (Aurelius/Vanguard/Meridian/etc.) sets
+   //--- it FALSE on its own init, by design, for when it runs alone on a
+   //--- chart. When TradePanel shares a chart with one of them, whichever
+   //--- EA's OnTick/OnInit last touches this property wins, so a one-time
+   //--- ChartSetInteger in ApplyTheme() can get silently overwritten back
+   //--- to false by the other EA's own tick. Re-asserting it true every
+   //--- tick here keeps TradePanel's chart winning that fight regardless
+   //--- of EA load order, without having to touch the other EAs (which
+   //--- still default it off correctly for their own solo-chart case).
+   if(InpHideTradeMarks) ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, true);
+
    datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
    if(t0 != g_lastBarTime)
      {
