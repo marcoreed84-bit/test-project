@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.16"
+#property version   "1.17"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -29,7 +29,7 @@
 input group "=== Trade buttons ==="
 input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens -
                                                   // stats/close/SL-TP are always scoped to this magic only
-input int    InpArmSeconds         = 5;          // ARM auto-expires after this many seconds unused -
+input int    InpArmSeconds         = 60;         // ARM auto-expires after this many seconds unused -
                                                   // starting value only, adjustable live from the panel
                                                   // itself now (Arm delay row) via g_armSeconds
 input int    InpSlippage           = 30;
@@ -76,11 +76,15 @@ input bool   InpApplyTheme         = true;
 input color  InpChartBg            = clrBlack;
 input color  InpBullCol            = C'0,150,255';    // neon blue - family standard
 input color  InpBearCol            = clrWhite;        // neon white - family standard
-input bool   InpHideTradeMarks     = true;    // hide MT5's own open-position lines and historical trade
-                                               // arrows - same InpHideTradeMarks idiom as the other EAs,
-                                               // applied unconditionally (not gated behind InpApplyTheme)
-                                               // since those arrows drawing through the panel is exactly
-                                               // what this fixes
+input bool   InpShowTradeLevels     = true;   // show MT5's native open-price/SL/TP lines - the ones you
+                                               // drag on the chart to set/move SL and TP. Kept ON by
+                                               // default; split out from trade-history so this panel can
+                                               // win the fight against a strategy EA on the same chart
+                                               // that turns it off for its own solo-chart case.
+input bool   InpHideTradeHistory    = true;   // hide MT5's own closed-trade arrows/labels only - applied
+                                               // unconditionally (not gated behind InpApplyTheme) since
+                                               // those arrows drawing through the panel is exactly what
+                                               // this fixes. Independent of InpShowTradeLevels above.
 
 input group "=== Trade condition light (green/red, same traffic-light idiom as the other EAs' panels) ==="
 input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from this project's own research
@@ -116,7 +120,7 @@ int      g_armSeconds = InpArmSeconds;   // live-adjustable from the panel's Arm
 
 #define PANEL_ZORDER 1000   // keeps every panel widget drawn above freshly-created MA/VWAP
                              // segments AND above MT5's own native trade arrows/levels, which
-                             // the InpHideTradeMarks toggle handles separately (z-order alone
+                             // InpShowTradeLevels/InpHideTradeHistory handle separately (z-order alone
                              // cannot reach those - they are not chart objects)
 #define TITLE_BAR_H  24      // drag is restricted to this strip at the top of the panel
 
@@ -494,18 +498,11 @@ void UpdateMarketLabel()
 //+------------------------------------------------------------------+
 void ApplyTheme()
   {
-   if(InpHideTradeMarks)
-     {
-      //--- CHART_SHOW_TRADE_LEVELS forced ON (not just "left alone") -
-      //--- that's the native open/SL/TP line set you drag to set SL/TP.
-      //--- A prior session or chart template can leave this property OFF
-      //--- on the chart itself, in which case merely not touching it here
-      //--- keeps it off. Only trade HISTORY (closed-trade arrows/labels,
-      //--- a years-deep clutter concern on a shared symbol chart, not
-      //--- something you'd ever drag) stays suppressed.
-      ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, true);
-      ChartSetInteger(0, CHART_SHOW_TRADE_HISTORY, false);
-     }
+   //--- two independent chart properties, two independent inputs - the
+   //--- native open/SL/TP drag-lines and the closed-trade history arrows
+   //--- are NOT the same setting and shouldn't share one toggle.
+   ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
+   if(InpHideTradeHistory) ChartSetInteger(0, CHART_SHOW_TRADE_HISTORY, false);
    if(!InpApplyTheme) return;
    ChartSetInteger(0, CHART_COLOR_BACKGROUND,  InpChartBg);
    ChartSetInteger(0, CHART_COLOR_FOREGROUND,  C'138,152,178');
@@ -822,7 +819,7 @@ void BuildPanel()
 
    y += 26;
    MkLabel("cntLbl", 12, y + 3, "Trade count:", InpTextColor, 9);
-   MkEdit("cntEdit", 130, y, 80, 20, "10");
+   MkEdit("cntEdit", 130, y, 80, 20, "3");
    MkButton("cntMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
    MkButton("cntPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
 
@@ -985,7 +982,7 @@ void OnTick()
    //--- tick here keeps TradePanel's chart winning that fight regardless
    //--- of EA load order, without having to touch the other EAs (which
    //--- still default it off correctly for their own solo-chart case).
-   if(InpHideTradeMarks) ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, true);
+   ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
 
    datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
    if(t0 != g_lastBarTime)
