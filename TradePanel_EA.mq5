@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.13"
+#property version   "1.14"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -329,81 +329,48 @@ bool PositionMatches(ulong ticket)
 
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| Closes pct of this panel's TOTAL matched volume, not pct of each   |
-//| position individually. The per-position approach broke completely |
-//| with several small same-size lots (e.g. 3x 0.01): 25% of a single  |
-//| 0.01 lot position rounds to 0 at a 0.01 step, which the old code   |
-//| then clamped UP to the broker minimum - silently closing that      |
-//| position 100% instead of 25%. Below a step's worth of volume can't |
-//| be sliced at all, so this closes whole positions, oldest first,    |
-//| until the target volume is reached, partial-closing at most the    |
-//| LAST one touched if there's enough left to form a valid partial.   |
-//| Exact pct isn't always achievable when volumes don't divide evenly |
-//| - this gets as close as the broker's own lot step allows, instead  |
-//| of the old silent all-or-nothing failure.                          |
+//| Closes exactly the N oldest matched positions, in full - avoids the
+//| ambiguity of a percentage-based close with several equal-size trades
+//| from one PLACE xN batch, where "close 50%" can only ever approximate
+//| a whole number of positions anyway. Closes fewer than N without
+//| complaint if fewer than N are open.
 //+------------------------------------------------------------------+
-void ClosePct(double pct)
+void ClosePositionCount(int n)
   {
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    int total = PositionsTotal();
-
    ulong  tickets[];
-   double vols[];
    datetime opens[];
-   int n = 0;
+   int m = 0;
    ArrayResize(tickets, total);
-   ArrayResize(vols, total);
    ArrayResize(opens, total);
-   double totalVol = 0.0;
    for(int i = 0; i < total; i++)
      {
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0 || !PositionMatches(ticket)) continue;
-      tickets[n] = ticket;
-      vols[n]    = PositionGetDouble(POSITION_VOLUME);
-      opens[n]   = (datetime)PositionGetInteger(POSITION_TIME);
-      totalVol  += vols[n];
-      n++;
+      tickets[m] = ticket;
+      opens[m]   = (datetime)PositionGetInteger(POSITION_TIME);
+      m++;
      }
-   if(n == 0) return;
+   if(m == 0) return;
 
-   // oldest-first (ascending open time) - simple insertion sort, n is tiny
-   for(int a = 1; a < n; a++)
+   // oldest-first (ascending open time) - simple insertion sort, m is tiny
+   for(int a = 1; a < m; a++)
      {
-      ulong  tt = tickets[a]; double tv = vols[a]; datetime to = opens[a];
+      ulong tt = tickets[a]; datetime to = opens[a];
       int b = a - 1;
       while(b >= 0 && opens[b] > to)
         {
-         tickets[b + 1] = tickets[b]; vols[b + 1] = vols[b]; opens[b + 1] = opens[b];
+         tickets[b + 1] = tickets[b]; opens[b + 1] = opens[b];
          b--;
         }
-      tickets[b + 1] = tt; vols[b + 1] = tv; opens[b + 1] = to;
+      tickets[b + 1] = tt; opens[b + 1] = to;
      }
 
-   double target = MathRound((totalVol * pct) / step) * step;
-   if(target < minLot) target = (pct > 0.0 && totalVol > 0.0) ? minLot : 0.0;
-   if(target > totalVol) target = totalVol;
-
-   double remaining = target;
+   int closeN = MathMin(n, m);
    int closed = 0, failed = 0;
-   for(int i = 0; i < n && remaining >= minLot - 1e-8; i++)
-     {
-      if(remaining >= vols[i] - 1e-8)
-        {
-         if(trade.PositionClose(tickets[i], (ulong)InpSlippage)) closed++; else failed++;
-         remaining -= vols[i];
-        }
-      else
-        {
-         double partial = MathRound(remaining / step) * step;
-         if(partial < minLot) break;   // what's left can't be sliced at this step
-         if(trade.PositionClosePartial(tickets[i], partial, (ulong)InpSlippage)) closed++; else failed++;
-         remaining -= partial;
-        }
-     }
-   PrintFormat("TradePanel: close %.0f%% - target %.2f of %.2f total lots, %d position(s) actioned, %d failed.",
-               pct * 100, target, totalVol, closed, failed);
+   for(int i = 0; i < closeN; i++)
+      if(trade.PositionClose(tickets[i], (ulong)InpSlippage)) closed++; else failed++;
+   PrintFormat("TradePanel: close %d position(s) - %d closed, %d failed (%d were open).", n, closed, failed, m);
   }
 
 //+------------------------------------------------------------------+
@@ -873,13 +840,22 @@ void BuildPanel()
    MkButton("buyBtn", 12, y, (w - 36) / 2, 26, "PLACE BUY xN", InpBuyColor, clrWhite, 9);
    MkButton("sellBtn", 12 + (w - 36) / 2 + 12, y, (w - 36) / 2, 26, "PLACE SELL xN", InpSellColor, clrWhite, 9);
 
+   //--- closes the N OLDEST matched positions exactly - replaced the old
+   //--- 25/50/75% buttons entirely per direct request: with several
+   //--- equal-size trades from one PLACE xN batch, "close N%" can only
+   //--- ever approximate a whole number of positions anyway, so exact
+   //--- count is both simpler and more precise.
    y += 34;
-   MkLabel("closeLbl", 12, y, "Partial close current position(s):", InpTextColor, 9);
+   MkLabel("closeNLbl", 12, y, "Close N oldest position(s):", InpTextColor, 9);
    y += 18;
-   int cw = (w - 48) / 3;
-   MkButton("c25", 12, y, cw, 22, "25%", C'70,70,78', clrWhite, 9);
-   MkButton("c50", 12 + (cw + 12), y, cw, 22, "50%", C'70,70,78', clrWhite, 9);
-   MkButton("c75", 12 + 2 * (cw + 12), y, cw, 22, "75%", C'70,70,78', clrWhite, 9);
+   MkLabel("closeNLbl", 12, y, "Close N oldest position(s):", InpTextColor, 9);
+   y += 18;
+     {
+      int ncw = (w - 24 - 8 * 2) / 9;   // 9 buttons, 2px gaps between them
+      for(int k = 1; k <= 9; k++)
+         MkButton("cN" + IntegerToString(k), 12 + (k - 1) * (ncw + 2), y, ncw, 22,
+                  IntegerToString(k), C'70,70,78', clrWhite, 9);
+     }
 
    y += 30;
    MkButton("cAll", 12, y, w - 24, 24, "CLOSE ALL OPEN TRADES", C'150,40,40', clrWhite, 9);
@@ -1175,9 +1151,15 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       ChartRedraw(0);
       return;
      }
-   if(sparam == PFX + "c25") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.25); UpdateStats(); ChartRedraw(0); return; }
-   if(sparam == PFX + "c50") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.50); UpdateStats(); ChartRedraw(0); return; }
-   if(sparam == PFX + "c75") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ClosePct(0.75); UpdateStats(); ChartRedraw(0); return; }
+   for(int k = 1; k <= 9; k++)
+      if(sparam == PFX + "cN" + IntegerToString(k))
+        {
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+         ClosePositionCount(k);
+         UpdateStats();
+         ChartRedraw(0);
+         return;
+        }
    if(sparam == PFX + "cAll") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); CloseAll(); UpdateStats(); ChartRedraw(0); return; }
    if(sparam == PFX + "slEdit" || sparam == PFX + "tpEdit") return;
    if(sparam == PFX + "setSL")
