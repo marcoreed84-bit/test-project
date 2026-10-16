@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.14"
+#property version   "1.15"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -496,12 +496,14 @@ void ApplyTheme()
   {
    if(InpHideTradeMarks)
      {
-      //--- CHART_SHOW_TRADE_LEVELS deliberately left ALONE (true, MT5's
-      //--- own default) - that's the native open/SL/TP line set you drag
-      //--- to set SL/TP, and hiding it here was in direct conflict with
-      //--- that workflow. Only trade HISTORY (closed-trade arrows/labels,
+      //--- CHART_SHOW_TRADE_LEVELS forced ON (not just "left alone") -
+      //--- that's the native open/SL/TP line set you drag to set SL/TP.
+      //--- A prior session or chart template can leave this property OFF
+      //--- on the chart itself, in which case merely not touching it here
+      //--- keeps it off. Only trade HISTORY (closed-trade arrows/labels,
       //--- a years-deep clutter concern on a shared symbol chart, not
       //--- something you'd ever drag) stays suppressed.
+      ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, true);
       ChartSetInteger(0, CHART_SHOW_TRADE_HISTORY, false);
      }
    if(!InpApplyTheme) return;
