@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.12"
+#property version   "1.13"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -328,29 +328,82 @@ bool PositionMatches(ulong ticket)
   }
 
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Closes pct of this panel's TOTAL matched volume, not pct of each   |
+//| position individually. The per-position approach broke completely |
+//| with several small same-size lots (e.g. 3x 0.01): 25% of a single  |
+//| 0.01 lot position rounds to 0 at a 0.01 step, which the old code   |
+//| then clamped UP to the broker minimum - silently closing that      |
+//| position 100% instead of 25%. Below a step's worth of volume can't |
+//| be sliced at all, so this closes whole positions, oldest first,    |
+//| until the target volume is reached, partial-closing at most the    |
+//| LAST one touched if there's enough left to form a valid partial.   |
+//| Exact pct isn't always achievable when volumes don't divide evenly |
+//| - this gets as close as the broker's own lot step allows, instead  |
+//| of the old silent all-or-nothing failure.                          |
+//+------------------------------------------------------------------+
 void ClosePct(double pct)
   {
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    int total = PositionsTotal();
-   int closed = 0, failed = 0;
-   for(int i = total - 1; i >= 0; i--)
+
+   ulong  tickets[];
+   double vols[];
+   datetime opens[];
+   int n = 0;
+   ArrayResize(tickets, total);
+   ArrayResize(vols, total);
+   ArrayResize(opens, total);
+   double totalVol = 0.0;
+   for(int i = 0; i < total; i++)
      {
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0 || !PositionMatches(ticket)) continue;
-      double vol = PositionGetDouble(POSITION_VOLUME);
-      double closeVol = MathRound((vol * pct) / step) * step;
-      if(closeVol < minLot) closeVol = minLot;
-      if(closeVol >= vol - 1e-8)
+      tickets[n] = ticket;
+      vols[n]    = PositionGetDouble(POSITION_VOLUME);
+      opens[n]   = (datetime)PositionGetInteger(POSITION_TIME);
+      totalVol  += vols[n];
+      n++;
+     }
+   if(n == 0) return;
+
+   // oldest-first (ascending open time) - simple insertion sort, n is tiny
+   for(int a = 1; a < n; a++)
+     {
+      ulong  tt = tickets[a]; double tv = vols[a]; datetime to = opens[a];
+      int b = a - 1;
+      while(b >= 0 && opens[b] > to)
         {
-         if(trade.PositionClose(ticket, (ulong)InpSlippage)) closed++; else failed++;
+         tickets[b + 1] = tickets[b]; vols[b + 1] = vols[b]; opens[b + 1] = opens[b];
+         b--;
+        }
+      tickets[b + 1] = tt; vols[b + 1] = tv; opens[b + 1] = to;
+     }
+
+   double target = MathRound((totalVol * pct) / step) * step;
+   if(target < minLot) target = (pct > 0.0 && totalVol > 0.0) ? minLot : 0.0;
+   if(target > totalVol) target = totalVol;
+
+   double remaining = target;
+   int closed = 0, failed = 0;
+   for(int i = 0; i < n && remaining >= minLot - 1e-8; i++)
+     {
+      if(remaining >= vols[i] - 1e-8)
+        {
+         if(trade.PositionClose(tickets[i], (ulong)InpSlippage)) closed++; else failed++;
+         remaining -= vols[i];
         }
       else
         {
-         if(trade.PositionClosePartial(ticket, closeVol, (ulong)InpSlippage)) closed++; else failed++;
+         double partial = MathRound(remaining / step) * step;
+         if(partial < minLot) break;   // what's left can't be sliced at this step
+         if(trade.PositionClosePartial(tickets[i], partial, (ulong)InpSlippage)) closed++; else failed++;
+         remaining -= partial;
         }
      }
-   PrintFormat("TradePanel: close %.0f%% - %d position(s) actioned, %d failed.", pct * 100, closed, failed);
+   PrintFormat("TradePanel: close %.0f%% - target %.2f of %.2f total lots, %d position(s) actioned, %d failed.",
+               pct * 100, target, totalVol, closed, failed);
   }
 
 //+------------------------------------------------------------------+
@@ -748,7 +801,11 @@ void CheckCrossProximity()
 //+------------------------------------------------------------------+
 void BuildPanel()
   {
-   g_panelW = 340;
+   //--- per direct request: shorter panel, smaller text - traded a bit of
+   //--- width (340->370) for a lot less height (rows tightened from
+   //--- 28-38px down to 20-26px, fonts from 10 down to 8-9) so nothing
+   //--- wraps or crowds at the smaller size.
+   g_panelW = 370;
    int w = g_panelW;
    ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -786,74 +843,74 @@ void BuildPanel()
    ObjectSetInteger(0, PFX + "titlebar", OBJPROP_ZORDER, PANEL_ZORDER);
    AddCtrl(PFX + "titlebar", 0, 0);
 
-   MkLabel("title", 10, 5, "TRADE PANEL  (drag here to move)", clrWhite, 10);
+   MkLabel("title", 10, 4, "TRADE PANEL  (drag here to move)", clrWhite, 9);
 
-   int y = TITLE_BAR_H + 14;
-   MkLabel("lotLbl", 12, y + 3, "Lot size:", InpTextColor, 10);
-   MkEdit("lotEdit", 120, y, 90, 24, "0.01");
-   MkButton("lotMinus", 216, y, 26, 24, "-", C'70,70,78', clrWhite, 12);
-   MkButton("lotPlus",  246, y, 26, 24, "+", C'70,70,78', clrWhite, 12);
+   int y = TITLE_BAR_H + 10;
+   MkLabel("lotLbl", 12, y + 3, "Lot size:", InpTextColor, 9);
+   MkEdit("lotEdit", 130, y, 80, 20, "0.01");
+   MkButton("lotMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
+   MkButton("lotPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
 
-   y += 34;
-   MkLabel("cntLbl", 12, y + 3, "Trade count:", InpTextColor, 10);
-   MkEdit("cntEdit", 120, y, 90, 24, "10");
-   MkButton("cntMinus", 216, y, 26, 24, "-", C'70,70,78', clrWhite, 12);
-   MkButton("cntPlus",  246, y, 26, 24, "+", C'70,70,78', clrWhite, 12);
-
-   y += 34;
-   MkLabel("expLbl", 12, y, "Exposure: -", clrKhaki, 10);
-
-   y += 30;
-   MkLabel("delayLbl", 12, y + 3, "Arm delay (s):", InpTextColor, 10);
-   MkEdit("delayEdit", 150, y, 60, 24, IntegerToString(g_armSeconds));
-   MkButton("delayMinus", 216, y, 26, 24, "-", C'70,70,78', clrWhite, 12);
-   MkButton("delayPlus",  246, y, 26, 24, "+", C'70,70,78', clrWhite, 12);
-
-   y += 34;
-   MkButton("armBtn", 12, y, w - 24, 28, "ARM (required before PLACE)", InpBgColor, clrSilver, 10);
-
-   y += 38;
-   MkButton("buyBtn", 12, y, (w - 36) / 2, 34, "PLACE BUY xN", InpBuyColor, clrWhite, 10);
-   MkButton("sellBtn", 12 + (w - 36) / 2 + 12, y, (w - 36) / 2, 34, "PLACE SELL xN", InpSellColor, clrWhite, 10);
-
-   y += 48;
-   MkLabel("closeLbl", 12, y, "Partial close current position(s):", InpTextColor, 10);
-   y += 22;
-   int cw = (w - 48) / 3;
-   MkButton("c25", 12, y, cw, 28, "25%", C'70,70,78', clrWhite, 10);
-   MkButton("c50", 12 + (cw + 12), y, cw, 28, "50%", C'70,70,78', clrWhite, 10);
-   MkButton("c75", 12 + 2 * (cw + 12), y, cw, 28, "75%", C'70,70,78', clrWhite, 10);
-
-   y += 38;
-   MkButton("cAll", 12, y, w - 24, 30, "CLOSE ALL OPEN TRADES", C'150,40,40', clrWhite, 10);
-
-   y += 40;
-   MkLabel("sltpLbl", 12, y, "Manual SL / TP for current position(s):", InpTextColor, 10);
-   y += 22;
-   MkLabel("slLbl", 12, y + 3, "SL:", InpTextColor, 10);
-   MkEdit("slEdit", 50, y, 110, 24, "0.00");
-   MkButton("setSL", 168, y, 76, 24, "Set SL", C'70,70,78', clrWhite, 10);
-   y += 30;
-   MkLabel("tpLbl", 12, y + 3, "TP:", InpTextColor, 10);
-   MkEdit("tpEdit", 50, y, 110, 24, "0.00");
-   MkButton("setTP", 168, y, 76, 24, "Set TP", C'70,70,78', clrWhite, 10);
-   y += 30;
-   MkButton("fillCur", 12, y, w - 24, 22, "Fill fields with current SL/TP", C'55,55,62', clrSilver, 9);
-
-   y += 36;
-   MkLabel("statLbl", 12, y, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver, 10);
+   y += 26;
+   MkLabel("cntLbl", 12, y + 3, "Trade count:", InpTextColor, 9);
+   MkEdit("cntEdit", 130, y, 80, 20, "10");
+   MkButton("cntMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
+   MkButton("cntPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
 
    y += 24;
-   MkLabel("spreadLbl", 12, y, "Spread: -", clrKhaki, 10);
-   y += 20;
-   MkLabel("volLbl", 12, y, "Volume (last bar): -", clrKhaki, 10);
+   MkLabel("expLbl", 12, y, "Exposure: -", clrKhaki, 9);
+
+   y += 22;
+   MkLabel("delayLbl", 12, y + 3, "Arm delay (s):", InpTextColor, 9);
+   MkEdit("delayEdit", 150, y, 50, 20, IntegerToString(g_armSeconds));
+   MkButton("delayMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
+   MkButton("delayPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
+
+   y += 26;
+   MkButton("armBtn", 12, y, w - 24, 22, "ARM (required before PLACE)", InpBgColor, clrSilver, 9);
 
    y += 28;
-   MkLabel("light", 12, y, "l", clrLimeGreen, 14);
-   ObjectSetString(0, PFX + "light", OBJPROP_FONT, "Wingdings");
-   MkLabel("lightLbl", 34, y + 2, "OK TO TRADE (spread within limit)", clrLimeGreen, 10);
+   MkButton("buyBtn", 12, y, (w - 36) / 2, 26, "PLACE BUY xN", InpBuyColor, clrWhite, 9);
+   MkButton("sellBtn", 12 + (w - 36) / 2 + 12, y, (w - 36) / 2, 26, "PLACE SELL xN", InpSellColor, clrWhite, 9);
 
-   g_panelH = y + 44;   // extra bottom margin so the last row never sits flush with the edge
+   y += 34;
+   MkLabel("closeLbl", 12, y, "Partial close current position(s):", InpTextColor, 9);
+   y += 18;
+   int cw = (w - 48) / 3;
+   MkButton("c25", 12, y, cw, 22, "25%", C'70,70,78', clrWhite, 9);
+   MkButton("c50", 12 + (cw + 12), y, cw, 22, "50%", C'70,70,78', clrWhite, 9);
+   MkButton("c75", 12 + 2 * (cw + 12), y, cw, 22, "75%", C'70,70,78', clrWhite, 9);
+
+   y += 30;
+   MkButton("cAll", 12, y, w - 24, 24, "CLOSE ALL OPEN TRADES", C'150,40,40', clrWhite, 9);
+
+   y += 32;
+   MkLabel("sltpLbl", 12, y, "Manual SL / TP for current position(s):", InpTextColor, 9);
+   y += 18;
+   MkLabel("slLbl", 12, y + 3, "SL:", InpTextColor, 9);
+   MkEdit("slEdit", 45, y, 100, 20, "0.00");
+   MkButton("setSL", 155, y, 65, 20, "Set SL", C'70,70,78', clrWhite, 9);
+   y += 24;
+   MkLabel("tpLbl", 12, y + 3, "TP:", InpTextColor, 9);
+   MkEdit("tpEdit", 45, y, 100, 20, "0.00");
+   MkButton("setTP", 155, y, 65, 20, "Set TP", C'70,70,78', clrWhite, 9);
+   y += 24;
+   MkButton("fillCur", 12, y, w - 24, 18, "Fill fields with current SL/TP", C'55,55,62', clrSilver, 8);
+
+   y += 28;
+   MkLabel("statLbl", 12, y, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver, 9);
+
+   y += 20;
+   MkLabel("spreadLbl", 12, y, "Spread: -", clrKhaki, 9);
+   y += 16;
+   MkLabel("volLbl", 12, y, "Volume (last bar): -", clrKhaki, 9);
+
+   y += 22;
+   MkLabel("light", 12, y, "l", clrLimeGreen, 12);
+   ObjectSetString(0, PFX + "light", OBJPROP_FONT, "Wingdings");
+   MkLabel("lightLbl", 30, y + 1, "OK TO TRADE (spread within limit)", clrLimeGreen, 9);
+
+   g_panelH = y + 36;   // extra bottom margin so the last row never sits flush with the edge
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, g_panelH);
 
    UpdateExposureLabel();
