@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.11"
+#property version   "1.12"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -476,7 +476,12 @@ void ApplyTheme()
   {
    if(InpHideTradeMarks)
      {
-      ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS,  false);
+      //--- CHART_SHOW_TRADE_LEVELS deliberately left ALONE (true, MT5's
+      //--- own default) - that's the native open/SL/TP line set you drag
+      //--- to set SL/TP, and hiding it here was in direct conflict with
+      //--- that workflow. Only trade HISTORY (closed-trade arrows/labels,
+      //--- a years-deep clutter concern on a shared symbol chart, not
+      //--- something you'd ever drag) stays suppressed.
       ChartSetInteger(0, CHART_SHOW_TRADE_HISTORY, false);
      }
    if(!InpApplyTheme) return;
@@ -917,6 +922,22 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
+//| True while the user is actively typing in any of this panel's     |
+//| edit boxes. MT5 sets OBJPROP_SELECTED on an OBJ_EDIT while it has  |
+//| keyboard focus/is being edited - checked here instead of guessed  |
+//| at, so the new-bar rebuild can defer itself exactly while (and     |
+//| only while) it would actually interrupt typing.                   |
+//+------------------------------------------------------------------+
+bool AnyEditFocused()
+  {
+   string edits[] = {"lotEdit", "cntEdit", "delayEdit", "slEdit", "tpEdit"};
+   for(int i = 0; i < ArraySize(edits); i++)
+      if(ObjectGetInteger(0, PFX + edits[i], OBJPROP_SELECTED))
+         return true;
+   return false;
+  }
+
+//+------------------------------------------------------------------+
 void OnTick()
   {
    datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -929,7 +950,15 @@ void OnTick()
       //--- bar object out from under an in-progress drag is asking for
       //--- trouble. The next new bar after the drag ends reclaims paint
       //--- order instead; one bar's delay is harmless.
-      if(!g_dragging) RebuildPanel();
+      //--- SAME reasoning for an in-progress edit: ObjectsDeleteAll inside
+      //--- RebuildPanel() destroys the slEdit/tpEdit/etc. object the user
+      //--- is mid-keystroke in, which silently drops keyboard focus (the
+      //--- freshly recreated object of the same name does NOT inherit it)
+      //--- - this was the real cause of "I can't type in the SL field",
+      //--- not an edit-box property. MT5 marks an OBJ_EDIT OBJPROP_SELECTED
+      //--- while it's being edited, which lets this be detected reliably
+      //--- rather than guessed at.
+      if(!g_dragging && !AnyEditFocused()) RebuildPanel();
      }
   }
 
