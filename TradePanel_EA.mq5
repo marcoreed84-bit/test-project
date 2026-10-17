@@ -19,7 +19,24 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.26"
+#property version   "1.27"
+//--- 1.27: FIX real performance bug - "charts hanging". A LIVE call to
+//--- ComputeStochSignals() (every new bar, and polled every 2s since
+//--- 1.25) was re-copying (CopyRates) and re-computing the stochastic -
+//--- TWICE since 1.24 added the exit one - plus a full ATR pass, over
+//--- the WHOLE loaded chart history every single time, purely to replay
+//--- lastDir/posDir state from scratch. On a full-history low-timeframe
+//--- chart (hundreds of thousands of bars) that is real, repeated, heavy
+//--- work on the UI thread every time a bar closes. A live call only
+//--- ever needs the ONE newest closed bar, so it now copies/computes a
+//--- small bounded window (minBars+10) instead, and lastDir/posDir/
+//--- lastArr/lastSl/lastTp are persisted across live calls in
+//--- g_sigLastDir/g_sigPosDir/g_sigLastArr/g_sigLastSl/g_sigLastTp
+//--- (reset to a safe default in ResyncStochSignals(), always correctly
+//--- rewritten by the next backfill or live call) instead of being
+//--- rebuilt by re-walking the whole history every time. Backfill (on
+//--- attach / timeframe switch, runs once) is unchanged - it still needs
+//--- the full history, just no longer on every bar close.
 //--- 1.26: FIX real bug - a zone-qualified entry cross with no sane stop
 //--- (risk<=0.0, close sitting exactly on the swing extreme) still
 //--- silently flipped lastDir/posDir even though NO arrow was ever drawn
@@ -219,6 +236,14 @@ ENUM_TIMEFRAMES g_sigPeriod = PERIOD_CURRENT;
 //--- true. Cleared back to false once %K leaves the zone again.
 bool g_sigZoneAlertedLong  = false;
 bool g_sigZoneAlertedShort = false;
+//--- persisted entry/exit overlay state, carried across LIVE calls to
+//--- ComputeStochSignals() so a live call only ever needs to look at a
+//--- small recent window instead of re-walking the WHOLE loaded chart
+//--- history on every new bar - see that function's own header for why
+//--- this matters (it was the real cause of charts hanging).
+int    g_sigLastDir = 0;
+string g_sigLastArr = "", g_sigLastSl = "", g_sigLastTp = "";
+int    g_sigPosDir  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1000,12 +1025,33 @@ void CheckStochZoneAlert(const double kCur)
 //| up to the last-but-one bar to recover state, then draws only the    |
 //| newest bar.                                                         |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| backfill=true (attach / timeframe switch, runs ONCE): walks the      |
+//| whole loaded chart history, same as always.                          |
+//| backfill=false (every new bar, now also polled every 2s by the       |
+//| timer): used to ALSO re-copy and re-compute the stochastic (TWICE,   |
+//| since 1.24 added the exit one) plus ATR over that SAME entire        |
+//| history, every single call - on a full-history low-timeframe chart   |
+//| (hundreds of thousands of bars) that is real, repeated, heavy work   |
+//| landing on the UI thread every time a bar closes, and was the real   |
+//| cause of charts hanging. A live call only ever needs the ONE newest  |
+//| closed bar's cross, so it now copies/computes a small bounded        |
+//| window instead, and lastDir/lastArr/lastSl/lastTp/posDir are         |
+//| persisted in g_sigLastDir/g_sigLastArr/.../g_sigPosDir ACROSS live   |
+//| calls (reset in ResyncStochSignals(), same as the zone-alert         |
+//| latches) instead of being reconstructed by re-walking history every  |
+//| time.                                                                 |
+//+------------------------------------------------------------------+
 void ComputeStochSignals(const bool backfill)
   {
    int minBarsEntry = InpSigKPeriod + InpSigSlowing + InpSigDPeriod + InpSigSwingBars;
    int minBarsExit  = InpShowExitSignals ? (InpExitKPeriod + InpExitSlowing + InpExitDPeriod) : 0;
    int minBars = MathMax(minBarsEntry, minBarsExit);
-   int total = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   //--- live calls only need enough trailing bars for k[n-1]/k[n-2] (and
+   //--- the exit/ATR equivalents) to be valid, plus a little padding -
+   //--- NOT the whole multi-year history
+   int total = backfill ? available : MathMin(available, minBars + 10);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -1027,16 +1073,26 @@ void ComputeStochSignals(const bool backfill)
    if(!backfill) CheckStochZoneAlert(k[n - 1]);
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
-   //--- draw/alert only from here on; bars before it (down to minBars) are
-   //--- still walked, silently, purely to reconstruct lastDir/lastArr/
-   //--- posDir state correctly for a live single-bar call
+   //--- backfill draws/alerts for every qualifying bar across the whole
+   //--- history; a live call only ever needs to look at the ONE newest
+   //--- closed bar - its window is already bounded to just that, so the
+   //--- loop below simply starts there instead of re-walking anything
    int drawFrom = backfill ? minBars : n - 1;
+   int from     = backfill ? minBars : n - 1;
 
-   int lastDir = 0;                 // last ENTRY direction drawn (same-direction replace, as before)
-   string lastArr = "", lastSl = "", lastTp = "";
-   int posDir = 0;                  // 0=flat, 1=long, -1=short - drives the exit overlay
+   int lastDir, posDir;
+   string lastArr, lastSl, lastTp;
+   if(backfill)
+     {
+      lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+     }
+   else
+     {
+      lastDir = g_sigLastDir; posDir = g_sigPosDir;
+      lastArr = g_sigLastArr; lastSl = g_sigLastSl; lastTp = g_sigLastTp;
+     }
 
-   for(int i = minBars; i < n; i++)
+   for(int i = from; i < n; i++)
      {
       bool draw = (i >= drawFrom);
       double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
@@ -1162,6 +1218,12 @@ void ComputeStochSignals(const bool backfill)
            }
         }
      }
+
+   //--- always write back (backfill included) - a backfill run freshly
+   //--- reconstructs the correct end-of-history state, so the very next
+   //--- LIVE call must continue from THAT, not from zero/empty
+   g_sigLastDir = lastDir; g_sigPosDir = posDir;
+   g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
   }
 
 //+------------------------------------------------------------------+
@@ -1173,9 +1235,16 @@ void ResyncStochSignals()
    ObjectsDeleteAll(0, g_sig);
    g_sigPeriod = (ENUM_TIMEFRAMES)_Period;
    //--- zone-alert latches are per-timeframe state; a fresh timeframe's
-   //--- %K has nothing to do with the old one's zone excursion
+   //--- %K has nothing to do with the old one's zone excursion. The
+   //--- persisted entry/exit state (g_sigLastDir/g_sigPosDir/...) doesn't
+   //--- need an explicit reset here - ComputeStochSignals(true) right
+   //--- below always writes it back, freshly reconstructed for the new
+   //--- timeframe's own history, so this is just a safe default in case
+   //--- that backfill bails out early (too little history loaded yet).
    g_sigZoneAlertedLong  = false;
    g_sigZoneAlertedShort = false;
+   g_sigLastDir = 0; g_sigPosDir = 0;
+   g_sigLastArr = ""; g_sigLastSl = ""; g_sigLastTp = "";
    if(InpShowStochSignals) ComputeStochSignals(true);
   }
 
