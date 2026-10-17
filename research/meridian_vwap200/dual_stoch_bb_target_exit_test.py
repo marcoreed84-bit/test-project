@@ -114,3 +114,63 @@ if __name__ == "__main__":
     run_tf("GOLD", "M5", load_m5)
     print(f"\n\n  Cumulative honest K for 'dual-stoch-in-zone' research line: 5")
     print(f"  (plain, +200EMA, +BB-touch-entry, +reverse-cross-exit, +BB-target-exit).")
+
+
+def random_timing_null_bb(df, point, real_trades, direction, n_draws=300, seed=0, time_cap_bars=TIME_CAP_BARS):
+    """Longs-only (or shorts-only) null: same BB-target/time-cap exit
+    machinery, same real spread, entry COUNT matched to the real
+    system's count for that direction - entries at uniformly random
+    bars (no 200EMA requirement either - the null doesn't need to
+    mimic the filter, only the exit mechanics and cost) instead of on
+    the dual-stoch-cross-in-zone signal. Tests whether the ENTRY
+    TIMING itself has skill, separate from "does the system make
+    money" (already reported above)."""
+    close, high, low = df["close"].values, df["high"].values, df["low"].values
+    spread = df["spread"].values
+    n = len(df)
+    bb_upper, bb_mid, bb_lower = bollinger(close, 20, 2.0)
+    valid_mask = ~(np.isnan(bb_upper) | np.isnan(bb_lower))
+    valid_idx = np.where(valid_mask)[0]
+    valid_idx = valid_idx[(valid_idx >= 210) & (valid_idx < n - time_cap_bars - 2)]
+
+    n_trades = len(real_trades)
+    rng = np.random.default_rng(seed)
+
+    net_pcts = []
+    for _ in range(n_draws):
+        total = 0.0
+        picks = rng.choice(valid_idx, size=n_trades, replace=False)
+        for idx in picks:
+            fill_i = idx + 1
+            sc = spread[fill_i] * point
+            entry_px = close[fill_i] + (sc if direction > 0 else -sc)
+            hard_limit = min(fill_i + time_cap_bars, n - 1)
+            exit_px = close[hard_limit]
+            for j in range(fill_i + 1, hard_limit + 1):
+                if np.isnan(bb_upper[j]) or np.isnan(bb_lower[j]):
+                    continue
+                hit = (high[j] >= bb_upper[j]) if direction > 0 else (low[j] <= bb_lower[j])
+                if hit:
+                    exit_px = bb_upper[j] if direction > 0 else bb_lower[j]
+                    break
+            total += ((exit_px - entry_px) / entry_px) * direction
+        net_pcts.append(total)
+    net_pcts = np.array(net_pcts)
+    real_net = sum(r["pnl_pct"] for r in real_trades)
+    p_value = (np.sum(net_pcts >= real_net) + 1) / (n_draws + 1)
+    return real_net, net_pcts, p_value
+
+
+def run_longs_null(symbol, tf_label, loader):
+    df, point = loader(symbol)
+    full_res = build_trades_bb_target(df, point)
+    longs = [r for r in full_res if r["dir"] > 0]
+    print(f"\n{symbol} {tf_label} LONGS-ONLY random-timing null (n_real={len(longs)}, n_draws=300):")
+    real_net, null_dist, p = random_timing_null_bb(df, point, longs, direction=1)
+    print(f"  real net%={100*real_net:.2f}   null mean%={100*null_dist.mean():.2f}   "
+          f"null std%={100*null_dist.std():.2f}   p-value={p:.4f}")
+
+
+if __name__ == "__main__":
+    run_longs_null("GOLD", "M15", load_m15)
+    run_longs_null("GOLD", "M5", load_m5)
