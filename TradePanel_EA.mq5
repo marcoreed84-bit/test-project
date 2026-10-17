@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.23"
+#property version   "1.24"
+//--- 1.24: (1) new independent EXIT signal overlay - solid dots, own
+//--- stochastic settings (InpExitKPeriod/Slowing/DPeriod), own on/off
+//--- (InpShowExitSignals), own alert (InpSigExitAlert). Fires on the exit
+//--- stochastic's own %K/%D cross AGAINST the currently-shown entry
+//--- direction (no zone requirement - plain "exit on opposite cross"),
+//--- only while an entry arrow is "open"; (2) entry arrows and exit dots
+//--- are now pushed away from the candle by InpSigArrowOffsetATR /
+//--- InpSigExitOffsetATR (in ATR(14) multiples, exit further out than
+//--- entry by default) instead of sitting right on the candle. Still
+//--- visual/alert only - no trading/execution logic touched.
 //--- 1.23: two new alert stages for the classic stoch overlay, live only
 //--- (never during backfill of old history): (1) InpSigZoneAlert - an
 //--- EARLY push+sound the moment %K first enters the oversold/overbought
@@ -142,6 +152,17 @@ input bool   InpSigZoneAlert       = true;    // EARLY heads-up push+sound when 
                                                // so before an arrow/signal is printed
 input bool   InpSigCrossAlert      = true;    // push+sound when the actual cross-in-zone signal prints
 input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder
+input double InpSigArrowOffsetATR  = 0.5;     // how far ENTRY arrows sit from the candle, in ATR(14) multiples
+                                               // (0 = touching the candle like before)
+
+input group "=== Classic/textbook Stochastic EXIT signal overlay - UNVALIDATED (own settings, independent of entry) ==="
+input bool   InpShowExitSignals    = true;    // master on/off for exit dots - entry overlay above is unaffected
+input int    InpExitKPeriod        = 14;      // exit stochastic %K period (can differ from the entry one)
+input int    InpExitSlowing        = 3;       // exit stochastic slowing
+input int    InpExitDPeriod        = 3;       // exit stochastic %D period
+input bool   InpSigExitAlert       = true;    // push+sound when an exit dot prints (live only)
+input double InpSigExitOffsetATR   = 1.0;     // how far EXIT dots sit from the candle, in ATR(14) multiples -
+                                               // bigger than the entry offset so the two never overlap
 
 CTrade trade;
 
@@ -839,6 +860,46 @@ void DrawSigArrow(const string nm, const datetime t, const double price, const b
   }
 
 //+------------------------------------------------------------------+
+//| Solid dot for an EXIT signal - same color family as the position   |
+//| being exited, Wingdings code 159 = filled circle.                  |
+//+------------------------------------------------------------------+
+void DrawSigDot(const string nm, const datetime t, const double price, const bool wasLong)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpSigBuyCol : InpSigSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 3);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "Classic stoch EXIT-LONG signal (own settings, UNVALIDATED, visual only)"
+                                                     : "Classic stoch EXIT-SHORT signal (own settings, UNVALIDATED, visual only)");
+  }
+
+//+------------------------------------------------------------------+
+//| Plain Wilder ATR(period), used only to push the arrows/dots a      |
+//| sane, instrument-scaled distance away from the candles - has no    |
+//| effect on the signal, stop or target math above.                   |
+//+------------------------------------------------------------------+
+void SigATR(const double &h[], const double &l[], const double &c[], const int n, const int period, double &atr[])
+  {
+   ArrayResize(atr, n);
+   ArrayInitialize(atr, SIG_NA);
+   if(n < period + 1) return;
+   double sum = 0.0;
+   for(int i = 1; i <= period; i++)
+      sum += MathMax(h[i] - l[i], MathMax(MathAbs(h[i] - c[i - 1]), MathAbs(l[i] - c[i - 1])));
+   atr[period] = sum / period;
+   for(int i = period + 1; i < n; i++)
+     {
+      double tr = MathMax(h[i] - l[i], MathMax(MathAbs(h[i] - c[i - 1]), MathAbs(l[i] - c[i - 1])));
+      atr[i] = (atr[i - 1] * (period - 1) + tr) / period;
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| Push notification + Experts-log line + sound, shared by both the   |
 //| early zone-entry alert and the confirmed-signal alert below.       |
 //| SendNotification() needs push notifications enabled AND a          |
@@ -897,15 +958,28 @@ void CheckStochZoneAlert(const double kCur)
   }
 
 //+------------------------------------------------------------------+
-//| Recomputes the stochastic over the whole loaded CLOSED history     |
-//| (the forming bar is excluded, so nothing here can repaint), then   |
-//| draws either every signal (backfill) or only the newest closed     |
-//| bar's. Every qualifying bar is marked - no "one trade at a time"   |
-//| skipping. Stop/target are measured from the signal bar's close.    |
+//| Recomputes the ENTRY stochastic (and, if enabled, a fully           |
+//| independent EXIT stochastic with its own K/slowing/D settings)      |
+//| over the whole loaded CLOSED history (the forming bar is excluded,  |
+//| so nothing here can repaint), then draws either every signal        |
+//| (backfill) or only the newest closed bar's.                         |
+//|                                                                     |
+//| EXIT RULE (own settings, no zone requirement - the usual "textbook" |
+//| exit-on-opposite-cross, not restricted to 20/80): fires the first   |
+//| time the EXIT stochastic crosses against the currently-shown ENTRY  |
+//| direction, i.e. only while an entry arrow is "open" (no entry has   |
+//| fired yet in the other direction). A single pass walks the whole    |
+//| history in time order so the entry/exit state machine (long / short |
+//| / flat) is reconstructed correctly either way - during backfill it  |
+//| draws as it goes; for a live single-bar call it replays silently    |
+//| up to the last-but-one bar to recover state, then draws only the    |
+//| newest bar.                                                         |
 //+------------------------------------------------------------------+
 void ComputeStochSignals(const bool backfill)
   {
-   int minBars = InpSigKPeriod + InpSigSlowing + InpSigDPeriod + InpSigSwingBars;
+   int minBarsEntry = InpSigKPeriod + InpSigSlowing + InpSigDPeriod + InpSigSwingBars;
+   int minBarsExit  = InpShowExitSignals ? (InpExitKPeriod + InpExitSlowing + InpExitDPeriod) : 0;
+   int minBars = MathMax(minBarsEntry, minBarsExit);
    int total = Bars(_Symbol, PERIOD_CURRENT) - 1;
    if(total < minBars) return;
    MqlRates r[];
@@ -918,94 +992,120 @@ void ComputeStochSignals(const bool backfill)
 
    double k[], d[];
    SigClassicStoch(h, l, c, n, InpSigKPeriod, InpSigSlowing, InpSigDPeriod, k, d);
+   double kE[], dE[];
+   if(InpShowExitSignals) SigClassicStoch(h, l, c, n, InpExitKPeriod, InpExitSlowing, InpExitDPeriod, kE, dE);
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
 
    //--- early zone-entry alert - live only (not during backfill, which
    //--- would otherwise fire hundreds of alerts for old history on attach)
    if(!backfill) CheckStochZoneAlert(k[n - 1]);
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
-   //--- when backfilling, replay from scratch so the "last fired direction"
-   //--- state below is correct from the start of history, not just from
-   //--- wherever the loop happens to begin
-   int from = backfill ? minBars : n - 1;
-   int lastDir = 0;
+   //--- draw/alert only from here on; bars before it (down to minBars) are
+   //--- still walked, silently, purely to reconstruct lastDir/lastArr/
+   //--- posDir state correctly for a live single-bar call
+   int drawFrom = backfill ? minBars : n - 1;
+
+   int lastDir = 0;                 // last ENTRY direction drawn (same-direction replace, as before)
    string lastArr = "", lastSl = "", lastTp = "";
-   if(!backfill)
-     {
-      //--- single-bar incremental call: recover lastDir/lastArr/lastSl/lastTp
-      //--- by re-scanning prior signals so a repeat same-direction cross
-      //--- still replaces the right objects
-      for(int p = minBars; p < n - 1; p++)
-        {
-         if(k[p] == SIG_NA || d[p] == SIG_NA || k[p - 1] == SIG_NA || d[p - 1] == SIG_NA) continue;
-         bool pUp   = k[p - 1] <= d[p - 1] && k[p] > d[p];
-         bool pDown = k[p - 1] >= d[p - 1] && k[p] < d[p];
-         int pDir = 0;
-         if(pUp && k[p] < InpSigZoneLow) pDir = 1;
-         else if(pDown && k[p] > InpSigZoneHigh) pDir = -1;
-         if(pDir == 0) continue;
-         string pid = IntegerToString((long)r[p].time);
-         lastDir = pDir;
-         lastArr = g_sig + "arr_" + pid;
-         lastSl  = g_sig + "sl_" + pid;
-         lastTp  = g_sig + "tp_" + pid;
-        }
-     }
-   for(int i = from; i < n; i++)
-     {
-      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
-      bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
-      bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
-      //--- crossover WITHIN the extreme zone (%K in the zone on the cross
-      //--- bar) - not a zone-exit rule
-      int dir = 0;
-      if(crossUp && k[i] < InpSigZoneLow) dir = 1;
-      else if(crossDown && k[i] > InpSigZoneHigh) dir = -1;
-      if(dir == 0) continue;
-      //--- confirmed-signal alert - live only, same reasoning as the
-      //--- zone-entry alert above (no backfill spam)
-      if(!backfill && InpSigCrossAlert)
-        {
-         string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-         FireSigAlert(StringFormat(
-            "%s %s: Classic stoch cross-in-zone %s signal PRINTED (K=%.1f) - chart overlay only, "
-            "UNVALIDATED, does not place/modify/close anything", _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
-        }
-      //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
-      //--- each other while both still sit inside the zone) REPLACES the
-      //--- previous same-run signal instead of adding a second one, so
-      //--- only the latest/held cross of a run stays on the chart - the
-      //--- first one is often a premature whipsaw that goes against price
-      //--- before the real move starts
-      if(dir == lastDir && lastArr != "")
-        {
-         ObjectDelete(0, lastArr);
-         ObjectDelete(0, lastSl);
-         ObjectDelete(0, lastTp);
-        }
-      lastDir = dir;
+   int posDir = 0;                  // 0=flat, 1=long, -1=short - drives the exit overlay
 
-      //--- recent swing = lowest low / highest high of the last
-      //--- InpSigSwingBars closed bars, signal bar included
-      double swing = (dir > 0) ? l[i] : h[i];
-      for(int j = i - InpSigSwingBars + 1; j < i; j++)
-         swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-      double risk = dir * (c[i] - swing);
-      if(risk <= 0.0) continue;   // close sits on the swing extreme - no sane stop
-      double stop = swing;
-      double tp   = c[i] + dir * InpSigRR * risk;
+   for(int i = minBars; i < n; i++)
+     {
+      bool draw = (i >= drawFrom);
+      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
+      double offExit   = (atr[i] == SIG_NA) ? 0.0 : InpSigExitOffsetATR  * atr[i];
 
-      datetime t = r[i].time;
-      string id = IntegerToString((long)t);
-      bool isBuy = dir > 0;
-      lastArr = g_sig + "arr_" + id;
-      lastSl  = g_sig + "sl_" + id;
-      lastTp  = g_sig + "tp_" + id;
-      DrawSigArrow(lastArr, t, isBuy ? r[i].low : r[i].high, isBuy);
-      DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
-                   "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
-      DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
-                   "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
+      //--- ENTRY: %K/%D cross WITHIN the extreme zone (not a zone-exit rule)
+      if(k[i] != SIG_NA && d[i] != SIG_NA && k[i - 1] != SIG_NA && d[i - 1] != SIG_NA)
+        {
+         bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
+         bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
+         int dir = 0;
+         if(crossUp && k[i] < InpSigZoneLow) dir = 1;
+         else if(crossDown && k[i] > InpSigZoneHigh) dir = -1;
+
+         if(dir != 0)
+           {
+            if(draw)
+              {
+               if(!backfill && InpSigCrossAlert)
+                 {
+                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                  FireSigAlert(StringFormat(
+                     "%s %s: Classic stoch cross-in-zone %s signal PRINTED (K=%.1f) - chart overlay only, "
+                     "UNVALIDATED, does not place/modify/close anything", _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
+                 }
+               //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
+               //--- each other while both still sit inside the zone) REPLACES the
+               //--- previous same-run signal instead of adding a second one - the
+               //--- first one is often a premature whipsaw that goes against price
+               //--- before the real move starts
+               if(dir == lastDir && lastArr != "")
+                 {
+                  ObjectDelete(0, lastArr);
+                  ObjectDelete(0, lastSl);
+                  ObjectDelete(0, lastTp);
+                 }
+              }
+            lastDir = dir;
+            posDir  = dir;   // new entry opens/flips the "position" the exit overlay watches
+
+            //--- recent swing = lowest low / highest high of the last
+            //--- InpSigSwingBars closed bars, signal bar included
+            double swing = (dir > 0) ? l[i] : h[i];
+            for(int j = i - InpSigSwingBars + 1; j < i; j++)
+               swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+            double risk = dir * (c[i] - swing);
+            if(risk > 0.0 && draw)   // risk<=0: close sits on the swing extreme - no sane stop, skip drawing
+              {
+               double stop = swing;
+               double tp   = c[i] + dir * InpSigRR * risk;
+               datetime t = r[i].time;
+               string id = IntegerToString((long)t);
+               bool isBuy = dir > 0;
+               lastArr = g_sig + "arr_" + id;
+               lastSl  = g_sig + "sl_" + id;
+               lastTp  = g_sig + "tp_" + id;
+               DrawSigArrow(lastArr, t, isBuy ? r[i].low - offEntry : r[i].high + offEntry, isBuy);
+               DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
+                            "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
+               DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
+                            "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
+              }
+           }
+        }
+
+      //--- EXIT: only while "in position" per the entry overlay above, on
+      //--- the EXIT stochastic's own (independently-set) %K/%D cross, in
+      //--- the direction that closes that position - no zone requirement
+      if(InpShowExitSignals && posDir != 0 &&
+         kE[i] != SIG_NA && dE[i] != SIG_NA && kE[i - 1] != SIG_NA && dE[i - 1] != SIG_NA)
+        {
+         bool exCrossUp   = kE[i - 1] <= dE[i - 1] && kE[i] > dE[i];
+         bool exCrossDown = kE[i - 1] >= dE[i - 1] && kE[i] < dE[i];
+         bool exitFires = (posDir > 0 && exCrossDown) || (posDir < 0 && exCrossUp);
+         if(exitFires)
+           {
+            if(draw)
+              {
+               if(!backfill && InpSigExitAlert)
+                 {
+                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                  FireSigAlert(StringFormat(
+                     "%s %s: Classic stoch EXIT-%s signal PRINTED (ExitK=%.1f) - chart overlay only, "
+                     "UNVALIDATED, does not place/modify/close anything", _Symbol, tf,
+                     (posDir > 0 ? "LONG" : "SHORT"), kE[i]));
+                 }
+               datetime t = r[i].time;
+               string exId = g_sig + "exit_" + IntegerToString((long)t);
+               bool wasLong = posDir > 0;
+               DrawSigDot(exId, t, wasLong ? r[i].high + offExit : r[i].low - offExit, wasLong);
+              }
+            posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
+           }
+        }
      }
   }
 
