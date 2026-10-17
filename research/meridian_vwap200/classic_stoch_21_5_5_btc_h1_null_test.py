@@ -54,20 +54,50 @@ def random_timing_null(df, point, real_trades, n_draws=1000, seed=0):
     rng = np.random.default_rng(seed)
 
     net_pcts = []
+    valid_idx_arr = np.array(valid_idx)
+    target_trades = n_long + n_short
     for draw in range(n_draws):
-        picks = rng.choice(valid_idx, size=n_long + n_short, replace=False)
-        dirs = [1] * n_long + [-1] * n_short
-        rng.shuffle(dirs)
+        dirs_pool = [1] * n_long + [-1] * n_short
+        rng.shuffle(dirs_pool)
         total = 0.0
-        # sort picks chronologically and skip overlaps the same way the
-        # real construction does (entries consume bars until their own exit)
-        order = sorted(range(len(picks)), key=lambda idx: picks[idx])
         next_free = start
-        for oi in order:
-            i = picks[oi]
-            dir_ = dirs[oi]
+        taken = 0
+        dir_pool_i = 0
+        # FIX (found by independent audit, 2026-10-17): the FIRST version
+        # drew exactly target_trades candidates up front and DROPPED any
+        # that overlapped an already-open random trade - a typical draw
+        # ended up with ~1/3 fewer trades than target_trades, which on an
+        # average-losing construction made random entries look better
+        # purely from trading less, not from better timing.
+        #
+        # The FIRST FIX attempt (picking uniformly from valid_idx_arr >=
+        # next_free on every single draw) had its OWN bug: a pick far in
+        # the future jumps next_free almost to the end of history, so most
+        # draws ran dry after single-digit trades instead of reaching
+        # target_trades - same root problem (short draws), different cause.
+        #
+        # This version oversamples a large pool of candidate times UNIFORMLY
+        # from the WHOLE valid range (not restricted to >= next_free), sorts
+        # it chronologically, and walks it taking only non-overlapping
+        # picks - topping up the pool and re-walking from where it left off
+        # if it runs out before reaching target_trades. This reliably hits
+        # EXACTLY target_trades per draw without the "one pick ends the
+        # draw" failure mode above.
+        pool = []
+        pool_pos = 0
+        while taken < target_trades:
+            if pool_pos >= len(pool):
+                batch = rng.choice(valid_idx_arr, size=max(target_trades * 3, 200), replace=True)
+                pool = sorted(int(x) for x in batch if x >= next_free)
+                pool_pos = 0
+                if not pool:
+                    break   # ran out of history this draw - ends short (rare, near end of data)
+            i = pool[pool_pos]
+            pool_pos += 1
             if i < next_free:
-                continue   # would overlap a still-open random trade - skip, same spirit as the real loop
+                continue
+            dir_ = dirs_pool[dir_pool_i % len(dirs_pool)]
+            dir_pool_i += 1
             swing = min(low[i - SWING_BARS:i]) if dir_ > 0 else max(high[i - SWING_BARS:i])
             risk = dir_ * (close[i] - swing)
             if risk <= 0.0:
@@ -113,6 +143,7 @@ def random_timing_null(df, point, real_trades, n_draws=1000, seed=0):
                 exit_i, exit_px = hard_limit, close[hard_limit]
             total += ((exit_px - entry_px) / entry_px) * dir_
             next_free = exit_i + 1
+            taken += 1
         net_pcts.append(total)
 
     net_pcts = np.array(net_pcts)
