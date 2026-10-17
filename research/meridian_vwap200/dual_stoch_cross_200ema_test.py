@@ -15,10 +15,10 @@ would be the signal lines crossing AT the oversold zone (and vice
 versa for a sell)", i.e. the cross location IS the signal, not a
 separate EMA trend filter:
   - BUY: the fast line (B) crosses UP through the slow line (A) while
-    BOTH are down in the oversold zone (<=20) at the cross bar.
+    EITHER is down in the oversold zone (<=20) at the cross bar.
   - SELL: the mirror - B crosses DOWN through A while both are up in
     the overbought zone (>=80).
-  - fill on the NEXT bar's open +/- real spread, same convention as
+  - fill on the NEXT bar's close +/- real spread, same convention as
     every other test in this project.
   - the 200-EMA direction filter from the original request ("maybe
     test buys above 200ema...") is reported as an OPTIONAL add-on
@@ -84,10 +84,16 @@ def smma(x, period):
 
 
 def stoch_close_smoothed(close, k_period, k_slow, d_period):
-    """Price field = Close/Close (NOT High/Low), MA method = Smoothed (SMMA)
-    for both the %K slowing step and %D - matches MT5's own Stochastic
-    Oscillator indicator with those two settings changed from their
-    High/Low + SMA defaults, exactly as specified."""
+    """Price field = Close/Close (NOT High/Low). FIDELITY CAVEAT (per Opus
+    audit, 2026-10-17): MT5's actual "slowing" step is NOT an MA at all -
+    it's sum(close-LL)/sum(HH-LL) over the slowing window, with the
+    Smoothed MA method applying only to the %D signal line on top of
+    that. This function instead SMMA-smooths the raw %K directly, which
+    is a different (but still internally consistent, causal) number from
+    what MT5's own indicator would show for "21,5,5 Smoothed". The result
+    below is valid for THIS construction as coded - if it's ever turned
+    into a live EA, it needs bar-matching against a real MT5 chart first,
+    per this project's standing rule, since the two will diverge somewhat."""
     lowest = pd.Series(close).rolling(k_period, min_periods=k_period).min().values
     highest = pd.Series(close).rolling(k_period, min_periods=k_period).max().values
     rng = highest - lowest
@@ -129,7 +135,7 @@ def report(label, results, n_days=None, split_dir=False):
 
 def build_trades(df, point, exit_mode="either", use_ema_filter=False, time_cap_bars=TIME_CAP_BARS):
     """Entry per direct clarification: a BUY is the fast line (B, 14,3,3)
-    crossing UP through the slow line (A, 21,5,5) while BOTH are down in
+    crossing UP through the slow line (A, 21,5,5) while EITHER is down in
     the oversold zone (<=20) at the cross bar - not just any cross,
     anywhere. A SELL is the mirror: B crosses DOWN through A while both
     are up in the overbought zone (>=80). use_ema_filter adds the
