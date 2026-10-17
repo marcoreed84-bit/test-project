@@ -19,7 +19,12 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.18"
+#property version   "1.19"
+//--- 1.19: dual-Stochastic(Close/Close, SMMA) cross-in-zone + 200EMA signal
+//--- overlay with suggested stop and three tiered TPs - DRAWING ONLY, it never
+//--- touches an order. Ported from research/meridian_vwap200/dual_stoch_*.py so
+//--- what's on the chart is the exact construction that was backtested, not a
+//--- look-alike built on MT5's native iStochastic (whose "slowing" differs).
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -93,6 +98,17 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
                                                // the ONLY thing the light checks (spread only, not a
                                                // trade signal of any kind - this panel has no strategy)
 
+input group "=== Dual-Stochastic signal overlay (VISUAL ONLY - never places, modifies or closes anything) ==="
+input bool   InpShowStochSignals   = true;
+input int    InpSigLineBars        = 8;       // stop-line length in bars; TP1/TP2/TP3 run 2/4/6 bars longer
+                                               // so the four levels stay readable when they sit close together
+input color  InpSigBuyCol          = C'0,150,255';
+input color  InpSigSellCol         = C'255,0,200';
+input color  InpSigStopCol         = clrRed;
+input color  InpSigTP1Col          = C'0,255,0';
+input color  InpSigTP2Col          = C'0,185,0';
+input color  InpSigTP3Col          = C'0,115,60';
+
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
@@ -109,6 +125,14 @@ datetime g_lastCrossAlertAt = 0;     // cooldown - see InpCrossAlertCooldownMin
 //--- the panel. Keep this prefix namespace-disjoint from PFX.
 string g_pm = "TPMA_";
 datetime g_lastBarTime = 0;
+//--- own prefix, disjoint from both PFX and g_pm, for the same reason as above:
+//--- neither RebuildPanel()'s sweep nor PurgeOldSegments() may touch these.
+string g_sig = "TPSIG_";
+//--- an EA's globals SURVIVE a timeframe switch (only OnDeinit/OnInit re-run),
+//--- so this is what lets CHARTEVENT_CHART_CHANGE tell a real period change
+//--- apart from an ordinary scroll/zoom.
+ENUM_TIMEFRAMES g_sigPeriod = PERIOD_CURRENT;
+#define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -685,6 +709,264 @@ void BackfillOverlayLines()
   }
 
 //+------------------------------------------------------------------+
+//| Dual-Stochastic signal overlay - every helper below is a line-for-|
+//| line port of the Python reference (ema/wilder_atr/session_vwap in |
+//| vwap_open_scenarios_test.py, smma/stoch_close_smoothed in          |
+//| dual_stoch_cross_200ema_test.py, bollinger in                      |
+//| dual_stoch_bb_filter_test.py), including their seeding and NaN     |
+//| behaviour. Arrays are chronological (index 0 = oldest), as in the  |
+//| Python, NOT series-ordered like the rest of this file.             |
+//+------------------------------------------------------------------+
+void SigEMA(const double &x[], const int n, const int p, double &out[])
+  {
+   ArrayResize(out, n);
+   ArrayInitialize(out, SIG_NA);
+   if(n < p) return;
+   double alpha = 2.0 / (p + 1);
+   double s = 0.0;
+   for(int i = 0; i < p; i++) s += x[i];
+   out[p - 1] = s / p;
+   for(int i = p; i < n; i++) out[i] = alpha * x[i] + (1.0 - alpha) * out[i - 1];
+  }
+
+//+------------------------------------------------------------------+
+//| Seeds with the mean of whatever is valid in the first window       |
+//| (np.nanmean), then a NaN input poisons every later value - the     |
+//| Python's own behaviour, kept so a flat-close window affects the    |
+//| chart exactly as it affected the backtest.                         |
+//+------------------------------------------------------------------+
+void SigSMMA(const double &x[], const int n, const int p, double &out[])
+  {
+   ArrayResize(out, n);
+   ArrayInitialize(out, SIG_NA);
+   int first = -1;
+   for(int i = 0; i < n; i++) if(x[i] != SIG_NA) { first = i; break; }
+   if(first < 0 || first + p > n) return;
+   double s = 0.0; int cnt = 0;
+   for(int i = first; i < first + p; i++) if(x[i] != SIG_NA) { s += x[i]; cnt++; }
+   out[first + p - 1] = s / cnt;
+   for(int i = first + p; i < n; i++)
+      out[i] = (out[i - 1] == SIG_NA || x[i] == SIG_NA) ? SIG_NA : (out[i - 1] * (p - 1) + x[i]) / p;
+  }
+
+//+------------------------------------------------------------------+
+//| Price field Close/Close: highest/lowest of CLOSE, not High/Low.    |
+//| Only the smoothed %K is returned - %D is never used by the signal. |
+//+------------------------------------------------------------------+
+void SigStochK(const double &c[], const int n, const int kp, const int slow, double &out[])
+  {
+   double raw[];
+   ArrayResize(raw, n);
+   ArrayInitialize(raw, SIG_NA);
+   for(int i = kp - 1; i < n; i++)
+     {
+      double lo = c[i], hi = c[i];
+      for(int j = i - kp + 1; j < i; j++) { if(c[j] < lo) lo = c[j]; if(c[j] > hi) hi = c[j]; }
+      if(hi - lo > 0.0) raw[i] = 100.0 * (c[i] - lo) / (hi - lo);
+     }
+   SigSMMA(raw, n, slow, out);
+  }
+
+//+------------------------------------------------------------------+
+void SigATR(const double &h[], const double &l[], const double &c[], const int n, const int p, double &out[])
+  {
+   ArrayResize(out, n);
+   ArrayInitialize(out, SIG_NA);
+   if(n <= p) return;
+   double tr[];
+   ArrayResize(tr, n);
+   tr[0] = 0.0;
+   for(int i = 1; i < n; i++)
+      tr[i] = MathMax(h[i] - l[i], MathMax(MathAbs(h[i] - c[i - 1]), MathAbs(l[i] - c[i - 1])));
+   double s = 0.0;
+   for(int i = 1; i <= p; i++) s += tr[i];
+   out[p] = s / p;
+   for(int i = p + 1; i < n; i++) out[i] = (out[i - 1] * (p - 1) + tr[i]) / p;
+  }
+
+//+------------------------------------------------------------------+
+//| Population std (ddof=0), matching pandas .std(ddof=0) in the       |
+//| reference - MT5's own iBands uses the same, but it isn't used here |
+//| so every input to the signal comes from one consistent array set.  |
+//+------------------------------------------------------------------+
+void SigBB(const double &c[], const int n, const int p, const double mult, double &up[], double &lo[])
+  {
+   ArrayResize(up, n); ArrayInitialize(up, SIG_NA);
+   ArrayResize(lo, n); ArrayInitialize(lo, SIG_NA);
+   for(int i = p - 1; i < n; i++)
+     {
+      double s = 0.0;
+      for(int j = i - p + 1; j <= i; j++) s += c[j];
+      double mid = s / p;
+      double v = 0.0;
+      for(int j = i - p + 1; j <= i; j++) v += (c[j] - mid) * (c[j] - mid);
+      double sd = MathSqrt(v / p);
+      up[i] = mid + mult * sd;
+      lo[i] = mid - mult * sd;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Same midnight-reset construction as SessionVWAP() above, computed  |
+//| in one forward pass instead of one Copy* batch per bar - the       |
+//| per-bar version would be far too slow across the full history.     |
+//+------------------------------------------------------------------+
+void SigVWAP(const MqlRates &r[], const int n, double &out[])
+  {
+   ArrayResize(out, n);
+   ArrayInitialize(out, SIG_NA);
+   double pv = 0.0, v = 0.0;
+   int curDay = -1;
+   for(int i = 0; i < n; i++)
+     {
+      MqlDateTime dt; TimeToStruct(r[i].time, dt);
+      int dayKey = dt.year * 10000 + dt.mon * 100 + dt.day;
+      if(dayKey != curDay) { curDay = dayKey; pv = 0.0; v = 0.0; }
+      double vol = (double)r[i].tick_volume;
+      pv += (r[i].high + r[i].low + r[i].close) / 3.0 * vol;
+      v  += vol;
+      if(v > 0.0) out[i] = pv / v;
+     }
+  }
+
+//+------------------------------------------------------------------+
+void DrawSigLevel(const string nm, const datetime t1, const datetime t2, const double price,
+                  const color col, const ENUM_LINE_STYLE style, const string tip)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_TREND, 0, t1, price, t2, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_STYLE, style);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip + " " + DoubleToString(price, _Digits));
+  }
+
+//+------------------------------------------------------------------+
+void DrawSigArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpSigBuyCol : InpSigSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 2);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Dual-stoch BUY signal (visual only)" : "Dual-stoch SELL signal (visual only)");
+  }
+
+//+------------------------------------------------------------------+
+//| Recomputes every series over the whole loaded CLOSED history (the  |
+//| forming bar is excluded, so nothing here can repaint), then draws  |
+//| either every signal (backfill) or only the newest closed bar's.    |
+//| Recomputing the arrays once per bar rather than carrying recursive |
+//| state keeps it bit-identical to the reference's own full-array     |
+//| pass; it's a few ms per bar, and object work stays incremental.    |
+//|                                                                     |
+//| Deliberate differences from the backtests, all visual-only:        |
+//|  - every qualifying bar is marked; the backtests skip signals while |
+//|    a prior trade is still open (i = exit_i + 1).                    |
+//|  - TP1/TP2 are measured from the signal bar's close; the backtests  |
+//|    measure from the next bar's close + spread, unknowable yet here. |
+//|  - TP3 is the band AT the signal bar; the backtest target tracked   |
+//|    the band live until it was tagged.                               |
+//+------------------------------------------------------------------+
+void ComputeStochSignals(const bool backfill)
+  {
+   int total = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   if(total < 211) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < 211) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double m21[], m50[], m200[], atr[], kA[], kB[], bbUp[], bbLo[], vwap[];
+   SigEMA(c, n, 21, m21);
+   SigEMA(c, n, 50, m50);
+   SigEMA(c, n, 200, m200);
+   SigATR(h, l, c, n, 14, atr);
+   SigStochK(c, n, 21, 5, kA);
+   SigStochK(c, n, 14, 3, kB);
+   SigBB(c, n, 20, 2.0, bbUp, bbLo);
+   SigVWAP(r, n, vwap);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = backfill ? 210 : n - 1;
+   for(int i = from; i < n; i++)
+     {
+      if(kA[i] == SIG_NA || kB[i] == SIG_NA || kA[i - 1] == SIG_NA || kB[i - 1] == SIG_NA
+         || m200[i] == SIG_NA || m50[i] == SIG_NA || m21[i] == SIG_NA || vwap[i] == SIG_NA
+         || bbUp[i] == SIG_NA || bbLo[i] == SIG_NA || atr[i] == SIG_NA || atr[i] <= 0.0)
+         continue;
+      bool crossUp   = kB[i - 1] <= kA[i - 1] && kB[i] > kA[i];
+      bool crossDown = kB[i - 1] >= kA[i - 1] && kB[i] < kA[i];
+      //--- EITHER line in the zone, not both - the fast line often clears
+      //--- 20/80 while the slow one is still short of it, and the research
+      //--- deliberately counts that as an in-zone cross.
+      bool oversold   = kA[i] <= 20.0 || kB[i] <= 20.0;
+      bool overbought = kA[i] >= 80.0 || kB[i] >= 80.0;
+      int dir = 0;
+      if(crossUp && oversold && c[i] > m200[i]) dir = 1;
+      else if(crossDown && overbought && c[i] < m200[i]) dir = -1;
+      if(dir == 0) continue;
+
+      //--- nearest of EMA21/50/200/VWAP on the protective side, 0.25 ATR
+      //--- beyond it; if none is on that side, the farthest line is used,
+      //--- same graceful fallback as dual_stoch_ma_stop_test.py.
+      double ref[4];
+      ref[0] = m21[i]; ref[1] = m50[i]; ref[2] = m200[i]; ref[3] = vwap[i];
+      double best = SIG_NA, extreme = ref[0];
+      for(int k = 0; k < 4; k++)
+        {
+         if(dir > 0)
+           {
+            if(ref[k] < c[i] && (best == SIG_NA || ref[k] > best)) best = ref[k];
+            if(ref[k] < extreme) extreme = ref[k];
+           }
+         else
+           {
+            if(ref[k] > c[i] && (best == SIG_NA || ref[k] < best)) best = ref[k];
+            if(ref[k] > extreme) extreme = ref[k];
+           }
+        }
+      if(best == SIG_NA) best = extreme;
+      double stop = best - dir * 0.25 * atr[i];
+      double tp1  = c[i] + dir * 1.0 * atr[i];
+      //--- TP2 is interpolated between the two tested targets for judgement
+      //--- only - it was never backtested on its own, unlike TP1 and TP3.
+      double tp2  = c[i] + dir * 2.0 * atr[i];
+      double tp3  = dir > 0 ? bbUp[i] : bbLo[i];
+
+      datetime t = r[i].time;
+      string id = IntegerToString((long)t);
+      bool isBuy = dir > 0;
+      DrawSigArrow(g_sig + "arr_" + id, t, isBuy ? r[i].low : r[i].high, isBuy);
+      DrawSigLevel(g_sig + "sl_" + id,  t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID, "Suggested SL");
+      DrawSigLevel(g_sig + "tp1_" + id, t, t + (InpSigLineBars + 2) * perSec, tp1,  InpSigTP1Col,  STYLE_SOLID, "TP1 1.0xATR (tested)");
+      DrawSigLevel(g_sig + "tp2_" + id, t, t + (InpSigLineBars + 4) * perSec, tp2,  InpSigTP2Col,  STYLE_DASH,  "TP2 2.0xATR (interpolated, NOT tested)");
+      DrawSigLevel(g_sig + "tp3_" + id, t, t + (InpSigLineBars + 6) * perSec, tp3,  InpSigTP3Col,  STYLE_DOT,   "TP3 BB(20,2) band (tested)");
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Full wipe + backfill - on attach, and on a timeframe switch, since |
+//| every level is timeframe-specific and must not be left stale.      |
+//+------------------------------------------------------------------+
+void ResyncStochSignals()
+  {
+   ObjectsDeleteAll(0, g_sig);
+   g_sigPeriod = (ENUM_TIMEFRAMES)_Period;
+   if(InpShowStochSignals) ComputeStochSignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- handles are needed for the cross-proximity alert even when the lines
@@ -938,6 +1220,7 @@ int OnInit()
    //--- moment of attach, not just until the first new bar's RebuildPanel()
    //--- call (same creation-order reasoning as RebuildPanel's own header).
    BackfillOverlayLines();
+   ResyncStochSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -953,7 +1236,8 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, g_pm);
-   if(g_maHandle21  != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
+   ObjectsDeleteAll(0, g_sig);
+   if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
    if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
@@ -996,6 +1280,7 @@ void OnTick()
      {
       g_lastBarTime = t0;
       UpdateOverlayLines();
+      if(InpShowStochSignals) ComputeStochSignals(false);
       CheckCrossProximity();
       //--- skip the rebuild while actively dragging - recreating the title
       //--- bar object out from under an in-progress drag is asking for
@@ -1131,6 +1416,18 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit" || sparam == PFX + "delayEdit"
          || sparam == PFX + "slEdit" || sparam == PFX + "tpEdit")
          g_editFocused = false;
+      return;
+     }
+   //--- MT5 normally re-runs OnDeinit/OnInit on a period switch, which already
+   //--- resyncs; this is the backstop for terminals/builds that only raise
+   //--- CHART_CHANGE. The period comparison filters out plain scroll/zoom.
+   if(id == CHARTEVENT_CHART_CHANGE)
+     {
+      if(g_sigPeriod != (ENUM_TIMEFRAMES)_Period)
+        {
+         ResyncStochSignals();
+         if(!g_dragging && !AnyEditFocused()) RebuildPanel();
+        }
       return;
      }
    if(id != CHARTEVENT_OBJECT_CLICK) return;
