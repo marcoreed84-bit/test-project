@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.17"
+#property version   "1.18"
 #property strict
 #property indicator_chart_window
 #property indicator_plots 0
@@ -177,7 +177,13 @@ void MkEdit(string name, int dx, int dy, int w, int h, string text)
    ObjectSetInteger(0, full, OBJPROP_BGCOLOR, clrWhite);
    ObjectSetInteger(0, full, OBJPROP_ALIGN, ALIGN_CENTER);
    ObjectSetInteger(0, full, OBJPROP_FONTSIZE, 10);
-   ObjectSetInteger(0, full, OBJPROP_SELECTABLE, true);
+   //--- SELECTABLE=true on an OBJ_EDIT makes a click SELECT the object
+   //--- (drag handles, for moving it on the chart) instead of putting it
+   //--- into text-edit mode - the real cause of "clicking does nothing,
+   //--- no text cursor" on every edit box on this panel. false here
+   //--- matches MkButton's own setting below and is what actually lets a
+   //--- click (or double-click) focus the box for typing.
+   ObjectSetInteger(0, full, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, full, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, full, OBJPROP_ZORDER, PANEL_ZORDER);
    AddCtrl(full, dx, dy);
@@ -955,18 +961,19 @@ void OnDeinit(const int reason)
 
 //+------------------------------------------------------------------+
 //| True while the user is actively typing in any of this panel's     |
-//| edit boxes. MT5 sets OBJPROP_SELECTED on an OBJ_EDIT while it has  |
-//| keyboard focus/is being edited - checked here instead of guessed  |
-//| at, so the new-bar rebuild can defer itself exactly while (and     |
-//| only while) it would actually interrupt typing.                   |
+//| edit boxes. Previously checked OBJPROP_SELECTED, which depends on |
+//| OBJPROP_SELECTABLE being true on the edit object - but SELECTABLE |
+//| has to be FALSE for an OBJ_EDIT to enter text-edit mode on click  |
+//| at all (true just selects/drags it instead). So this is now a     |
+//| plain flag, set true on CHARTEVENT_OBJECT_CLICK for one of these  |
+//| boxes and cleared on CHARTEVENT_OBJECT_ENDEDIT - both of which    |
+//| fire regardless of SELECTABLE.                                    |
 //+------------------------------------------------------------------+
+bool g_editFocused = false;
+
 bool AnyEditFocused()
   {
-   string edits[] = {"lotEdit", "cntEdit", "delayEdit", "slEdit", "tpEdit"};
-   for(int i = 0; i < ArraySize(edits); i++)
-      if(ObjectGetInteger(0, PFX + edits[i], OBJPROP_SELECTED))
-         return true;
-   return false;
+   return g_editFocused;
   }
 
 //+------------------------------------------------------------------+
@@ -997,11 +1004,10 @@ void OnTick()
       //--- SAME reasoning for an in-progress edit: ObjectsDeleteAll inside
       //--- RebuildPanel() destroys the slEdit/tpEdit/etc. object the user
       //--- is mid-keystroke in, which silently drops keyboard focus (the
-      //--- freshly recreated object of the same name does NOT inherit it)
-      //--- - this was the real cause of "I can't type in the SL field",
-      //--- not an edit-box property. MT5 marks an OBJ_EDIT OBJPROP_SELECTED
-      //--- while it's being edited, which lets this be detected reliably
-      //--- rather than guessed at.
+      //--- freshly recreated object of the same name does NOT inherit it).
+      //--- AnyEditFocused() is tracked via g_editFocused, set/cleared on
+      //--- CHARTEVENT_OBJECT_CLICK/ENDEDIT - see its own header for why
+      //--- OBJPROP_SELECTED isn't used for this anymore.
       if(!g_dragging && !AnyEditFocused()) RebuildPanel();
      }
   }
@@ -1120,7 +1126,18 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
         }
       return;
      }
+   if(id == CHARTEVENT_OBJECT_ENDEDIT)
+     {
+      if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit" || sparam == PFX + "delayEdit"
+         || sparam == PFX + "slEdit" || sparam == PFX + "tpEdit")
+         g_editFocused = false;
+      return;
+     }
    if(id != CHARTEVENT_OBJECT_CLICK) return;
+
+   if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit" || sparam == PFX + "delayEdit"
+      || sparam == PFX + "slEdit" || sparam == PFX + "tpEdit")
+      g_editFocused = true;
 
    //--- OnTimer no longer force-redraws every second (that was the real
    //--- cause of the general lag, including clicks feeling slow - the chart
