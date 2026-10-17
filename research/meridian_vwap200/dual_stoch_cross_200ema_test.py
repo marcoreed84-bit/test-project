@@ -203,7 +203,7 @@ def build_trades(df, point, exit_mode="either", use_ema_filter=False, time_cap_b
     return results
 
 
-def random_timing_null(df, point, real_trades, n_draws=2000, seed=0, time_cap_bars=TIME_CAP_BARS):
+def random_timing_null(df, point, real_trades, n_draws=300, seed=0, time_cap_bars=TIME_CAP_BARS):
     """Same exit machinery (zone-or-time), same real spread, entry COUNT and
     DIRECTION MIX matched to the real system - entries placed at uniformly
     random bars instead of on the dual-stoch cross signal."""
@@ -271,13 +271,22 @@ def run_tf(symbol, tf_label, loader):
         full_res = build_trades(df, point, use_ema_filter=use_filter)
         report(f"{symbol} {tf_label} - FULL HISTORY", full_res, full_days, split_dir=True)
 
-        if len(full_res) >= 10:
-            print(f"\n  Random-timing null (full history, n=2000 draws, matched trade count/direction):")
+        full_pf = pct_pf(full_res)
+        if len(full_res) < 10:
+            print(f"\n  (too few trades (n={len(full_res)}) for a meaningful random-timing null)")
+        elif full_pf < 1.0:
+            # already a net loser on its own real P&L, with a large enough
+            # sample that this isn't noise - no need to also run the (slow)
+            # random-timing null just to reconfirm "does it make money" when
+            # the answer is already a clear no.
+            print(f"\n  (skipping random-timing null - full-history %PF={full_pf:.3f} is already a clear")
+            print(f"   net loser on {len(full_res)} real trades; a timing-skill test only matters once")
+            print(f"   something has actual real-money edge to compare against random entries)")
+        else:
+            print(f"\n  Random-timing null (full history, n=300 draws, matched trade count/direction):")
             real_net, null_dist, p = random_timing_null(df, point, full_res)
             print(f"    real net%={100*real_net:.2f}   null mean%={100*null_dist.mean():.2f}   "
                   f"null std%={100*null_dist.std():.2f}   p-value={p:.4f}")
-        else:
-            print(f"\n  (too few trades (n={len(full_res)}) for a meaningful random-timing null)")
 
 
 if __name__ == "__main__":
