@@ -19,7 +19,15 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.22"
+#property version   "1.23"
+//--- 1.23: two new alert stages for the classic stoch overlay, live only
+//--- (never during backfill of old history): (1) InpSigZoneAlert - an
+//--- EARLY push+sound the moment %K first enters the oversold/overbought
+//--- zone, BEFORE any cross is confirmed or arrow printed; (2)
+//--- InpSigCrossAlert - push+sound when the actual cross-in-zone signal
+//--- prints. Both use SendNotification() (needs push notifications +
+//--- MetaQuotes ID set in the terminal) and PlaySound(InpSigSoundFile).
+//--- Still visual/alert only - no trading/execution logic touched.
 //--- 1.22: Classic stoch overlay settings (K/slowing/D period, zone levels,
 //--- swing-stop bar count, R:R) are now inputs (InpSigKPeriod etc.) instead
 //--- of hardcoded #defines, so they can be changed per-chart without
@@ -129,6 +137,11 @@ input color  InpSigBuyCol          = C'0,150,255';
 input color  InpSigSellCol         = C'255,0,200';
 input color  InpSigStopCol         = clrRed;
 input color  InpSigTPCol           = C'0,255,0';
+input bool   InpSigZoneAlert       = true;    // EARLY heads-up push+sound when %K first enters the
+                                               // oversold/overbought zone - before any cross is confirmed,
+                                               // so before an arrow/signal is printed
+input bool   InpSigCrossAlert      = true;    // push+sound when the actual cross-in-zone signal prints
+input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder
 
 CTrade trade;
 
@@ -154,6 +167,12 @@ string g_sig = "TPSIG_";
 //--- apart from an ordinary scroll/zoom.
 ENUM_TIMEFRAMES g_sigPeriod = PERIOD_CURRENT;
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
+
+//--- latches for the two stoch-overlay alert stages, so each only fires
+//--- ONCE per excursion/signal rather than spamming every tick it stays
+//--- true. Cleared back to false once %K leaves the zone again.
+bool g_sigZoneAlertedLong  = false;
+bool g_sigZoneAlertedShort = false;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -820,6 +839,64 @@ void DrawSigArrow(const string nm, const datetime t, const double price, const b
   }
 
 //+------------------------------------------------------------------+
+//| Push notification + Experts-log line + sound, shared by both the   |
+//| early zone-entry alert and the confirmed-signal alert below.       |
+//| SendNotification() needs push notifications enabled AND a          |
+//| MetaQuotes ID set in Tools->Options->Notifications in the terminal |
+//| - it fails silently (returns false, logged) otherwise; this does   |
+//| NOT retry or warn beyond the one log line, so check that setup if  |
+//| no push ever arrives. PlaySound() needs InpSigSoundFile to exist   |
+//| in the terminal's Sounds folder (terminal_data_folder\Sounds\).    |
+//+------------------------------------------------------------------+
+void FireSigAlert(const string msg)
+  {
+   if(!SendNotification(msg))
+      Print("StochSignal: push notification FAILED (check Tools->Options->Notifications has",
+            " 'Enable Push Notifications' checked and a MetaQuotes ID set) - ", msg);
+   else
+      Print("StochSignal: ", msg);
+   if(StringLen(InpSigSoundFile) > 0) PlaySound(InpSigSoundFile);
+  }
+
+//+------------------------------------------------------------------+
+//| EARLY heads-up, fired the moment %K first enters the oversold/     |
+//| overbought zone on a newly-closed bar - i.e. BEFORE any cross is   |
+//| confirmed and BEFORE ComputeStochSignals() below would print an    |
+//| arrow. Latches so it fires once per excursion into the zone, not   |
+//| every bar it stays there; clears once %K leaves the zone again so  |
+//| the NEXT excursion can alert too.                                  |
+//+------------------------------------------------------------------+
+void CheckStochZoneAlert(const double kCur)
+  {
+   if(!InpSigZoneAlert || kCur == SIG_NA) return;
+   string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+
+   if(kCur <= InpSigZoneLow)
+     {
+      if(!g_sigZoneAlertedLong)
+        {
+         FireSigAlert(StringFormat(
+            "%s %s: Stochastic %%K=%.1f entered OVERSOLD (<=%.0f) - watch for a BUY cross-in-zone "
+            "signal (not printed yet - UNVALIDATED, visual only)", _Symbol, tf, kCur, InpSigZoneLow));
+         g_sigZoneAlertedLong = true;
+        }
+     }
+   else g_sigZoneAlertedLong = false;
+
+   if(kCur >= InpSigZoneHigh)
+     {
+      if(!g_sigZoneAlertedShort)
+        {
+         FireSigAlert(StringFormat(
+            "%s %s: Stochastic %%K=%.1f entered OVERBOUGHT (>=%.0f) - watch for a SELL cross-in-zone "
+            "signal (not printed yet - UNVALIDATED, visual only)", _Symbol, tf, kCur, InpSigZoneHigh));
+         g_sigZoneAlertedShort = true;
+        }
+     }
+   else g_sigZoneAlertedShort = false;
+  }
+
+//+------------------------------------------------------------------+
 //| Recomputes the stochastic over the whole loaded CLOSED history     |
 //| (the forming bar is excluded, so nothing here can repaint), then   |
 //| draws either every signal (backfill) or only the newest closed     |
@@ -841,6 +918,10 @@ void ComputeStochSignals(const bool backfill)
 
    double k[], d[];
    SigClassicStoch(h, l, c, n, InpSigKPeriod, InpSigSlowing, InpSigDPeriod, k, d);
+
+   //--- early zone-entry alert - live only (not during backfill, which
+   //--- would otherwise fire hundreds of alerts for old history on attach)
+   if(!backfill) CheckStochZoneAlert(k[n - 1]);
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    //--- when backfilling, replay from scratch so the "last fired direction"
@@ -881,6 +962,15 @@ void ComputeStochSignals(const bool backfill)
       if(crossUp && k[i] < InpSigZoneLow) dir = 1;
       else if(crossDown && k[i] > InpSigZoneHigh) dir = -1;
       if(dir == 0) continue;
+      //--- confirmed-signal alert - live only, same reasoning as the
+      //--- zone-entry alert above (no backfill spam)
+      if(!backfill && InpSigCrossAlert)
+        {
+         string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+         FireSigAlert(StringFormat(
+            "%s %s: Classic stoch cross-in-zone %s signal PRINTED (K=%.1f) - chart overlay only, "
+            "UNVALIDATED, does not place/modify/close anything", _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
+        }
       //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
       //--- each other while both still sit inside the zone) REPLACES the
       //--- previous same-run signal instead of adding a second one, so
@@ -927,6 +1017,10 @@ void ResyncStochSignals()
   {
    ObjectsDeleteAll(0, g_sig);
    g_sigPeriod = (ENUM_TIMEFRAMES)_Period;
+   //--- zone-alert latches are per-timeframe state; a fresh timeframe's
+   //--- %K has nothing to do with the old one's zone excursion
+   g_sigZoneAlertedLong  = false;
+   g_sigZoneAlertedShort = false;
    if(InpShowStochSignals) ComputeStochSignals(true);
   }
 
