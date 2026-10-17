@@ -21,16 +21,38 @@
 //|    HA_high  = max(H, HA_open, HA_close)                               |
 //|    HA_low   = min(L, HA_open, HA_close)                                |
 //|  HA_open depends on the PRIOR HA bar, so it's computed once per        |
-//|  closed bar and cached (g_haOpen[]/g_haClose[] by bar time) rather       |
+//|  closed bar and kept in the indicator's own buffers rather              |
 //|  than recomputed from scratch on every tick - recomputing from a          |
 //|  fixed lookback window on every tick would let a different lookback        |
 //|  length quietly change HA_open for bars inside that window (HA_open is      |
 //|  a running recursive average over the WHOLE history, not a fixed-window      |
 //|  indicator), which is a real, easy-to-miss correctness bug for this           |
 //|  specific construction.                                                        |
+//|                                                                  |
+//|  VERSION HISTORY                                                  |
+//|  1.00 - first version.                                            |
+//|  1.01 - FIX "no Heikin-Ashi candles show at all". Three causes:    |
+//|   (a) The bar-time cache lookup scanned the whole cache for every  |
+//|       bar, so the first full calculation on a normal chart (tens   |
+//|       of thousands of bars) took minutes - the terminal shows      |
+//|       nothing until that finishes, and it restarts on every        |
+//|       history reload. The cache is removed; each HA bar now just   |
+//|       reads the previous HA bar straight from the indicator's own  |
+//|       buffers (same formula, same results, instant).               |
+//|   (b) If "Chart on foreground" was on, the real candles (painted   |
+//|       in the background colour to hide them) were drawn ON TOP of  |
+//|       the HA candles and blanked them out. Now forced off while    |
+//|       attached, restored on removal.                               |
+//|   (c) Only the real candle BODIES were hidden; their outlines and  |
+//|       wicks (separate chart colours) stayed visible in the same    |
+//|       blue/white as the HA candles, so the chart looked like       |
+//|       ordinary candles. Outlines/wicks are now hidden too.         |
+//|  Also: the hide is re-checked twice a second by a timer (not only  |
+//|  on new ticks), so another EA on the same chart (e.g. TradePanel   |
+//|  re-applying its theme) can't bring the real candles back for long.|
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 5
 #property indicator_plots   1
@@ -48,44 +70,21 @@ double BufLow[];
 double BufClose[];
 double BufColor[];
 
-//--- cache of HA_open/HA_close by bar TIME (not index - index shifts as
-//--- new bars arrive, time doesn't), so the recursive relationship never
-//--- needs recomputation deeper than "one bar back" on each new tick/bar.
-datetime g_haTime[];
-double   g_haOpen[];
-double   g_haClose[];
-int      g_haCount = 0;
-
 //--- original chart state, saved on init, restored on removal.
 long  g_origCandleBull = -1;
 long  g_origCandleBear = -1;
 long  g_origChartMode  = -1;
+long  g_origChartUp    = -1;
+long  g_origChartDown  = -1;
+long  g_origForeground = -1;
 bool  g_savedOriginal   = false;
 
-//+------------------------------------------------------------------+
-int FindCachedHA(datetime t)
+//--- set a chart integer property only if it differs; returns true if changed
+bool SetIfDiff(ENUM_CHART_PROPERTY_INTEGER prop, long value)
   {
-   for(int i = g_haCount - 1; i >= 0; i--)
-      if(g_haTime[i] == t) return i;
-   return -1;
-  }
-
-//+------------------------------------------------------------------+
-void CacheHA(datetime t, double o, double c)
-  {
-   int idx = FindCachedHA(t);
-   if(idx >= 0) { g_haOpen[idx] = o; g_haClose[idx] = c; return; }
-   if(g_haCount >= ArraySize(g_haTime))
-     {
-      int newSize = ArraySize(g_haTime) + 1000;
-      ArrayResize(g_haTime, newSize);
-      ArrayResize(g_haOpen, newSize);
-      ArrayResize(g_haClose, newSize);
-     }
-   g_haTime[g_haCount] = t;
-   g_haOpen[g_haCount] = o;
-   g_haClose[g_haCount] = c;
-   g_haCount++;
+   if(ChartGetInteger(0, prop) == value) return false;
+   ChartSetInteger(0, prop, value);
+   return true;
   }
 
 //+------------------------------------------------------------------+
@@ -101,13 +100,20 @@ void HideRealCandles()
       g_origCandleBull = ChartGetInteger(0, CHART_COLOR_CANDLE_BULL);
       g_origCandleBear = ChartGetInteger(0, CHART_COLOR_CANDLE_BEAR);
       g_origChartMode  = ChartGetInteger(0, CHART_MODE);
+      g_origChartUp    = ChartGetInteger(0, CHART_COLOR_CHART_UP);
+      g_origChartDown  = ChartGetInteger(0, CHART_COLOR_CHART_DOWN);
+      g_origForeground = ChartGetInteger(0, CHART_FOREGROUND);
       g_savedOriginal  = true;
      }
    long bg = ChartGetInteger(0, CHART_COLOR_BACKGROUND);
-   ChartSetInteger(0, CHART_MODE, CHART_CANDLES);   // the color trick only works in candle mode
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, (color)bg);
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, (color)bg);
-   ChartRedraw(0);
+   bool changed = false;
+   if(SetIfDiff(CHART_MODE, CHART_CANDLES)) changed = true;      // the color trick only works in candle mode
+   if(SetIfDiff(CHART_FOREGROUND, 0)) changed = true;            // price chart must be BEHIND indicator plots
+   if(SetIfDiff(CHART_COLOR_CANDLE_BULL, bg)) changed = true;    // bodies
+   if(SetIfDiff(CHART_COLOR_CANDLE_BEAR, bg)) changed = true;
+   if(SetIfDiff(CHART_COLOR_CHART_UP,    bg)) changed = true;    // outlines + wicks
+   if(SetIfDiff(CHART_COLOR_CHART_DOWN,  bg)) changed = true;
+   if(changed) ChartRedraw(0);
   }
 
 //+------------------------------------------------------------------+
@@ -116,6 +122,9 @@ void RestoreRealCandles()
    if(!g_savedOriginal) return;
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, (color)g_origCandleBull);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, (color)g_origCandleBear);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP,    (color)g_origChartUp);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  (color)g_origChartDown);
+   ChartSetInteger(0, CHART_FOREGROUND, g_origForeground != 0);
    ChartSetInteger(0, CHART_MODE, (int)g_origChartMode);
    ChartRedraw(0);
   }
@@ -137,18 +146,22 @@ int OnInit()
    ArraySetAsSeries(BufClose, false);
    ArraySetAsSeries(BufColor, false);
 
-   ArrayResize(g_haTime,  1000);
-   ArrayResize(g_haOpen,  1000);
-   ArrayResize(g_haClose, 1000);
-
    HideRealCandles();
+   EventSetMillisecondTimer(500);   // reassert hide even when no ticks arrive
    return(INIT_SUCCEEDED);
   }
 
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
    RestoreRealCandles();
+  }
+
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   HideRealCandles();
   }
 
 //+------------------------------------------------------------------+
@@ -172,11 +185,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
       else
         {
-         int prevIdx = FindCachedHA(time[i - 1]);
-         double prevOpen, prevClose;
-         if(prevIdx >= 0) { prevOpen = g_haOpen[prevIdx]; prevClose = g_haClose[prevIdx]; }
-         else             { prevOpen = BufOpen[i - 1];    prevClose = BufClose[i - 1]; }
-         haOpen = (prevOpen + prevClose) / 2.0;
+         //--- previous HA bar is already in our own buffers (bars before
+         //--- prev_calculated-1 are kept by the terminal between calls).
+         haOpen = (BufOpen[i - 1] + BufClose[i - 1]) / 2.0;
         }
       double haHigh = MathMax(high[i], MathMax(haOpen, haClose));
       double haLow  = MathMin(low[i],  MathMin(haOpen, haClose));
@@ -186,8 +197,6 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       BufLow[i]   = haLow;
       BufClose[i] = haClose;
       BufColor[i] = (haClose >= haOpen) ? 0 : 1;   // 0 = bull color, 1 = bear color
-
-      CacheHA(time[i], haOpen, haClose);
      }
    return(rates_total);
   }
