@@ -19,7 +19,20 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.24"
+#property version   "1.25"
+//--- 1.25: new-bar work (overlay lines, stoch signals/alerts, panel
+//--- rebuild) is now ALSO checked from the existing 2s OnTimer, not just
+//--- OnTick - a quiet/illiquid market can go well past a second between
+//--- real ticks, so relying on ticks alone meant a signal that closed
+//--- mid-quiet-spell could sit undrawn until the next trade printed
+//--- somewhere. Factored into CheckNewBar(), called from both; a new
+//--- bar is still only ever processed ONCE (g_lastBarTime guards it,
+//--- same as before), and it now force-redraws right after, so a
+//--- freshly-printed arrow/dot shows immediately instead of waiting on
+//--- the terminal's own tick-driven paint cycle. No change to how often
+//--- the full per-tick OnTick body runs, and the blanket per-timer
+//--- redraw that was deliberately removed earlier for performance is
+//--- still not back - only this one new-bar-only redraw was added.
 //--- 1.24: (1) new independent EXIT signal overlay - solid dots, own
 //--- stochastic settings (InpExitKPeriod/Slowing/DPeriod), own on/off
 //--- (InpShowExitSignals), own alert (InpSigExitAlert). Fires on the exit
@@ -1419,6 +1432,49 @@ bool AnyEditFocused()
   }
 
 //+------------------------------------------------------------------+
+//| New-bar work (overlay lines, stoch signals/alerts, cross-alert,     |
+//| panel rebuild) - factored out so BOTH OnTick (driven by real price  |
+//| ticks) and OnTimer (every 2s regardless of ticks) can call it. A    |
+//| quiet/illiquid market can go well over a second between ticks, so   |
+//| relying on OnTick alone means a signal that closed mid-quiet-spell  |
+//| would sit undrawn until the NEXT trade prints somewhere - the timer |
+//| guarantees it appears within ~2s of the bar actually closing        |
+//| instead of waiting on a tick (or a manual chart refresh/scroll).    |
+//| Idempotent: g_lastBarTime guards it, so whichever of OnTick/OnTimer |
+//| notices the new bar first runs it, and the other is a no-op.        |
+//+------------------------------------------------------------------+
+void CheckNewBar()
+  {
+   datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
+   if(t0 == g_lastBarTime) return;
+   g_lastBarTime = t0;
+   UpdateOverlayLines();
+   if(InpShowStochSignals) ComputeStochSignals(false);
+   CheckCrossProximity();
+   //--- skip the rebuild while actively dragging - recreating the title
+   //--- bar object out from under an in-progress drag is asking for
+   //--- trouble. The next new bar after the drag ends reclaims paint
+   //--- order instead; one bar's delay is harmless.
+   //--- SAME reasoning for an in-progress edit: ObjectsDeleteAll inside
+   //--- RebuildPanel() destroys the slEdit/tpEdit/etc. object the user
+   //--- is mid-keystroke in, which silently drops keyboard focus (the
+   //--- freshly recreated object of the same name does NOT inherit it).
+   //--- AnyEditFocused() is tracked via g_editFocused, set/cleared on
+   //--- CHARTEVENT_OBJECT_CLICK/ENDEDIT - see its own header for why
+   //--- OBJPROP_SELECTED isn't used for this anymore.
+   if(!g_dragging && !AnyEditFocused()) RebuildPanel();
+   //--- a signal drawn here (arrow/dot/level) is a NEW chart object - MT5
+   //--- normally paints that on its own next natural cycle, but that cycle
+   //--- is itself tick-driven, so in a quiet market force one redraw right
+   //--- here to make a just-printed signal actually visible immediately
+   //--- rather than only once the next tick (possibly seconds/minutes
+   //--- later) happens to arrive. One redraw per NEW BAR only (not per
+   //--- tick, not every 2s) - cheap, not the blanket per-timer redraw
+   //--- that was deliberately removed below for performance.
+   ChartRedraw(0);
+  }
+
+//+------------------------------------------------------------------+
 void OnTick()
   {
    //--- CHART_SHOW_TRADE_LEVELS is a per-CHART property, not per-EA - every
@@ -1432,27 +1488,7 @@ void OnTick()
    //--- of EA load order, without having to touch the other EAs (which
    //--- still default it off correctly for their own solo-chart case).
    ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
-
-   datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
-   if(t0 != g_lastBarTime)
-     {
-      g_lastBarTime = t0;
-      UpdateOverlayLines();
-      if(InpShowStochSignals) ComputeStochSignals(false);
-      CheckCrossProximity();
-      //--- skip the rebuild while actively dragging - recreating the title
-      //--- bar object out from under an in-progress drag is asking for
-      //--- trouble. The next new bar after the drag ends reclaims paint
-      //--- order instead; one bar's delay is harmless.
-      //--- SAME reasoning for an in-progress edit: ObjectsDeleteAll inside
-      //--- RebuildPanel() destroys the slEdit/tpEdit/etc. object the user
-      //--- is mid-keystroke in, which silently drops keyboard focus (the
-      //--- freshly recreated object of the same name does NOT inherit it).
-      //--- AnyEditFocused() is tracked via g_editFocused, set/cleared on
-      //--- CHARTEVENT_OBJECT_CLICK/ENDEDIT - see its own header for why
-      //--- OBJPROP_SELECTED isn't used for this anymore.
-      if(!g_dragging && !AnyEditFocused()) RebuildPanel();
-     }
+   CheckNewBar();
   }
 
 //+------------------------------------------------------------------+
@@ -1470,14 +1506,19 @@ void OnTimer()
       g_dragging = false;
       ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
      }
-   //--- NOT calling ChartRedraw() here unconditionally anymore - this ran
-   //--- every single second, forcing MT5 to repaint the whole chart
+   //--- catches a bar close during a quiet spell between ticks - see
+   //--- CheckNewBar()'s own header. g_lastBarTime guards it so this is a
+   //--- cheap no-op on every 2s tick except the one right after a new bar.
+   CheckNewBar();
+   //--- NOT calling ChartRedraw() unconditionally here otherwise - this ran
+   //--- every single second/2s, forcing MT5 to repaint the whole chart
    //--- (including every background MA/VWAP object) regardless of whether
    //--- anything actually changed. ObjectSetString/ObjectSetInteger changes
    //--- still show up on the terminal's own natural paint cycle (driven by
-   //--- ticks); an explicit redraw is only needed right after a batch
-   //--- change the user is actively looking at - RebuildPanel(), SetArmed(),
-   //--- and the button click handlers already call it where it matters.
+   //--- ticks); an explicit redraw beyond CheckNewBar()'s own is only
+   //--- needed right after a batch change the user is actively looking at -
+   //--- RebuildPanel(), SetArmed(), and the button click handlers already
+   //--- call it where it matters.
   }
 
 //+------------------------------------------------------------------+
