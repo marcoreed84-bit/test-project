@@ -1,23 +1,33 @@
 """
 Adds a real stop loss to the BB-target-exit construction, per direct
-instruction with a chart example: at entry, find whichever MA (21, 50,
-or 200 EMA) price is closest to on the trade's protective side - for a
-long, the nearest EMA BELOW price (the one price looks like it just
-"rejected" off); for a short, the nearest EMA above - and place the
-stop just beyond it (a small ATR buffer past the MA, not exactly at it,
-so normal noise/spread doesn't stop it out instantly). This is a real
+instruction with a chart example: at entry, find whichever reference
+line - 21/50/200 EMA, OR the session VWAP (added per follow-up request)
+- price is closest to on the trade's protective side; for a long, the
+nearest one BELOW price (the one price looks like it just "rejected"
+off); for a short, the nearest one above - and place the stop just
+beyond it (a small ATR buffer past the line, not exactly at it, so
+normal noise/spread doesn't stop it out instantly). This is a real
 answer to the single biggest flaw already found tonight: the BB-target
 construction has NO protective exit at all, which is exactly why one
 crash trade cost -$218 against ~$3 average wins.
 
+First pass (EMA-only reference lines) already run: full-history %PF
+0.968 M15 / 0.839 M5, win rate collapsed to ~47-53% (stop firing about
+as often as the target - the stop is too tight, not just catching the
+rare crash trades). Adding VWAP as a candidate reference line to see
+whether it changes which line typically ends up "nearest" and whether
+that's a better stop placement, not a different result by chance.
+
 Entry: unchanged from dual_stoch_bb_target_exit_test.py (dual-stoch
 cross-in-zone + 200EMA direction filter).
-Exit: whichever comes first - BB-band target (unchanged), the new MA
-stop, or the time cap.
+Exit: whichever comes first - BB-band target (unchanged), the stop, or
+the time cap.
 
 Honest K for this addition: 1 (one stop rule, fixed 0.25*ATR buffer,
 not swept/tuned against this data).
-Cumulative honest K for 'dual-stoch-in-zone' line: 6.
+Cumulative honest K for 'dual-stoch-in-zone' line: 7 (plain, +200EMA,
++BB-touch-entry, +reverse-cross-exit, +BB-target-exit, +MA-stop,
++MA-stop-with-VWAP).
 """
 import sys
 import os
@@ -29,7 +39,7 @@ from dual_stoch_cross_200ema_test import (
     stoch_close_smoothed, load_m15, load_m5, pct_pf, report, ema,
     OVERSOLD, OVERBOUGHT, TIME_CAP_BARS
 )
-from vwap_open_scenarios_test import wilder_atr
+from vwap_open_scenarios_test import wilder_atr, session_vwap
 from dual_stoch_bb_filter_test import bollinger
 
 STOP_ATR_BUFFER = 0.25
@@ -42,6 +52,7 @@ def build_trades_ma_stop(df, point, time_cap_bars=TIME_CAP_BARS):
     m21 = ema(close, 21)
     m50 = ema(close, 50)
     m200 = ema(close, 200)
+    vwap = session_vwap(df)
     atr = wilder_atr(high, low, close, 14)
     kA, _ = stoch_close_smoothed(close, 21, 5, 5)
     kB, _ = stoch_close_smoothed(close, 14, 3, 3)
@@ -51,7 +62,7 @@ def build_trades_ma_stop(df, point, time_cap_bars=TIME_CAP_BARS):
     i = 210
     while i < n - 1:
         if (np.isnan(kA[i]) or np.isnan(kB[i]) or np.isnan(kA[i - 1]) or np.isnan(kB[i - 1])
-                or np.isnan(m200[i]) or np.isnan(m50[i]) or np.isnan(m21[i])
+                or np.isnan(m200[i]) or np.isnan(m50[i]) or np.isnan(m21[i]) or np.isnan(vwap[i])
                 or np.isnan(bb_upper[i]) or np.isnan(bb_lower[i]) or np.isnan(atr[i]) or atr[i] <= 0):
             i += 1
             continue
@@ -77,9 +88,10 @@ def build_trades_ma_stop(df, point, time_cap_bars=TIME_CAP_BARS):
         entry_px = close[fill_i] + (sc if direction > 0 else -sc)
         hard_limit = min(fill_i + time_cap_bars, n - 1)
 
-        # nearest MA on the protective side, at the ENTRY bar (i, the
-        # signal bar - causal, known before the fill).
-        mas = [m21[i], m50[i], m200[i]]
+        # nearest reference line (EMA 21/50/200 or session VWAP) on the
+        # protective side, at the ENTRY bar (i, the signal bar - causal,
+        # known before the fill - VWAP included per follow-up request).
+        mas = [m21[i], m50[i], m200[i], vwap[i]]
         if direction > 0:
             below = [m for m in mas if m < close[i]]
             ref_ma = max(below) if below else min(mas)   # closest below; degrade gracefully if none
@@ -118,7 +130,7 @@ def build_trades_ma_stop(df, point, time_cap_bars=TIME_CAP_BARS):
 def run_tf(symbol, tf_label, loader):
     df, point = loader(symbol)
     n = len(df)
-    print(f"\n{'#'*100}\n{symbol} {tf_label} - dual-stoch cross-in-zone + 200EMA filter, BB target, MA-based stop\n{'#'*100}")
+    print(f"\n{'#'*100}\n{symbol} {tf_label} - dual-stoch cross-in-zone + 200EMA filter, BB target, MA/VWAP stop\n{'#'*100}")
     print(f"  {df['time'].iloc[0]} .. {df['time'].iloc[-1]} ({n} bars, point={point})")
     cutoff_i = int(n * 0.70)
     cutoff_date = df["time"].iloc[cutoff_i].date()
@@ -140,5 +152,6 @@ def run_tf(symbol, tf_label, loader):
 if __name__ == "__main__":
     run_tf("GOLD", "M15", load_m15)
     run_tf("GOLD", "M5", load_m5)
-    print(f"\n\n  Cumulative honest K for 'dual-stoch-in-zone' research line: 6")
-    print(f"  (plain, +200EMA, +BB-touch-entry, +reverse-cross-exit, +BB-target-exit, +MA-stop).")
+    print(f"\n\n  Cumulative honest K for 'dual-stoch-in-zone' research line: 7")
+    print(f"  (plain, +200EMA, +BB-touch-entry, +reverse-cross-exit, +BB-target-exit, +MA-stop,")
+    print(f"  +MA-stop-with-VWAP).")
