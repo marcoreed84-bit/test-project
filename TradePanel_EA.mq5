@@ -20,11 +20,12 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property version   "1.21"
-//--- 1.21: fixed overlay drawing duplicate/repeat same-direction signal
-//--- arrows (e.g. %K/%D whipsawing against each other while both still sit
-//--- inside the zone) - now only the FIRST cross of a given direction draws,
-//--- until the opposite-direction cross fires. Cosmetic only - no change to
-//--- the signal rule, stop, or target, and no change to trading/execution.
+//--- 1.21: when %K/%D whipsaws and re-crosses in the SAME direction before
+//--- the opposite cross fires, the overlay now REPLACES the previous
+//--- arrow/SL/TP with the new one instead of drawing a second one - keeps
+//--- the latest/held cross of a run visible, not the earlier premature one
+//--- that often goes against price first. Cosmetic only - no change to the
+//--- signal rule, stop, or target, and no change to trading/execution.
 //--- 1.20: overlay swapped to the CLASSIC textbook rule (single Stochastic
 //--- 14,3,3 Low/High+SMA, %K/%D cross inside 80/20, swing stop, 1:2 R:R) so it
 //--- can be eyeballed against the researched one. Untested - the 1.19 research
@@ -841,18 +842,26 @@ void ComputeStochSignals(const bool backfill)
    //--- wherever the loop happens to begin
    int from = backfill ? minBars : n - 1;
    int lastDir = 0;
+   string lastArr = "", lastSl = "", lastTp = "";
    if(!backfill)
      {
-      //--- single-bar incremental call: recover lastDir by re-scanning
-      //--- prior signals so a repeat same-direction cross still gets
-      //--- suppressed correctly
+      //--- single-bar incremental call: recover lastDir/lastArr/lastSl/lastTp
+      //--- by re-scanning prior signals so a repeat same-direction cross
+      //--- still replaces the right objects
       for(int p = minBars; p < n - 1; p++)
         {
          if(k[p] == SIG_NA || d[p] == SIG_NA || k[p - 1] == SIG_NA || d[p - 1] == SIG_NA) continue;
          bool pUp   = k[p - 1] <= d[p - 1] && k[p] > d[p];
          bool pDown = k[p - 1] >= d[p - 1] && k[p] < d[p];
-         if(pUp && k[p] < 20.0 && lastDir != 1) lastDir = 1;
-         else if(pDown && k[p] > 80.0 && lastDir != -1) lastDir = -1;
+         int pDir = 0;
+         if(pUp && k[p] < 20.0) pDir = 1;
+         else if(pDown && k[p] > 80.0) pDir = -1;
+         if(pDir == 0) continue;
+         string pid = IntegerToString((long)r[p].time);
+         lastDir = pDir;
+         lastArr = g_sig + "arr_" + pid;
+         lastSl  = g_sig + "sl_" + pid;
+         lastTp  = g_sig + "tp_" + pid;
         }
      }
    for(int i = from; i < n; i++)
@@ -866,11 +875,18 @@ void ComputeStochSignals(const bool backfill)
       if(crossUp && k[i] < 20.0) dir = 1;
       else if(crossDown && k[i] > 80.0) dir = -1;
       if(dir == 0) continue;
-      //--- suppress a repeat same-direction cross (e.g. %K/%D whipsawing
-      //--- against each other while both still sit inside the zone) -
-      //--- only the first cross of a given direction draws a signal,
-      //--- until the opposite-direction cross fires
-      if(dir == lastDir) continue;
+      //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
+      //--- each other while both still sit inside the zone) REPLACES the
+      //--- previous same-run signal instead of adding a second one, so
+      //--- only the latest/held cross of a run stays on the chart - the
+      //--- first one is often a premature whipsaw that goes against price
+      //--- before the real move starts
+      if(dir == lastDir && lastArr != "")
+        {
+         ObjectDelete(0, lastArr);
+         ObjectDelete(0, lastSl);
+         ObjectDelete(0, lastTp);
+        }
       lastDir = dir;
 
       //--- recent swing = lowest low / highest high of the last
@@ -886,10 +902,13 @@ void ComputeStochSignals(const bool backfill)
       datetime t = r[i].time;
       string id = IntegerToString((long)t);
       bool isBuy = dir > 0;
-      DrawSigArrow(g_sig + "arr_" + id, t, isBuy ? r[i].low : r[i].high, isBuy);
-      DrawSigLevel(g_sig + "sl_" + id, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
+      lastArr = g_sig + "arr_" + id;
+      lastSl  = g_sig + "sl_" + id;
+      lastTp  = g_sig + "tp_" + id;
+      DrawSigArrow(lastArr, t, isBuy ? r[i].low : r[i].high, isBuy);
+      DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
                    "Classic SL: recent " + IntegerToString(SIG_SWING_BARS) + "-bar swing (unvalidated)");
-      DrawSigLevel(g_sig + "tp_" + id, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
+      DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
                    "Classic TP: 1:2 R:R example (unvalidated)");
      }
   }
