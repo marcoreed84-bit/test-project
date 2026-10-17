@@ -20,8 +20,15 @@ Construction (matches SigClassicStoch() in TradePanel_EA.mq5 exactly):
 
 Tested Gold + Silver M15, full rigor (walk-forward IS/OOS split,
 random-timing null matched on trade count/direction and real spread
-cost). Honest K: 1 per symbol (fixed construction taken directly from
-the uploaded articles' own stated settings/levels, not swept or tuned).
+cost).
+
+2026-10-17 update: swing-stop lookback changed from 10 to 20 bars per
+direct request (wider stop, same everything else) after the 10-bar
+version lost on both symbols with 75-85% of trades hitting the stop -
+testing whether a less noise-sensitive stop changes that. Honest K: 2
+per symbol now (10-bar and 20-bar swing both tried against this same
+Gold+Silver M15 history - this is a real second look, not a free
+retune, and should be reported as such regardless of outcome).
 """
 import sys
 import os
@@ -34,7 +41,7 @@ from meridian_early_cross_test import load_m15
 from dual_stoch_cross_200ema_test import pct_pf, report, TIME_CAP_BARS
 
 K_PERIOD, SLOWING, D_PERIOD = 14, 3, 3
-SWING_BARS = 10
+SWING_BARS = 20
 RR = 2.0
 ZONE_LOW, ZONE_HIGH = 20.0, 80.0
 
@@ -224,6 +231,6 @@ def run_symbol(symbol):
 if __name__ == "__main__":
     run_symbol("GOLD")
     run_symbol("SILVER")
-    print(f"\n\n  Honest K: 1 per symbol (classic Stoch(14,3,3) Low/High+SMA cross-in-zone,")
-    print(f"  {SWING_BARS}-bar swing stop, fixed 1:{RR:.0f} R:R - the uploaded articles' own stated")
-    print(f"  construction, not re-tuned or searched).")
+    print(f"\n\n  Honest K: 2 per symbol (classic Stoch(14,3,3) Low/High+SMA cross-in-zone,")
+    print(f"  10-bar AND {SWING_BARS}-bar swing stop both tried against this same history,")
+    print(f"  fixed 1:{RR:.0f} R:R - a real second look, not a free retune).")
