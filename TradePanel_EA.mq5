@@ -19,7 +19,23 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.27"
+#property version   "1.28"
+//--- 1.28: FIX a real bug introduced by 1.27's performance fix: a LIVE
+//--- call always assumed exactly ONE new bar had closed since the last
+//--- check (from = n-1). During a stall/hang (or any gap in the EA
+//--- actually running), several bars can close before the next check -
+//--- any entry/exit inside that gap was silently skipped, leaving
+//--- g_sigPosDir stuck on a stale value (e.g. still "long" after a real
+//--- live SELL arrow printed), so the exit overlay later closed the
+//--- WRONG, invisible position - wrong color, wrong side. Now tracks
+//--- g_sigLastProcessedBar and catches up on every bar since, not just
+//--- the newest one (bounded to a 500-bar trailing window - still far
+//--- short of the whole history, but enough for any realistic gap).
+//--- Also added: every entry/exit now prints an unconditional ground-
+//--- truth line to the Experts log (both backfill and live, regardless
+//--- of the push-alert inputs) - "StochSignal LOG: ..." - so the exact
+//--- recognized sequence can be checked directly against what the chart
+//--- shows, instead of guessing from a screenshot.
 //--- 1.27: FIX real performance bug - "charts hanging". A LIVE call to
 //--- ComputeStochSignals() (every new bar, and polled every 2s since
 //--- 1.25) was re-copying (CopyRates) and re-computing the stochastic -
@@ -244,6 +260,11 @@ bool g_sigZoneAlertedShort = false;
 int    g_sigLastDir = 0;
 string g_sigLastArr = "", g_sigLastSl = "", g_sigLastTp = "";
 int    g_sigPosDir  = 0;
+//--- the newest bar a LIVE call has actually processed - lets the next
+//--- live call catch up on every bar since, not just assume exactly one
+//--- new bar happened (a stall/hang, or the EA being briefly detached,
+//--- can let several bars close in between)
+datetime g_sigLastProcessedBar = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1048,10 +1069,13 @@ void ComputeStochSignals(const bool backfill)
    int minBarsExit  = InpShowExitSignals ? (InpExitKPeriod + InpExitSlowing + InpExitDPeriod) : 0;
    int minBars = MathMax(minBarsEntry, minBarsExit);
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   //--- live calls only need enough trailing bars for k[n-1]/k[n-2] (and
-   //--- the exit/ATR equivalents) to be valid, plus a little padding -
-   //--- NOT the whole multi-year history
-   int total = backfill ? available : MathMin(available, minBars + 10);
+   //--- live calls need enough trailing bars for k[n-1]/k[n-2] (and the
+   //--- exit/ATR equivalents) to be valid, PLUS enough slack to catch up
+   //--- on every bar since g_sigLastProcessedBar in one go if several
+   //--- closed back-to-back (a stall/hang, or the EA being briefly
+   //--- detached, can do that) - NOT the whole multi-year history, but
+   //--- comfortably more than "just the one newest bar"
+   int total = backfill ? available : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -1074,11 +1098,23 @@ void ComputeStochSignals(const bool backfill)
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    //--- backfill draws/alerts for every qualifying bar across the whole
-   //--- history; a live call only ever needs to look at the ONE newest
-   //--- closed bar - its window is already bounded to just that, so the
-   //--- loop below simply starts there instead of re-walking anything
-   int drawFrom = backfill ? minBars : n - 1;
-   int from     = backfill ? minBars : n - 1;
+   //--- history. A live call draws/alerts for every bar NEWER than
+   //--- g_sigLastProcessedBar - normally just the one newest bar, but
+   //--- catches up properly if more than one closed since the last call
+   //--- (see g_sigLastProcessedBar's own comment). Falls back to the
+   //--- start of this window if nothing's been processed yet, or if the
+   //--- gap is bigger than the window itself (a genuinely long stall) -
+   //--- bounded by the window size either way, never the whole history.
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_sigLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int drawFrom = from;
 
    int lastDir, posDir;
    string lastArr, lastSl, lastTp;
@@ -1173,6 +1209,14 @@ void ComputeStochSignals(const bool backfill)
                                "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
                   DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
                                "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
+                  //--- unconditional ground-truth log line (both backfill AND
+                  //--- live, independent of InpSigCrossAlert) - scroll the
+                  //--- Experts tab to see the EXACT entry/exit sequence the
+                  //--- code actually recognized, if the chart's own colors/
+                  //--- placement ever look wrong again
+                  PrintFormat("StochSignal LOG: %s ENTRY %s @ %s  K=%.1f  posDir->%d",
+                               TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
+                               DoubleToString(c[i], _Digits), k[i], posDir);
                  }
               }
            }
@@ -1213,6 +1257,10 @@ void ComputeStochSignals(const bool backfill)
                else
                   dotPrice = wasLong ? r[i].high + offExit : r[i].low - offExit;
                DrawSigDot(exId, t, dotPrice, wasLong);
+               //--- same unconditional ground-truth log line as the entry side
+               PrintFormat("StochSignal LOG: %s EXIT-%s @ %s  ExitK=%.1f  (closing posDir %d -> 0)",
+                            TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
+                            DoubleToString(c[i], _Digits), kE[i], posDir);
               }
             posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
            }
@@ -1224,6 +1272,7 @@ void ComputeStochSignals(const bool backfill)
    //--- LIVE call must continue from THAT, not from zero/empty
    g_sigLastDir = lastDir; g_sigPosDir = posDir;
    g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
+   g_sigLastProcessedBar = r[n - 1].time;
   }
 
 //+------------------------------------------------------------------+
@@ -1245,6 +1294,7 @@ void ResyncStochSignals()
    g_sigZoneAlertedShort = false;
    g_sigLastDir = 0; g_sigPosDir = 0;
    g_sigLastArr = ""; g_sigLastSl = ""; g_sigLastTp = "";
+   g_sigLastProcessedBar = 0;
    if(InpShowStochSignals) ComputeStochSignals(true);
   }
 
