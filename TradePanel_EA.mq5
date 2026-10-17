@@ -19,7 +19,12 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.21"
+#property version   "1.22"
+//--- 1.22: Classic stoch overlay settings (K/slowing/D period, zone levels,
+//--- swing-stop bar count, R:R) are now inputs (InpSigKPeriod etc.) instead
+//--- of hardcoded #defines, so they can be changed per-chart without
+//--- editing code. No default values changed; no trading/execution logic
+//--- touched.
 //--- 1.21: when %K/%D whipsaws and re-crosses in the SAME direction before
 //--- the opposite cross fires, the overlay now REPLACES the previous
 //--- arrow/SL/TP with the new one instead of drawing a second one - keeps
@@ -108,8 +113,16 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
                                                // the ONLY thing the light checks (spread only, not a
                                                // trade signal of any kind - this panel has no strategy)
 
-input group "=== Classic/textbook Stochastic(14,3,3) signal overlay - UNVALIDATED (VISUAL ONLY - never places, modifies or closes anything) ==="
+input group "=== Classic/textbook Stochastic signal overlay - UNVALIDATED (VISUAL ONLY - never places, modifies or closes anything) ==="
 input bool   InpShowStochSignals   = true;
+input int    InpSigKPeriod         = 14;      // %K period
+input int    InpSigSlowing         = 3;       // slowing
+input int    InpSigDPeriod         = 3;       // %D period
+input double InpSigZoneLow         = 20.0;    // oversold zone (buy cross must be below this)
+input double InpSigZoneHigh        = 80.0;    // overbought zone (sell cross must be above this)
+input int    InpSigSwingBars       = 10;      // "recent swing" = plain N-bar lowest low / highest high
+                                               // for the stop, as retail articles typically describe
+input double InpSigRR              = 2.0;     // R:R convention - a representative example, not validated
 input int    InpSigLineBars        = 8;       // stop-line length in bars; the TP line runs 2 bars longer
                                                // so the two levels stay readable when they sit close together
 input color  InpSigBuyCol          = C'0,150,255';
@@ -741,13 +754,6 @@ void BackfillOverlayLines()
 //| of %K). Arrays are chronological (index 0 = oldest), NOT series-   |
 //| ordered like the rest of this file.                                 |
 //+------------------------------------------------------------------+
-#define SIG_K_PERIOD   14
-#define SIG_SLOWING    3
-#define SIG_D_PERIOD   3
-#define SIG_SWING_BARS 10     // "recent swing" = plain N-bar lowest low / highest high, as retail
-                               // articles describe it - not a confirmed-pivot detector
-#define SIG_RR         2.0    // R:R convention chosen as a representative example since sources
-                               // did not converge on one value - not independently validated
 
 //+------------------------------------------------------------------+
 //| Price field Low/High: lowest LOW / highest HIGH over kp bars.      |
@@ -822,7 +828,7 @@ void DrawSigArrow(const string nm, const datetime t, const double price, const b
 //+------------------------------------------------------------------+
 void ComputeStochSignals(const bool backfill)
   {
-   int minBars = SIG_K_PERIOD + SIG_SLOWING + SIG_D_PERIOD + SIG_SWING_BARS;
+   int minBars = InpSigKPeriod + InpSigSlowing + InpSigDPeriod + InpSigSwingBars;
    int total = Bars(_Symbol, PERIOD_CURRENT) - 1;
    if(total < minBars) return;
    MqlRates r[];
@@ -834,7 +840,7 @@ void ComputeStochSignals(const bool backfill)
    for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
 
    double k[], d[];
-   SigClassicStoch(h, l, c, n, SIG_K_PERIOD, SIG_SLOWING, SIG_D_PERIOD, k, d);
+   SigClassicStoch(h, l, c, n, InpSigKPeriod, InpSigSlowing, InpSigDPeriod, k, d);
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    //--- when backfilling, replay from scratch so the "last fired direction"
@@ -854,8 +860,8 @@ void ComputeStochSignals(const bool backfill)
          bool pUp   = k[p - 1] <= d[p - 1] && k[p] > d[p];
          bool pDown = k[p - 1] >= d[p - 1] && k[p] < d[p];
          int pDir = 0;
-         if(pUp && k[p] < 20.0) pDir = 1;
-         else if(pDown && k[p] > 80.0) pDir = -1;
+         if(pUp && k[p] < InpSigZoneLow) pDir = 1;
+         else if(pDown && k[p] > InpSigZoneHigh) pDir = -1;
          if(pDir == 0) continue;
          string pid = IntegerToString((long)r[p].time);
          lastDir = pDir;
@@ -872,8 +878,8 @@ void ComputeStochSignals(const bool backfill)
       //--- crossover WITHIN the extreme zone (%K in the zone on the cross
       //--- bar) - not a zone-exit rule
       int dir = 0;
-      if(crossUp && k[i] < 20.0) dir = 1;
-      else if(crossDown && k[i] > 80.0) dir = -1;
+      if(crossUp && k[i] < InpSigZoneLow) dir = 1;
+      else if(crossDown && k[i] > InpSigZoneHigh) dir = -1;
       if(dir == 0) continue;
       //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
       //--- each other while both still sit inside the zone) REPLACES the
@@ -890,14 +896,14 @@ void ComputeStochSignals(const bool backfill)
       lastDir = dir;
 
       //--- recent swing = lowest low / highest high of the last
-      //--- SIG_SWING_BARS closed bars, signal bar included
+      //--- InpSigSwingBars closed bars, signal bar included
       double swing = (dir > 0) ? l[i] : h[i];
-      for(int j = i - SIG_SWING_BARS + 1; j < i; j++)
+      for(int j = i - InpSigSwingBars + 1; j < i; j++)
          swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
       double risk = dir * (c[i] - swing);
       if(risk <= 0.0) continue;   // close sits on the swing extreme - no sane stop
       double stop = swing;
-      double tp   = c[i] + dir * SIG_RR * risk;
+      double tp   = c[i] + dir * InpSigRR * risk;
 
       datetime t = r[i].time;
       string id = IntegerToString((long)t);
@@ -907,9 +913,9 @@ void ComputeStochSignals(const bool backfill)
       lastTp  = g_sig + "tp_" + id;
       DrawSigArrow(lastArr, t, isBuy ? r[i].low : r[i].high, isBuy);
       DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
-                   "Classic SL: recent " + IntegerToString(SIG_SWING_BARS) + "-bar swing (unvalidated)");
+                   "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
       DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
-                   "Classic TP: 1:2 R:R example (unvalidated)");
+                   "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
      }
   }
 
