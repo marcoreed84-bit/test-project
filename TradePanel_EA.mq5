@@ -19,7 +19,19 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.25"
+#property version   "1.26"
+//--- 1.26: FIX real bug - a zone-qualified entry cross with no sane stop
+//--- (risk<=0.0, close sitting exactly on the swing extreme) still
+//--- silently flipped lastDir/posDir even though NO arrow was ever drawn
+//--- for it. The exit overlay (added in 1.24) watches posDir, so this
+//--- produced a confusing wrong-color/wrong-side exit dot later, closing
+//--- a "position" that was never visibly shown opening - exactly the
+//--- symptom reported on a live chart. Disqualified crosses now skip
+//--- lastDir/posDir too, not just the drawing. Also: when an exit dot and
+//--- a brand-new entry arrow land on the exact same bar AND the same side
+//--- (e.g. a sell arrow above + an exit-long dot that would also sit
+//--- above), the dot now stacks further out starting from the arrow's
+//--- own price instead of overlapping it.
 //--- 1.25: new-bar work (overlay lines, stoch signals/alerts, panel
 //--- rebuild) is now ALSO checked from the existing 2s OnTimer, not just
 //--- OnTick - a quiet/illiquid market can go well past a second between
@@ -1030,6 +1042,13 @@ void ComputeStochSignals(const bool backfill)
       double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
       double offExit   = (atr[i] == SIG_NA) ? 0.0 : InpSigExitOffsetATR  * atr[i];
 
+      //--- tracked only when an entry ARROW is actually drawn this bar (see
+      //--- the risk<=0.0 note below) - lets a same-bar exit stack off the
+      //--- arrow instead of colliding with it
+      bool entryDrawnThisBar = false;
+      double entryDrawnPrice = 0.0;
+      bool entryDrawnAbove = false;
+
       //--- ENTRY: %K/%D cross WITHIN the extreme zone (not a zone-exit rule)
       if(k[i] != SIG_NA && d[i] != SIG_NA && k[i - 1] != SIG_NA && d[i - 1] != SIG_NA)
         {
@@ -1041,51 +1060,64 @@ void ComputeStochSignals(const bool backfill)
 
          if(dir != 0)
            {
-            if(draw)
-              {
-               if(!backfill && InpSigCrossAlert)
-                 {
-                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                  FireSigAlert(StringFormat(
-                     "%s %s: Classic stoch cross-in-zone %s signal PRINTED (K=%.1f) - chart overlay only, "
-                     "UNVALIDATED, does not place/modify/close anything", _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
-                 }
-               //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
-               //--- each other while both still sit inside the zone) REPLACES the
-               //--- previous same-run signal instead of adding a second one - the
-               //--- first one is often a premature whipsaw that goes against price
-               //--- before the real move starts
-               if(dir == lastDir && lastArr != "")
-                 {
-                  ObjectDelete(0, lastArr);
-                  ObjectDelete(0, lastSl);
-                  ObjectDelete(0, lastTp);
-                 }
-              }
-            lastDir = dir;
-            posDir  = dir;   // new entry opens/flips the "position" the exit overlay watches
-
             //--- recent swing = lowest low / highest high of the last
             //--- InpSigSwingBars closed bars, signal bar included
             double swing = (dir > 0) ? l[i] : h[i];
             for(int j = i - InpSigSwingBars + 1; j < i; j++)
                swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
             double risk = dir * (c[i] - swing);
-            if(risk > 0.0 && draw)   // risk<=0: close sits on the swing extreme - no sane stop, skip drawing
+            //--- risk<=0.0 (close sits exactly on the swing extreme - no sane
+            //--- stop) now skips this bar ENTIRELY, not just the drawing: a
+            //--- disqualified cross must NOT flip lastDir/posDir either, or
+            //--- the exit overlay ends up "watching" a position that was
+            //--- never actually shown, and later prints an exit in the
+            //--- wrong direction/color with no entry arrow to explain it -
+            //--- exactly what was happening before this fix.
+            if(risk > 0.0)
               {
-               double stop = swing;
-               double tp   = c[i] + dir * InpSigRR * risk;
-               datetime t = r[i].time;
-               string id = IntegerToString((long)t);
-               bool isBuy = dir > 0;
-               lastArr = g_sig + "arr_" + id;
-               lastSl  = g_sig + "sl_" + id;
-               lastTp  = g_sig + "tp_" + id;
-               DrawSigArrow(lastArr, t, isBuy ? r[i].low - offEntry : r[i].high + offEntry, isBuy);
-               DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
-                            "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
-               DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
-                            "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
+               if(draw)
+                 {
+                  if(!backfill && InpSigCrossAlert)
+                    {
+                     string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                     FireSigAlert(StringFormat(
+                        "%s %s: Classic stoch cross-in-zone %s signal PRINTED (K=%.1f) - chart overlay only, "
+                        "UNVALIDATED, does not place/modify/close anything", _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
+                    }
+                  //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
+                  //--- each other while both still sit inside the zone) REPLACES the
+                  //--- previous same-run signal instead of adding a second one - the
+                  //--- first one is often a premature whipsaw that goes against price
+                  //--- before the real move starts
+                  if(dir == lastDir && lastArr != "")
+                    {
+                     ObjectDelete(0, lastArr);
+                     ObjectDelete(0, lastSl);
+                     ObjectDelete(0, lastTp);
+                    }
+                 }
+               lastDir = dir;
+               posDir  = dir;   // new entry opens/flips the "position" the exit overlay watches
+
+               if(draw)
+                 {
+                  double stop = swing;
+                  double tp   = c[i] + dir * InpSigRR * risk;
+                  datetime t = r[i].time;
+                  string id = IntegerToString((long)t);
+                  bool isBuy = dir > 0;
+                  lastArr = g_sig + "arr_" + id;
+                  lastSl  = g_sig + "sl_" + id;
+                  lastTp  = g_sig + "tp_" + id;
+                  entryDrawnThisBar = true;
+                  entryDrawnAbove   = !isBuy;   // buy arrow sits BELOW, sell arrow ABOVE
+                  entryDrawnPrice   = isBuy ? r[i].low - offEntry : r[i].high + offEntry;
+                  DrawSigArrow(lastArr, t, entryDrawnPrice, isBuy);
+                  DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
+                               "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
+                  DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
+                               "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
+                 }
               }
            }
         }
@@ -1114,7 +1146,17 @@ void ComputeStochSignals(const bool backfill)
                datetime t = r[i].time;
                string exId = g_sig + "exit_" + IntegerToString((long)t);
                bool wasLong = posDir > 0;
-               DrawSigDot(exId, t, wasLong ? r[i].high + offExit : r[i].low - offExit, wasLong);
+               //--- if a NEW entry arrow ALSO landed on this exact bar and on
+               //--- the SAME side (e.g. a sell arrow above + an exit-long dot
+               //--- that would also sit above), stack the dot further out
+               //--- starting from the arrow's own price instead of the plain
+               //--- candle-based offset, so the two never overlap
+               double dotPrice;
+               if(entryDrawnThisBar && entryDrawnAbove == wasLong)
+                  dotPrice = wasLong ? entryDrawnPrice + offExit : entryDrawnPrice - offExit;
+               else
+                  dotPrice = wasLong ? r[i].high + offExit : r[i].low - offExit;
+               DrawSigDot(exId, t, dotPrice, wasLong);
               }
             posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
            }
