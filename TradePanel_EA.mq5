@@ -19,7 +19,12 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.20"
+#property version   "1.21"
+//--- 1.21: fixed overlay drawing duplicate/repeat same-direction signal
+//--- arrows (e.g. %K/%D whipsawing against each other while both still sit
+//--- inside the zone) - now only the FIRST cross of a given direction draws,
+//--- until the opposite-direction cross fires. Cosmetic only - no change to
+//--- the signal rule, stop, or target, and no change to trading/execution.
 //--- 1.20: overlay swapped to the CLASSIC textbook rule (single Stochastic
 //--- 14,3,3 Low/High+SMA, %K/%D cross inside 80/20, swing stop, 1:2 R:R) so it
 //--- can be eyeballed against the researched one. Untested - the 1.19 research
@@ -831,7 +836,25 @@ void ComputeStochSignals(const bool backfill)
    SigClassicStoch(h, l, c, n, SIG_K_PERIOD, SIG_SLOWING, SIG_D_PERIOD, k, d);
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
+   //--- when backfilling, replay from scratch so the "last fired direction"
+   //--- state below is correct from the start of history, not just from
+   //--- wherever the loop happens to begin
    int from = backfill ? minBars : n - 1;
+   int lastDir = 0;
+   if(!backfill)
+     {
+      //--- single-bar incremental call: recover lastDir by re-scanning
+      //--- prior signals so a repeat same-direction cross still gets
+      //--- suppressed correctly
+      for(int p = minBars; p < n - 1; p++)
+        {
+         if(k[p] == SIG_NA || d[p] == SIG_NA || k[p - 1] == SIG_NA || d[p - 1] == SIG_NA) continue;
+         bool pUp   = k[p - 1] <= d[p - 1] && k[p] > d[p];
+         bool pDown = k[p - 1] >= d[p - 1] && k[p] < d[p];
+         if(pUp && k[p] < 20.0 && lastDir != 1) lastDir = 1;
+         else if(pDown && k[p] > 80.0 && lastDir != -1) lastDir = -1;
+        }
+     }
    for(int i = from; i < n; i++)
      {
       if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
@@ -843,6 +866,12 @@ void ComputeStochSignals(const bool backfill)
       if(crossUp && k[i] < 20.0) dir = 1;
       else if(crossDown && k[i] > 80.0) dir = -1;
       if(dir == 0) continue;
+      //--- suppress a repeat same-direction cross (e.g. %K/%D whipsawing
+      //--- against each other while both still sit inside the zone) -
+      //--- only the first cross of a given direction draws a signal,
+      //--- until the opposite-direction cross fires
+      if(dir == lastDir) continue;
+      lastDir = dir;
 
       //--- recent swing = lowest low / highest high of the last
       //--- SIG_SWING_BARS closed bars, signal bar included
