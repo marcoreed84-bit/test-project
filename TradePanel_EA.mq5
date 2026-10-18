@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.33"
+#property version   "1.34"
+//--- 1.34: ROOT CAUSE FOUND for the real/overlay cross-detection dispute -
+//--- a screenshot of the user's own native MT5 Stochastic Properties dialog
+//--- showed Method: Smoothed, not Simple. Both v1.33 options
+//--- (InpSigUseSumSlowing true/false, now replaced) were SMA-family only -
+//--- neither could ever have matched Smoothed (SMMA), a different recursive
+//--- formula, which is exactly why toggling it produced "nothing changed."
+//--- Replaced InpSigUseSumSlowing with a 3-way InpSigStochMethod
+//--- (SUM / SMA / SMOOTHED), default SMOOTHED to match the confirmed real
+//--- setting, and implemented proper SMMA math for both the %K slowing
+//--- step and the %D line (MT5 applies the same Method to both).
 //--- 1.33: added InpSigUseSumSlowing (default true = unchanged behavior).
 //--- After repeated real, non-sub-pixel disagreement between this overlay
 //--- and the user's own same-settings (21,5,5, Low/High, SMA) native MT5
@@ -252,12 +262,22 @@ input bool   InpShowStochSignals   = true;
 input int    InpSigKPeriod         = 14;      // %K period
 input int    InpSigSlowing         = 3;       // slowing
 input int    InpSigDPeriod         = 3;       // %D period
-input bool   InpSigUseSumSlowing   = true;    // TRUE = sum num/den separately over the slowing window then
-                                               // divide (what this project believed MT5's native indicator
-                                               // does). FALSE = plain SMA of the raw per-bar %K instead (the
-                                               // "textbook" convention). If your own same-settings native
-                                               // indicator still disagrees with this overlay, flip this and
-                                               // compare again - this setting is exactly what's in dispute.
+enum ENUM_SIG_STOCH_METHOD
+  {
+   SIG_STOCH_SUM      = 0,   // Simple - sum num/den separately over the slowing window then divide
+   SIG_STOCH_SMA      = 1,   // Simple - plain SMA of the raw per-bar %K ("textbook" convention)
+   SIG_STOCH_SMOOTHED = 2    // Smoothed (SMMA) - matches MT5's native Stochastic "Method: Smoothed"
+  };
+input ENUM_SIG_STOCH_METHOD InpSigStochMethod = SIG_STOCH_SMOOTHED;
+                                               // v1.34: confirmed via user's native MT5 Stochastic Properties
+                                               // dialog screenshot that their indicator's Method is set to
+                                               // "Smoothed", not "Simple" - neither of the two old SMA-family
+                                               // options (SIG_STOCH_SUM/SIG_STOCH_SMA, formerly toggled by
+                                               // InpSigUseSumSlowing) could ever have matched that, which is
+                                               // exactly why that toggle produced "nothing changed." Smoothed
+                                               // (SMMA) is a different recursive formula, not an SMA variant -
+                                               // this now implements it properly for both the %K slowing step
+                                               // and the %D line (MT5 applies the same Method to both).
 input double InpSigZoneLow         = 20.0;    // oversold zone (buy cross must be below this)
 input double InpSigZoneHigh        = 80.0;    // overbought zone (sell cross must be above this)
 input int    InpSigSwingBars       = 10;      // "recent swing" = plain N-bar lowest low / highest high
@@ -949,19 +969,21 @@ void BackfillOverlayLines()
 //| i.e. a simple (SMA) smoothing; %D = SMA(dp) of %K.                 |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| Two genuinely different "slowing" conventions both call themselves|
-//| standard Stochastic - useSumSlowing=true sums the numerator/      |
-//| denominator separately over the slowing window then divides (what |
-//| this project believed MT5's own compiled indicator does);         |
-//| useSumSlowing=false instead takes a plain SMA of the raw per-bar   |
-//| %K over the slowing window (the "textbook" convention). Exposed    |
-//| as a switchable input (InpSigUseSumSlowing) specifically so this   |
-//| can be A/B-compared against a real MT5 native indicator bar-by-bar |
-//| rather than taken on faith - see v1.33 version-history note.       |
+//| Three stochastic averaging conventions, selectable via            |
+//| InpSigStochMethod:                                                 |
+//|  SIG_STOCH_SUM/SIG_STOCH_SMA - both Simple/SMA-family (see enum    |
+//|  comments above) - these were the only two options before v1.34.  |
+//|  SIG_STOCH_SMOOTHED - MT5 native "Method: Smoothed" (SMMA), a      |
+//|  genuinely different recursive formula, applied to BOTH the %K     |
+//|  slowing step and the %D line (MT5 applies the same Method to      |
+//|  both - confirmed from the user's own Properties dialog showing    |
+//|  a single Method dropdown governing the whole indicator).          |
+//|  SMMA: seed = SMA of the first `period` values; thereafter         |
+//|  smma[i] = (smma[i-1]*(period-1) + value[i]) / period.             |
 //+------------------------------------------------------------------+
 void SigClassicStoch(const double &h[], const double &l[], const double &c[], const int n,
                      const int kp, const int slow, const int dp, double &k[], double &d[],
-                     const bool useSumSlowing = true)
+                     const ENUM_SIG_STOCH_METHOD method = SIG_STOCH_SMOOTHED)
   {
    ArrayResize(k, n); ArrayInitialize(k, SIG_NA);
    ArrayResize(d, n); ArrayInitialize(d, SIG_NA);
@@ -976,26 +998,50 @@ void SigClassicStoch(const double &h[], const double &l[], const double &c[], co
       den[i] = hi - lo;
       rawK[i] = (den[i] > 0.0) ? 100.0 * num[i] / den[i] : 100.0;
      }
-   for(int i = kp + slow - 2; i < n; i++)
+   int kStart = kp + slow - 2;
+   if(method == SIG_STOCH_SUM)
      {
-      if(useSumSlowing)
+      for(int i = kStart; i < n; i++)
         {
          double sn = 0.0, sd = 0.0;
          for(int j = i - slow + 1; j <= i; j++) { sn += num[j]; sd += den[j]; }
          k[i] = (sd > 0.0) ? 100.0 * sn / sd : 100.0;   // MT5 returns 100 on a zero range
         }
-      else
+     }
+   else if(method == SIG_STOCH_SMA)
+     {
+      for(int i = kStart; i < n; i++)
         {
          double s = 0.0;
          for(int j = i - slow + 1; j <= i; j++) s += rawK[j];
          k[i] = s / slow;   // plain SMA of the raw per-bar %K ("textbook" convention)
         }
      }
-   for(int i = kp + slow + dp - 3; i < n; i++)
+   else // SIG_STOCH_SMOOTHED
      {
-      double s = 0.0;
-      for(int j = i - dp + 1; j <= i; j++) s += k[j];
-      d[i] = s / dp;
+      double seed = 0.0;
+      for(int j = kStart - slow + 1; j <= kStart; j++) seed += rawK[j];
+      k[kStart] = seed / slow;
+      for(int i = kStart + 1; i < n; i++)
+         k[i] = (k[i - 1] * (slow - 1) + rawK[i]) / slow;
+     }
+   int dStart = kp + slow + dp - 3;
+   if(method == SIG_STOCH_SMOOTHED)
+     {
+      double seed = 0.0;
+      for(int j = dStart - dp + 1; j <= dStart; j++) seed += k[j];
+      d[dStart] = seed / dp;
+      for(int i = dStart + 1; i < n; i++)
+         d[i] = (d[i - 1] * (dp - 1) + k[i]) / dp;
+     }
+   else
+     {
+      for(int i = dStart; i < n; i++)
+        {
+         double s = 0.0;
+         for(int j = i - dp + 1; j <= i; j++) s += k[j];
+         d[i] = s / dp;
+        }
      }
   }
 
@@ -1206,9 +1252,9 @@ void ComputeStochSignals(const bool backfill)
    for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
 
    double k[], d[];
-   SigClassicStoch(h, l, c, n, InpSigKPeriod, InpSigSlowing, InpSigDPeriod, k, d, InpSigUseSumSlowing);
+   SigClassicStoch(h, l, c, n, InpSigKPeriod, InpSigSlowing, InpSigDPeriod, k, d, InpSigStochMethod);
    double kE[], dE[];
-   if(InpShowExitSignals) SigClassicStoch(h, l, c, n, InpExitKPeriod, InpExitSlowing, InpExitDPeriod, kE, dE, InpSigUseSumSlowing);
+   if(InpShowExitSignals) SigClassicStoch(h, l, c, n, InpExitKPeriod, InpExitSlowing, InpExitDPeriod, kE, dE, InpSigStochMethod);
    double atr[];
    SigATR(h, l, c, n, 14, atr);
 
@@ -1713,10 +1759,12 @@ int OnInit()
    //--- with - check this line in the Experts log any time there's doubt
    //--- about whether a changed input actually took effect, rather than
    //--- trusting the Properties dialog alone
-   PrintFormat("TradePanel v1.33 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  sumSlowing=%s  showExit=%s  showMidline=%s",
+   string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
+                      (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
+   PrintFormat("TradePanel v1.34 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
-               InpSigUseSumSlowing ? "true(SUM)" : "false(SMA-of-K)",
+               methodStr,
                InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false");
 
    ApplyTheme();
