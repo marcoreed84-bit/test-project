@@ -19,7 +19,18 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.28"
+#property version   "1.29"
+//--- 1.29: FIX real bug - orphaned exit dots. The "repeat same-direction
+//--- cross REPLACES the previous signal" rule deleted the previous arrow
+//--- (and its SL/TP) whenever the new entry matched lastDir - even when
+//--- that previous entry had ALREADY been closed by an exit dot in
+//--- between. Sequence: BUY arrow -> SELL arrow -> EXIT-SHORT dot (posDir
+//--- correctly -1 -> 0) -> another SELL cross: dir==lastDir, so the first
+//--- SELL arrow was deleted, leaving BUY arrow -> magenta dot with no sell
+//--- arrow visible between them. posDir itself was never wrong; the
+//--- arrow that explained it was erased. An exit now clears lastArr/
+//--- lastSl/lastTp, so only a still-OPEN same-direction signal is ever
+//--- replaced.
 //--- 1.28: FIX a real bug introduced by 1.27's performance fix: a LIVE
 //--- call always assumed exactly ONE new bar had closed since the last
 //--- check (from = n-1). During a stall/hang (or any gap in the EA
@@ -1263,6 +1274,12 @@ void ComputeStochSignals(const bool backfill)
                             DoubleToString(c[i], _Digits), kE[i], posDir);
               }
             posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
+            //--- 1.29: the previous entry's run is now CLOSED by this exit, so
+            //--- its arrow/SL/TP must never again be eligible for the "repeat
+            //--- same-direction cross replaces the previous signal" delete -
+            //--- otherwise a later same-side entry erases an arrow whose exit
+            //--- dot is still on the chart (an orphaned exit dot)
+            lastArr = ""; lastSl = ""; lastTp = "";
            }
         }
      }
