@@ -19,7 +19,15 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.31"
+#property version   "1.32"
+//--- 1.32: diagnostic only - OnInit now prints the ENTRY/EXIT stochastic
+//--- settings it actually initialized with (and the show-exit/show-midline
+//--- toggles) to the Experts log, so "did my changed input actually take
+//--- effect" can be checked directly instead of trusting the Properties
+//--- dialog. Confirmed in code: both SigClassicStoch() calls already used
+//--- InpSigKPeriod/Slowing/DPeriod and InpExitKPeriod/Slowing/DPeriod (not
+//--- hardcoded numbers) - this doesn't change that, it just makes it
+//--- provable from the log.
 //--- 1.31: diagnostic only - the entry/exit StochSignal LOG lines now print
 //--- the full K[i-1]/D[i-1]/K[i]/D[i] (3 decimals) instead of just K, so a
 //--- "did this actually cross" dispute can be settled against your own
@@ -1658,6 +1666,15 @@ void RebuildPanel()
 int OnInit()
   {
    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
+
+   //--- hard proof of what settings this EA instance actually initialized
+   //--- with - check this line in the Experts log any time there's doubt
+   //--- about whether a changed input actually took effect, rather than
+   //--- trusting the Properties dialog alone
+   PrintFormat("TradePanel v1.31 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  showExit=%s  showMidline=%s",
+               InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
+               InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
+               InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false");
 
    ApplyTheme();
    SetupMAs();
