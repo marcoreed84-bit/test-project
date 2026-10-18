@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.36"
+#property version   "1.37"
+//--- 1.37: new InpSigUseInterpCross input (default TRUE), per direct
+//--- request - the zone qualification check now uses the INTERPOLATED
+//--- point where the %K/%D line segments actually cross between bar i-1
+//--- and bar i (solving for where K-D hits zero), instead of either bar's
+//--- raw endpoint value. This matches "where the lines visually meet on
+//--- the chart" rather than the bar-close snapshot, which a fast-moving
+//--- bar can jump straight past. Does NOT change which bars count as a
+//--- cross (still the same k[i-1]<=d[i-1] && k[i]>d[i] / mirror test) -
+//--- only changes what value gets compared against the zone threshold.
+//--- RAWCROSS diagnostic (v1.36) now also prints this interpolated value.
 //--- 1.36: diagnostic only - added StochSignal RAWCROSS log line, printed
 //--- for EVERY raw %K/%D cross on the entry stoch (not just ones that
 //--- qualify and draw an arrow), showing K/D values, the zone thresholds
@@ -308,6 +318,23 @@ input ENUM_SIG_STOCH_METHOD InpSigStochMethod = SIG_STOCH_SMOOTHED;
                                                // and the %D line (MT5 applies the same Method to both).
 input double InpSigZoneLow         = 20.0;    // oversold zone (buy cross must be below this)
 input double InpSigZoneHigh        = 80.0;    // overbought zone (sell cross must be above this)
+input bool   InpSigUseInterpCross  = true;    // TRUE (v1.37, NEW): qualify using the INTERPOLATED point
+                                               // where the %K/%D line segments actually cross between
+                                               // bar i-1 and bar i (linear interpolation, matching the
+                                               // literal "X" where the two lines visually meet on the
+                                               // chart) - instead of either bar's raw endpoint value. A
+                                               // fast-moving bar can jump from inside the zone to outside
+                                               // it between two closes; the endpoint-only check (FALSE)
+                                               // can miss that cross entirely even though the lines
+                                               // visually crossed well inside the zone. Per direct request
+                                               // after a disputed real chart cross: K[i-1]=24.550 (inside
+                                               // a 30 zone) -> K[i]=36.706 (not) - the interpolated
+                                               // crossing value computed to ~33.3, which does NOT qualify
+                                               // even under a 30 zone (still above it) - this mode gets
+                                               // closer to "where the lines visually meet" than the old
+                                               // endpoint-only check, but it's still a real number from
+                                               // the actual bar data, not a guarantee every visually-close
+                                               // cross will now qualify.
 input int    InpSigSwingBars       = 10;      // "recent swing" = plain N-bar lowest low / highest high
                                                // for the stop, as retail articles typically describe
 input double InpSigRR              = 2.0;     // R:R convention - a representative example, not validated
@@ -1352,9 +1379,32 @@ void ComputeStochSignals(const bool backfill)
         {
          bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
          bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
+
+         //--- 1.37: the value actually tested against the zone. Either the
+         //--- plain bar-close k[i] (old behavior), or the value at the
+         //--- INTERPOLATED point where the K/D line segments cross between
+         //--- bar i-1 and bar i - linear interpolation on where (K-D) hits
+         //--- zero, matching the literal "X" point where the two lines
+         //--- visually meet on the chart, which can sit well inside the
+         //--- zone even when the bar-CLOSE value has already moved outside
+         //--- it (a fast-moving bar can jump straight through the zone).
+         double zoneTestVal = k[i];
+         if(InpSigUseInterpCross && (crossUp || crossDown))
+           {
+            double diffPrev = k[i - 1] - d[i - 1];
+            double diffCur  = k[i] - d[i];
+            double denom = diffPrev - diffCur;
+            if(MathAbs(denom) > 0.0000001)
+              {
+               double t = diffPrev / denom;
+               if(t < 0.0) t = 0.0;
+               if(t > 1.0) t = 1.0;
+               zoneTestVal = k[i - 1] + t * (k[i] - k[i - 1]);
+              }
+           }
          int dir = 0;
-         if(crossUp && k[i] < InpSigZoneLow) dir = 1;
-         else if(crossDown && k[i] > InpSigZoneHigh) dir = -1;
+         if(crossUp && zoneTestVal < InpSigZoneLow) dir = 1;
+         else if(crossDown && zoneTestVal > InpSigZoneHigh) dir = -1;
 
          //--- 1.36: diagnostic only - every raw %K/%D cross on the entry
          //--- stoch gets logged unconditionally (not just ones that qualify
@@ -1369,10 +1419,10 @@ void ComputeStochSignals(const bool backfill)
          //--- enough (a handful per day) that this isn't meaningful spam.
          if(draw && (crossUp || crossDown))
             PrintFormat("StochSignal RAWCROSS: %s %s  K[i-1]=%.3f D[i-1]=%.3f -> K[i]=%.3f D[i]=%.3f  "
-                        "zoneLow=%.1f zoneHigh=%.1f  qualifies=%s",
+                        "interpCrossVal=%.3f (interpUsed=%s)  zoneLow=%.1f zoneHigh=%.1f  qualifies=%s",
                         TimeToString(r[i].time, TIME_DATE | TIME_MINUTES), crossUp ? "crossUp" : "crossDown",
-                        k[i - 1], d[i - 1], k[i], d[i], InpSigZoneLow, InpSigZoneHigh,
-                        (dir != 0) ? "YES" : "NO(outside zone)");
+                        k[i - 1], d[i - 1], k[i], d[i], zoneTestVal, InpSigUseInterpCross ? "true" : "false",
+                        InpSigZoneLow, InpSigZoneHigh, (dir != 0) ? "YES" : "NO(outside zone)");
 
          if(dir != 0)
            {
@@ -1830,10 +1880,10 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.34 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.37 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
-               methodStr, InpSigZoneLow, InpSigZoneHigh,
+               methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
                InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false");
 
    ApplyTheme();
