@@ -19,7 +19,18 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.29"
+#property version   "1.30"
+//--- 1.30: new EXPERIMENTAL midline-cross signal overlay (off by default -
+//--- InpShowMidlineSignals), per direct request: a cross back through the
+//--- 50 midline (not a deep 20/80 zone extreme) after a genuine pullback
+//--- (InpMidlineBandLow/High, InpMidlinePriorLookback). Drawn as a diamond
+//--- marker (own colors InpMidlineBuyCol/SellCol, own offset
+//--- InpMidlineOffsetATR) so it's never visually confused with the
+//--- existing arrows/dots. Fully independent - does not touch posDir,
+//--- lastDir, or the entry/exit overlay's state in any way, purely
+//--- additive. Backtested separately (research/meridian_vwap200/
+//--- classic_stoch_21_5_5_btc_h1_midline_entry_test.py): full-history
+//--- %PF~0.65, still a net loser - shown for visual reference only.
 //--- 1.29: FIX real bug - orphaned exit dots. The "repeat same-direction
 //--- cross REPLACES the previous signal" rule deleted the previous arrow
 //--- (and its SL/TP) whenever the new entry matched lastDir - even when
@@ -232,6 +243,19 @@ input int    InpExitDPeriod        = 3;       // exit stochastic %D period
 input bool   InpSigExitAlert       = true;    // push+sound when an exit dot prints (live only)
 input double InpSigExitOffsetATR   = 1.0;     // how far EXIT dots sit from the candle, in ATR(14) multiples -
                                                // bigger than the entry offset so the two never overlap
+
+input group "=== Midline-cross signal overlay - EXPERIMENTAL, UNVALIDATED (separate construction, not combined with the entry/exit above) ==="
+input bool   InpShowMidlineSignals = false;   // off by default - a genuinely different, less-tested idea than
+                                               // the zone-cross entry above (backtested full-history %PF~0.65,
+                                               // still a net loser - see project research notes)
+input double InpMidlineBandLow     = 40.0;    // %K must be inside this band on the cross bar (not a deep
+input double InpMidlineBandHigh    = 60.0;    // zone extreme - a cross back through the 50 midline instead)
+input int    InpMidlinePriorLookback = 10;    // %K must have dipped (buy) / risen (sell) to 50 within this
+                                               // many preceding bars - confirms a genuine pullback, not noise
+                                               // sitting near 50
+input color  InpMidlineBuyCol      = clrYellow;
+input color  InpMidlineSellCol     = clrOrange;
+input double InpMidlineOffsetATR   = 0.8;     // own offset so it never sits on top of the entry arrows/exit dots
 
 CTrade trade;
 
@@ -961,6 +985,27 @@ void DrawSigDot(const string nm, const datetime t, const double price, const boo
   }
 
 //+------------------------------------------------------------------+
+//| Diamond marker (Wingdings 117) for a MIDLINE-CROSS signal -           |
+//| deliberately a different shape from both the arrows (zone-cross       |
+//| entry) and the dots (exit), so this separate/experimental overlay     |
+//| can never be visually confused with the main one.                     |
+//+------------------------------------------------------------------+
+void DrawMidlineMarker(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpMidlineBuyCol : InpMidlineSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 3);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, (isBuy ? "MIDLINE-CROSS BUY" : "MIDLINE-CROSS SELL") +
+                   " (experimental, UNVALIDATED - backtested net loser, visual only, not combined with the entry/exit overlay above)");
+  }
+
+//+------------------------------------------------------------------+
 //| Plain Wilder ATR(period), used only to push the arrows/dots a      |
 //| sane, instrument-scaled distance away from the candles - has no    |
 //| effect on the signal, stop or target math above.                   |
@@ -1230,6 +1275,44 @@ void ComputeStochSignals(const bool backfill)
                                DoubleToString(c[i], _Digits), k[i], posDir);
                  }
               }
+           }
+        }
+
+      //--- MIDLINE-CROSS: fully independent experimental overlay - a cross
+      //--- back through the 50 midline (not a deep 20/80 zone extreme)
+      //--- after a genuine pullback, per direct request. Uses the SAME
+      //--- entry stochastic (k/d) but a different trigger condition. Does
+      //--- NOT touch posDir/lastDir/lastArr or interact with the entry/
+      //--- exit overlay above in any way - purely additive, its own marker
+      //--- shape, drawn (or not) independent of everything else in this loop.
+      if(InpShowMidlineSignals && draw &&
+         k[i] != SIG_NA && d[i] != SIG_NA && k[i - 1] != SIG_NA && d[i - 1] != SIG_NA &&
+         k[i] >= InpMidlineBandLow && k[i] <= InpMidlineBandHigh)
+        {
+         bool mCrossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
+         bool mCrossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
+         bool mDir = false; bool mFire = false;
+         if(mCrossUp)
+           {
+            double lo = k[i];
+            for(int j = MathMax(i - InpMidlinePriorLookback, 0); j < i; j++)
+               if(k[j] != SIG_NA && k[j] < lo) lo = k[j];
+            if(lo <= 50.0) { mFire = true; mDir = true; }
+           }
+         else if(mCrossDown)
+           {
+            double hi = k[i];
+            for(int j = MathMax(i - InpMidlinePriorLookback, 0); j < i; j++)
+               if(k[j] != SIG_NA && k[j] > hi) hi = k[j];
+            if(hi >= 50.0) { mFire = true; mDir = false; }
+           }
+         if(mFire)
+           {
+            datetime mt = r[i].time;
+            string mid = g_sig + "mid_" + IntegerToString((long)mt);
+            double offMid = (atr[i] == SIG_NA) ? 0.0 : InpMidlineOffsetATR * atr[i];
+            double mPrice = mDir ? r[i].low - offMid : r[i].high + offMid;
+            DrawMidlineMarker(mid, mt, mPrice, mDir);
            }
         }
 
