@@ -19,7 +19,21 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.30"
+#property version   "1.31"
+//--- 1.31: diagnostic only - the entry/exit StochSignal LOG lines now print
+//--- the full K[i-1]/D[i-1]/K[i]/D[i] (3 decimals) instead of just K, so a
+//--- "did this actually cross" dispute can be settled against your own
+//--- same-settings native indicator's Data Window values bar-by-bar,
+//--- instead of eyeballing the chart. No logic changed - an Opus audit
+//--- (prompted by a confirmed visual non-cross on the user's own 21,5,5
+//--- native indicator at a bar where a SELL arrow was drawn) checked the
+//--- cross-detection indexing, the live-window-vs-backfill bar alignment,
+//--- and SigClassicStoch's own internal loop bounds for 21/5/5 - all
+//--- correct, no bug found. Likely explanation: a sub-pixel (K/D differ by
+//--- hundredths) cross that both the EA and the native indicator would
+//--- agree on numerically but can't be seen by eye even zoomed in - this
+//--- logging change is how to actually confirm that next time, rather
+//--- than guess again.
 //--- 1.30: new EXPERIMENTAL midline-cross signal overlay (off by default -
 //--- InpShowMidlineSignals), per direct request: a cross back through the
 //--- 50 midline (not a deep 20/80 zone extreme) after a genuine pullback
@@ -1270,9 +1284,9 @@ void ComputeStochSignals(const bool backfill)
                   //--- Experts tab to see the EXACT entry/exit sequence the
                   //--- code actually recognized, if the chart's own colors/
                   //--- placement ever look wrong again
-                  PrintFormat("StochSignal LOG: %s ENTRY %s @ %s  K=%.1f  posDir->%d",
+                  PrintFormat("StochSignal LOG: %s ENTRY %s @ %s  K[i-1]=%.3f D[i-1]=%.3f -> K[i]=%.3f D[i]=%.3f  posDir->%d",
                                TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                               DoubleToString(c[i], _Digits), k[i], posDir);
+                               DoubleToString(c[i], _Digits), k[i - 1], d[i - 1], k[i], d[i], posDir);
                  }
               }
            }
@@ -1352,9 +1366,9 @@ void ComputeStochSignals(const bool backfill)
                   dotPrice = wasLong ? r[i].high + offExit : r[i].low - offExit;
                DrawSigDot(exId, t, dotPrice, wasLong);
                //--- same unconditional ground-truth log line as the entry side
-               PrintFormat("StochSignal LOG: %s EXIT-%s @ %s  ExitK=%.1f  (closing posDir %d -> 0)",
+               PrintFormat("StochSignal LOG: %s EXIT-%s @ %s  ExitK[i-1]=%.3f ExitD[i-1]=%.3f -> ExitK[i]=%.3f ExitD[i]=%.3f  (closing posDir %d -> 0)",
                             TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                            DoubleToString(c[i], _Digits), kE[i], posDir);
+                            DoubleToString(c[i], _Digits), kE[i - 1], dE[i - 1], kE[i], dE[i], posDir);
               }
             posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
             //--- 1.29: the previous entry's run is now CLOSED by this exit, so
