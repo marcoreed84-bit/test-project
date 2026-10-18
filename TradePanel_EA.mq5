@@ -19,7 +19,25 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.34"
+#property version   "1.35"
+//--- 1.35: REAL BUG - the ENTRY block set posDir to the NEW direction
+//--- before the EXIT block (later in the same per-bar loop) read posDir to
+//--- decide whether/which-side to fire an exit. On a bar where both an
+//--- opposite-direction entry AND an exit-stoch cross against the OLD
+//--- position happened together, the exit check was already looking at the
+//--- freshly-flipped posDir and silently never fired - exactly the
+//--- symptom the user screenshotted (a sell cross that should have shown
+//--- both a new SELL arrow and an EXIT-LONG dot only showed the arrow).
+//--- Same root cause also let a fresh entry from flat get spuriously
+//--- "exited" on its own entry bar, wiping its own lastArr/Sl/Tp. Fixed by
+//--- snapshotting posDir into prevPosDir BEFORE the entry block can change
+//--- it, and having the entire exit block (fire condition, alert text,
+//--- wasLong label, log line) read prevPosDir instead. The flat/clear
+//--- cleanup (posDir=0, lastArr/Sl/Tp="") now only runs when no entry also
+//--- fired this bar - if one did, posDir/lastArr/Sl/Tp already correctly
+//--- belong to that new entry and must not be wiped. Found, confirmed, and
+//--- fixed by an independent Opus audit; diff reviewed and verified
+//--- (brace/paren balance) before committing.
 //--- 1.34: ROOT CAUSE FOUND for the real/overlay cross-detection dispute -
 //--- a screenshot of the user's own native MT5 Stochastic Properties dialog
 //--- showed Method: Smoothed, not Simple. Both v1.33 options
@@ -1307,6 +1325,18 @@ void ComputeStochSignals(const bool backfill)
       double entryDrawnPrice = 0.0;
       bool entryDrawnAbove = false;
 
+      //--- 1.35: snapshot the position held coming INTO this bar, before the
+      //--- ENTRY block below can overwrite posDir. The EXIT block must judge
+      //--- (and label/color/stack) the exit against the OLD position - not a
+      //--- brand-new one opened on this same bar. Before this fix: long, then
+      //--- a bar with BOTH a sell cross-in-zone AND an exit-stoch cross down
+      //--- flipped posDir to -1 first, so the exit check then demanded a
+      //--- cross UP and the exit-long dot silently never drew (user-reported).
+      //--- It also let a fresh entry from flat be "exited" on its own entry
+      //--- bar by an opposite exit cross, wiping its lastArr/Sl/Tp.
+      int  prevPosDir = posDir;
+      bool entryFiredThisBar = false;   // qualifying entry (risk>0), drawn or not
+
       //--- ENTRY: %K/%D cross WITHIN the extreme zone (not a zone-exit rule)
       if(k[i] != SIG_NA && d[i] != SIG_NA && k[i - 1] != SIG_NA && d[i - 1] != SIG_NA)
         {
@@ -1356,6 +1386,7 @@ void ComputeStochSignals(const bool backfill)
                  }
                lastDir = dir;
                posDir  = dir;   // new entry opens/flips the "position" the exit overlay watches
+               entryFiredThisBar = true;
 
                if(draw)
                  {
@@ -1429,12 +1460,14 @@ void ComputeStochSignals(const bool backfill)
       //--- EXIT: only while "in position" per the entry overlay above, on
       //--- the EXIT stochastic's own (independently-set) %K/%D cross, in
       //--- the direction that closes that position - no zone requirement
-      if(InpShowExitSignals && posDir != 0 &&
+      //--- (1.35: everything below reads prevPosDir - the position held
+      //--- coming into this bar - never the possibly-just-flipped posDir)
+      if(InpShowExitSignals && prevPosDir != 0 &&
          kE[i] != SIG_NA && dE[i] != SIG_NA && kE[i - 1] != SIG_NA && dE[i - 1] != SIG_NA)
         {
          bool exCrossUp   = kE[i - 1] <= dE[i - 1] && kE[i] > dE[i];
          bool exCrossDown = kE[i - 1] >= dE[i - 1] && kE[i] < dE[i];
-         bool exitFires = (posDir > 0 && exCrossDown) || (posDir < 0 && exCrossUp);
+         bool exitFires = (prevPosDir > 0 && exCrossDown) || (prevPosDir < 0 && exCrossUp);
          if(exitFires)
            {
             if(draw)
@@ -1445,11 +1478,11 @@ void ComputeStochSignals(const bool backfill)
                   FireSigAlert(StringFormat(
                      "%s %s: Classic stoch EXIT-%s signal PRINTED (ExitK=%.1f) - chart overlay only, "
                      "UNVALIDATED, does not place/modify/close anything", _Symbol, tf,
-                     (posDir > 0 ? "LONG" : "SHORT"), kE[i]));
+                     (prevPosDir > 0 ? "LONG" : "SHORT"), kE[i]));
                  }
                datetime t = r[i].time;
                string exId = g_sig + "exit_" + IntegerToString((long)t);
-               bool wasLong = posDir > 0;
+               bool wasLong = prevPosDir > 0;
                //--- if a NEW entry arrow ALSO landed on this exact bar and on
                //--- the SAME side (e.g. a sell arrow above + an exit-long dot
                //--- that would also sit above), stack the dot further out
@@ -1464,15 +1497,23 @@ void ComputeStochSignals(const bool backfill)
                //--- same unconditional ground-truth log line as the entry side
                PrintFormat("StochSignal LOG: %s EXIT-%s @ %s  ExitK[i-1]=%.3f ExitD[i-1]=%.3f -> ExitK[i]=%.3f ExitD[i]=%.3f  (closing posDir %d -> 0)",
                             TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                            DoubleToString(c[i], _Digits), kE[i - 1], dE[i - 1], kE[i], dE[i], posDir);
+                            DoubleToString(c[i], _Digits), kE[i - 1], dE[i - 1], kE[i], dE[i], prevPosDir);
               }
-            posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
-            //--- 1.29: the previous entry's run is now CLOSED by this exit, so
-            //--- its arrow/SL/TP must never again be eligible for the "repeat
-            //--- same-direction cross replaces the previous signal" delete -
-            //--- otherwise a later same-side entry erases an arrow whose exit
-            //--- dot is still on the chart (an orphaned exit dot)
-            lastArr = ""; lastSl = ""; lastTp = "";
+            //--- 1.35: if an entry ALSO fired this bar, this is "exit the old
+            //--- position AND open the new one on the same bar" - posDir and
+            //--- lastArr/Sl/Tp already belong to that NEW entry (and the old
+            //--- run's objects were never put back into lastArr), so leave
+            //--- them alone. Only go flat/clear when no entry fired this bar.
+            if(!entryFiredThisBar)
+              {
+               posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
+               //--- 1.29: the previous entry's run is now CLOSED by this exit, so
+               //--- its arrow/SL/TP must never again be eligible for the "repeat
+               //--- same-direction cross replaces the previous signal" delete -
+               //--- otherwise a later same-side entry erases an arrow whose exit
+               //--- dot is still on the chart (an orphaned exit dot)
+               lastArr = ""; lastSl = ""; lastTp = "";
+              }
            }
         }
      }
