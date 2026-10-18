@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.35"
+#property version   "1.36"
+//--- 1.36: diagnostic only - added StochSignal RAWCROSS log line, printed
+//--- for EVERY raw %K/%D cross on the entry stoch (not just ones that
+//--- qualify and draw an arrow), showing K/D values, the zone thresholds
+//--- actually in effect, and whether it qualified. Confirmed zone/method
+//--- inputs ARE correctly wired (30.0/70.0/Smoothed all verified in the
+//--- Inputs dialog) and the Experts log showed NO entry fired for a bar
+//--- the user's chart clearly showed crossing under 30 - but the old
+//--- logging only ever printed QUALIFYING entries, so there was no way to
+//--- see the actual K/D the code computed for the disputed bar, only
+//--- neighboring bars. This closes that visibility gap for next time.
 //--- 1.35: REAL BUG - the ENTRY block set posDir to the NEW direction
 //--- before the EXIT block (later in the same per-bar loop) read posDir to
 //--- decide whether/which-side to fire an exit. On a bar where both an
@@ -1345,6 +1355,24 @@ void ComputeStochSignals(const bool backfill)
          int dir = 0;
          if(crossUp && k[i] < InpSigZoneLow) dir = 1;
          else if(crossDown && k[i] > InpSigZoneHigh) dir = -1;
+
+         //--- 1.36: diagnostic only - every raw %K/%D cross on the entry
+         //--- stoch gets logged unconditionally (not just ones that qualify
+         //--- and draw), so a "the chart clearly crossed under 30 but no
+         //--- entry fired" dispute can be settled from real numbers instead
+         //--- of a chart screenshot. Separate from the cross+zone-qualifying
+         //--- ENTRY log further below, which only prints when dir!=0.
+         //--- Runs during backfill too (not just live) - a reattach re-walks
+         //--- recent history, so this is the only way to get real numbers
+         //--- for a cross that already happened before you went looking for
+         //--- it, not just ones from this point forward. Crosses are rare
+         //--- enough (a handful per day) that this isn't meaningful spam.
+         if(draw && (crossUp || crossDown))
+            PrintFormat("StochSignal RAWCROSS: %s %s  K[i-1]=%.3f D[i-1]=%.3f -> K[i]=%.3f D[i]=%.3f  "
+                        "zoneLow=%.1f zoneHigh=%.1f  qualifies=%s",
+                        TimeToString(r[i].time, TIME_DATE | TIME_MINUTES), crossUp ? "crossUp" : "crossDown",
+                        k[i - 1], d[i - 1], k[i], d[i], InpSigZoneLow, InpSigZoneHigh,
+                        (dir != 0) ? "YES" : "NO(outside zone)");
 
          if(dir != 0)
            {
