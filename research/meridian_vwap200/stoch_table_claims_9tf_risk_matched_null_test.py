@@ -43,6 +43,13 @@ bars). Gold/Silver H1 reuse that instrument's M15 claimed config
 Point size read from each CSV header (verified: GOLD 0.01, SILVER 0.001,
 BTCUSD 0.01). M5 files are a recent slice only, not 2014+ (noted).
 
+RESULT CAVEAT (read before citing): this null returned all 9 rows at the
+p floor - a uniform result, investigated in
+stoch_table_claims_cross_conditioned_control.py. Most of the gap is the
+entry-on-fresh-cross / exit-on-opposite-cross coupling, not zone timing
+skill: against random same-direction crosses Gold H1 p=0.12 and BTC H1
+p=1.0. Do NOT read these p-values as "beats random timing".
+
 Honest K: 9 rows. NEW %PF tests here = 2 (Gold H1, Silver H1). BTC M15
 and BTC H1 %PF are re-computed only to confirm the cited numbers (0.201,
 0.388), not counted as new. Null tests: 9 risk-matched nulls, each

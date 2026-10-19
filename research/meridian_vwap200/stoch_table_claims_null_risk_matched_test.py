@@ -1,4 +1,15 @@
 """
+SUPERSEDED/RETRACTED - use stoch_table_claims_9tf_risk_matched_null_test.py
+instead. An independent Opus audit found this file's risk-matching was
+still geometrically wrong (it put the stop at exactly risk_pct x
+entry_px, not matching the real construction's fill-price-drift-and-
+spread-widened stop/target distance), AND that even the corrected
+version's "all 9 configs beat random" result was itself a second,
+different artifact (entry-on-fresh-cross/exit-on-opposite-cross
+coupling, not genuine zone-timing skill - confirmed via an any-cross
+control test). Left in place for the history/trail, not as a result to
+cite - see the superseding file's own docstring for the full account.
+
 CORRECTED random-timing null, replacing stoch_table_claims_null_test.py.
 
 That file's null test had a real confound, found by investigating why
