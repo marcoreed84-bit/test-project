@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.41"
+#property version   "1.42"
+//--- 1.42: per direct request ("like we said with the buy signal arrow,
+//--- the exit dot must be below it") - an exit dot now draws on the SAME
+//--- side as the direction it's closing: EXIT-LONG (closing a BUY, which
+//--- sits below) now also sits below; EXIT-SHORT (closing a SELL, which
+//--- sits above) now also sits above. It was previously the opposite -
+//--- which put an exit dot on the same side as the OPPOSITE-direction
+//--- entry arrow, directly causing the overlap reported from two separate
+//--- live chart screenshots (v1.40's price-level anti-collision was
+//--- working correctly the whole time - this was a placement-RULE issue,
+//--- not a collision-detection bug).
 //--- 1.41: per direct request, entry arrows and exit dots made smaller
 //--- (arrow width 2->1, dot width 3->2) - OBJ_ARROW_UP/DOWN were already
 //--- solid filled triangles, not outlines, so "solid colour" needed no
@@ -1681,22 +1691,30 @@ void ComputeStochSignals(const bool backfill)
                datetime t = r[i].time;
                string exId = g_sig + "exit_" + IntegerToString((long)t);
                bool wasLong = prevPosDir > 0;
+               //--- 1.42: per direct request, an exit dot now sits on the SAME
+               //--- side as the direction it's closing - EXIT-LONG (closing a
+               //--- position that was opened by a BUY arrow, which sits BELOW)
+               //--- now also draws BELOW; EXIT-SHORT (closing a SELL arrow,
+               //--- which sits ABOVE) now also draws ABOVE. Previously this was
+               //--- the opposite (EXIT-LONG above, EXIT-SHORT below), which put
+               //--- it on the same side as the OPPOSITE-direction entry arrow -
+               //--- exactly the overlap pattern reported from a live chart.
+               bool dotAbove = !wasLong;
                //--- if a NEW entry arrow ALSO landed on this exact bar and on
-               //--- the SAME side (e.g. a sell arrow above + an exit-long dot
-               //--- that would also sit above), stack the dot further out
-               //--- starting from the arrow's own price instead of the plain
-               //--- candle-based offset, so the two never overlap
+               //--- the SAME side, stack the dot further out starting from the
+               //--- arrow's own price instead of the plain candle-based offset,
+               //--- so the two never overlap
                double dotPrice;
-               if(entryDrawnThisBar && entryDrawnAbove == wasLong)
-                  dotPrice = wasLong ? entryDrawnPrice + offExit : entryDrawnPrice - offExit;
+               if(entryDrawnThisBar && entryDrawnAbove == dotAbove)
+                  dotPrice = dotAbove ? entryDrawnPrice + offExit : entryDrawnPrice - offExit;
                else
-                  dotPrice = wasLong ? r[i].high + offExit : r[i].low - offExit;
+                  dotPrice = dotAbove ? r[i].high + offExit : r[i].low - offExit;
                //--- 1.40: general anti-collision (covers the case above too, plus
-               //--- any other marker combination/opposite-side case/different-bar
-               //--- case the same-bar stacking above doesn't reach) - see
-               //--- NudgeAwayFromLastMarker()'s own header
+               //--- any other marker combination/different-bar case the same-bar
+               //--- stacking above doesn't reach) - see NudgeAwayFromLastMarker()'s
+               //--- own header
                double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-               dotPrice = NudgeAwayFromLastMarker(dotPrice, t, wasLong,
+               dotPrice = NudgeAwayFromLastMarker(dotPrice, t, dotAbove,
                                                    lastMarkerPrice, lastMarkerTime, minGapExit);
                lastMarkerPrice = dotPrice; lastMarkerTime = t;
                DrawSigDot(exId, t, dotPrice, wasLong);
@@ -2033,7 +2051,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.41 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.42 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
