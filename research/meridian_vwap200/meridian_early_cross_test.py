@@ -39,7 +39,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "vwap_open"))
 from vwap_open_scenarios_test import ema, wilder_atr, session_vwap
 
 TIME_CAP_BARS = 200
-DATA_DIR = "/tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data"
+#--- committed into the repo (research/data/) after a container restart twice
+#--- wiped the old /tmp scratchpad copy - see the "Commit GOLD M5/M15 market
+#--- data into the repo" commit. Relative to this file so it works from any
+#--- checkout path, not just this one container's.
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 def load_m15(symbol):
