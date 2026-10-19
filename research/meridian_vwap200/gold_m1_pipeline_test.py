@@ -41,8 +41,11 @@ RR = 2.0
 ZONE_LOW, ZONE_HIGH = 20.0, 80.0
 EMA_FAST, EMA_SLOW = 21, 50
 TIME_CAP_BARS = 300
-M1_WINDOW_START = pd.Timestamp("2014-06-13")
-M1_WINDOW_END   = pd.Timestamp("2021-12-31 18:50:00")   # last bar before the ~4yr data gap
+#--- per direct request, re-pointed at the RECENT continuous chunk instead of
+#--- the older 2014-2021 one - closer to current market conditions, and the
+#--- one actually relevant to live trading now
+M1_WINDOW_START = pd.Timestamp("2025-11-19")
+M1_WINDOW_END   = pd.Timestamp("2026-09-25 20:52:00")
 
 
 def load_m1_gold():
@@ -196,8 +199,7 @@ if __name__ == "__main__":
     df, point = load_m1_gold()
     n = len(df)
     full_days = (df["time"].iloc[-1] - df["time"].iloc[0]).days
-    print(f"\n{'#'*100}\nGOLD M1 pipeline - continuous window only (2014-06-13 .. 2021-12-31, "
-          f"the ~4yr 2022-2024 M1 gap excluded)\n{'#'*100}")
+    print(f"\n{'#'*100}\nGOLD M1 pipeline - RECENT continuous window (2025-11-19 onward)\n{'#'*100}")
     print(f"  {df['time'].iloc[0]} .. {df['time'].iloc[-1]} ({n} bars, point={point})")
 
     print(f"\n  --- (1) baseline zone-cross stochastic entry, on M1 ---")
@@ -209,5 +211,5 @@ if __name__ == "__main__":
     report("GOLD M1 - pure EMA21/50 crossover", trades2, full_days, split_dir=True)
 
     print(f"\n\n  Honest K=1 per construction on M1 (first time tested on this timeframe).")
-    print(f"  DATA GOTCHA: GOLD M1 only continuous 2014-06-13..2021-12-31 - a ~4yr gap")
-    print(f"  (2022-2024) exists before a second chunk starting 2025-11-19, NOT used here.")
+    print(f"  Using the RECENT continuous chunk (2025-11-19 onward) per direct request -")
+    print(f"  not the older 2014-2021 data. GOLD M1 has a ~4yr gap (2022-2024) between them.")
