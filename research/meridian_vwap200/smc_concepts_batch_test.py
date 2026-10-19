@@ -114,6 +114,11 @@ def signals_fvg_fill(o, h, l, c, n):
         elif l[i - 2] > h[i]:
             gaps.append([h[i], l[i - 2], -1, i, False])
 
+        #--- prune used/stale gaps so this list (and the per-bar loop below)
+        #--- stays bounded over a 290k-bar history - unbounded growth here is
+        #--- what stalled the first run on BTCUSD
+        gaps[:] = [g for g in gaps if not g[4] and i - g[3] <= SR_LEVEL_MAX_AGE_BARS]
+
         for g in gaps:
             zlo, zhi, gdir, created, used = g
             if used or i <= created:
@@ -163,6 +168,9 @@ def signals_order_block(o, h, l, c, n, pivot_highs, pivot_lows):
                 blocks.append([l[ob], h[ob], -1, i, False])
             last_piv_low = None
 
+        #--- same pruning as FVG_FILL above
+        blocks[:] = [b for b in blocks if not b[4] and i - b[3] <= SR_LEVEL_MAX_AGE_BARS]
+
         for b in blocks:
             blo, bhi, bdir, created, used = b
             if used or i <= created:
@@ -195,10 +203,21 @@ def signals_fib_zone(o, h, l, c, n, pivot_highs, pivot_lows):
                 legs.append([zlo, zhi, -1, idx, False])
         prev = (idx, kind, price)
 
+    #--- incremental active-list walk, not a full rescan of `legs` every bar -
+    #--- the original full-rescan version was O(n * total_legs), which stalled
+    #--- the first run on BTCUSD. `legs` is already sorted by created_at
+    #--- (built in pivot/time order above), so a single pointer suffices.
+    active = []
+    next_leg_ptr = 0
     for i in range(n):
-        for lg in legs:
+        while next_leg_ptr < len(legs) and legs[next_leg_ptr][3] <= i:
+            active.append(legs[next_leg_ptr])
+            next_leg_ptr += 1
+        active[:] = [lg for lg in active if not lg[4] and i - lg[3] <= SR_LEVEL_MAX_AGE_BARS]
+
+        for lg in active:
             zlo, zhi, ldir, created, used = lg
-            if used or i <= created:
+            if used:
                 continue
             touched = l[i] <= zhi and h[i] >= zlo
             if not touched:
