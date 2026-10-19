@@ -19,7 +19,24 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.48"
+#property version   "1.49"
+//--- 1.49: NEW Trend-Aligned Stochastic overlay, per direct request - a
+//--- fourth distinct signal overlay (alongside the EMA21/50 crossover and
+//--- candlestick engulfing overlays from v1.47, each with their own colors
+//--- and exit logic, as asked for explicitly). Own full settings
+//--- (InpTSKPeriod/Slowing/DPeriod/StochMethod, InpTSEmaFast/Slow/Method),
+//--- so it can be tuned independently from the baseline stochastic overlay.
+//--- Rule: a %K/%D cross (ANY level, no zone restriction) only fires when
+//--- it matches the trend the 2-EMA alignment already shows - BUY only
+//--- when close>EMA_fast>EMA_slow and the cross is up; SELL only when
+//--- close<EMA_fast<EMA_slow and the cross is down (exact mirror, per
+//--- direct request - "obviously vice versa for the sell"). A disagreeing
+//--- cross is simply ignored, never flipped into an opposite signal.
+//--- UNVALIDATED - the two closest relatives (price-vs-EMA21 alone, and
+//--- EMA21-reject alone) were tested as FILTERS on the zone-cross
+//--- stochastic earlier tonight and both failed (%PF=0.530 and 0.559
+//--- vs baseline 0.701) - this is a different combination (2-EMA
+//--- alignment, ANY cross, no zone), not yet separately checked.
 //--- 1.48: THREE new EXPERIMENTAL/UNVALIDATED marker-only overlays, per
 //--- direct request - "built the signals as i have described all of them
 //--- i will check them on the chart". None of these passed tonight's
@@ -585,6 +602,34 @@ input color  InpSnapBuyCol          = clrSpringGreen;
 input color  InpSnapSellCol         = clrOrchid;
 input int    InpExpMarkerSize       = 2;
 
+input group "=== Trend-Aligned Stochastic overlay - own settings, separate from the baseline stochastic overlay above ==="
+input bool   InpShowTrendStochSignals = true;   // per direct request: stochastic cross only fires in the
+                                                 // direction the trend is already aligned in - no opposite
+                                                 // signals. NOT the same construction as anything tested
+                                                 // tonight (closest relatives - price-vs-EMA21 alone and
+                                                 // EMA21-reject alone - were tested as FILTERS on the
+                                                 // zone-cross stochastic and both failed; this is a
+                                                 // different combination: 2-EMA alignment, ANY stoch cross,
+                                                 // no zone restriction - UNVALIDATED until checked)
+input int    InpTSKPeriod          = 21;
+input int    InpTSSlowing          = 5;
+input int    InpTSDPeriod          = 5;
+input ENUM_SIG_STOCH_METHOD InpTSStochMethod = SIG_STOCH_SMA;
+input int    InpTSEmaFast          = 21;
+input int    InpTSEmaSlow          = 50;
+input ENUM_MA_METHOD InpTSEmaMethod = MODE_EMA;
+input int    InpTSSwingBars        = 10;
+input double InpTSRR               = 2.0;
+input color  InpTSBuyCol           = clrLime;
+input color  InpTSSellCol          = clrRed;
+input color  InpTSStopCol          = C'255,80,0';
+input color  InpTSTPCol            = clrYellow;
+input double InpTSArrowOffsetATR   = 1.0;
+input double InpTSExitOffsetATR    = 1.2;
+input int    InpTSArrowSize        = 1;
+input int    InpTSDotSize          = 2;
+input int    InpTSLineBars         = 8;
+
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
@@ -679,6 +724,17 @@ string   g_snp = "TPSNP_";   // fresh extension from EMA21, betting on snap-back
 datetime g_snpLastProcessedBar = 0;
 double   g_snpLastMarkerPrice = 0.0;
 datetime g_snpLastMarkerTime  = 0;
+
+//--- v1.49: Trend-Aligned Stochastic overlay - own namespace, own posDir
+//--- state machine (same pattern as the baseline stochastic/EMA-cross
+//--- overlays: one open signal at a time per direction, exit dot on the
+//--- next qualifying opposite signal).
+string   g_tsx = "TPTSX_";
+int      g_tsxLastDir = 0, g_tsxPosDir = 0;
+string   g_tsxLastArr = "", g_tsxLastSl = "", g_tsxLastTp = "";
+datetime g_tsxLastProcessedBar = 0;
+double   g_tsxLastMarkerPrice = 0.0;
+datetime g_tsxLastMarkerTime  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1511,6 +1567,42 @@ void DrawCandleArrow(const string nm, const datetime t, const double price, cons
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Engulfing-at-swing-low BUY (validated GOLD only, p=0.0010 - Silver/BTC NOT real)"
                                                    : "Engulfing-at-swing-high SELL (validated GOLD only, p=0.0010 - Silver/BTC NOT real)");
+  }
+
+//+------------------------------------------------------------------+
+//| v1.49: Trend-Aligned Stochastic overlay's own entry arrow / exit    |
+//| dot. Buy only fires when close>EMA_fast>EMA_slow (uptrend aligned); |
+//| sell only fires when close<EMA_fast<EMA_slow (downtrend aligned) -  |
+//| mirror conditions, per direct request ("obviously vice versa for    |
+//| the sell"). UNVALIDATED - see the input group's own comment.        |
+//+------------------------------------------------------------------+
+void DrawTrendStochArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpTSBuyCol : InpTSSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpTSArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Trend-aligned stoch BUY (close>EMA_fast>EMA_slow, UNVALIDATED, visual only)"
+                                                   : "Trend-aligned stoch SELL (close<EMA_fast<EMA_slow, UNVALIDATED, visual only)");
+  }
+
+void DrawTrendStochDot(const string nm, const datetime t, const double price, const bool wasLong)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpTSBuyCol : InpTSSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpTSDotSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "Trend-aligned stoch EXIT-LONG (opposite trend-aligned cross)"
+                                                     : "Trend-aligned stoch EXIT-SHORT (opposite trend-aligned cross)");
   }
 
 //+------------------------------------------------------------------+
@@ -2685,6 +2777,165 @@ void ResyncSnapbackSignals()
   }
 
 //+------------------------------------------------------------------+
+//| v1.49: Trend-Aligned Stochastic overlay. Entry: a %K/%D cross (ANY  |
+//| level, no zone restriction) that matches the trend already aligned  |
+//| via the 2-EMA check - BUY only when close>EMA_fast>EMA_slow and the |
+//| cross is up; SELL only when close<EMA_fast<EMA_slow and the cross   |
+//| is down (mirror, per direct request). A disagreeing cross (e.g. a   |
+//| down-cross while the trend is aligned bullish) is simply ignored -  |
+//| never produces an opposite signal. Exit: the next qualifying        |
+//| opposite-direction signal (same posDir state-machine pattern as the |
+//| EMA-cross overlay). UNVALIDATED - see the input group's own         |
+//| comment; closest relatives (price-vs-EMA21 alone, EMA21-reject      |
+//| alone) were tested as filters on the zone-cross stochastic tonight  |
+//| and both failed - this is a different combination, not yet checked. |
+//+------------------------------------------------------------------+
+void ComputeTrendStochSignals(const bool backfill)
+  {
+   int minBars = MathMax(InpTSKPeriod + InpTSSlowing + InpTSDPeriod, InpTSEmaSlow) + InpTSSwingBars + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double k[], d[];
+   SigClassicStoch(h, l, c, n, InpTSKPeriod, InpTSSlowing, InpTSDPeriod, k, d, InpTSStochMethod);
+   double eFast[], eSlow[];
+   SigEMA(c, n, InpTSEmaFast, eFast);
+   SigEMA(c, n, InpTSEmaSlow, eSlow);
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_tsxLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   int lastDir, posDir;
+   string lastArr, lastSl, lastTp;
+   double lastMarkerPrice;
+   datetime lastMarkerTime;
+   if(backfill)
+     {
+      lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+      lastMarkerPrice = 0.0; lastMarkerTime = 0;
+     }
+   else
+     {
+      lastDir = g_tsxLastDir; posDir = g_tsxPosDir;
+      lastArr = g_tsxLastArr; lastSl = g_tsxLastSl; lastTp = g_tsxLastTp;
+      lastMarkerPrice = g_tsxLastMarkerPrice; lastMarkerTime = g_tsxLastMarkerTime;
+     }
+
+   for(int i = from; i < n; i++)
+     {
+      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA ||
+         eFast[i] == SIG_NA || eSlow[i] == SIG_NA) continue;
+      bool draw = (i >= drawFrom);
+      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpTSArrowOffsetATR * atr[i];
+      double offExit   = (atr[i] == SIG_NA) ? 0.0 : InpTSExitOffsetATR  * atr[i];
+
+      bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
+      bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
+      bool trendUp   = c[i] > eFast[i] && eFast[i] > eSlow[i];
+      bool trendDown = c[i] < eFast[i] && eFast[i] < eSlow[i];
+
+      int dir = 0;
+      if(crossUp && trendUp) dir = 1;
+      else if(crossDown && trendDown) dir = -1;
+      if(dir == 0) continue;
+
+      int prevPosDir = posDir;
+
+      //--- EXIT: the next qualifying opposite-direction signal closes
+      //--- whatever the ENTRY block below opened
+      if(prevPosDir != 0 && dir != prevPosDir)
+        {
+         if(draw)
+           {
+            datetime t = r[i].time;
+            string exId = g_tsx + "exit_" + IntegerToString((long)t);
+            bool wasLong = prevPosDir > 0;
+            double dotPrice = wasLong ? h[i] + offExit : l[i] - offExit;
+            double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+            dotPrice = NudgeAwayFromLastMarker(dotPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
+            lastMarkerPrice = dotPrice; lastMarkerTime = t;
+            DrawTrendStochDot(exId, t, dotPrice, wasLong);
+           }
+         posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+        }
+
+      //--- ENTRY: only while flat
+      if(dir != 0 && posDir == 0)
+        {
+         double swing = (dir > 0) ? l[i] : h[i];
+         for(int j = i - InpTSSwingBars + 1; j < i; j++)
+            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+         double risk = dir * (c[i] - swing);
+         if(risk > 0.0)
+           {
+            posDir = dir;
+            lastDir = dir;
+            if(draw)
+              {
+               double stop = swing;
+               double tp   = c[i] + dir * InpTSRR * risk;
+               datetime t = r[i].time;
+               string id = IntegerToString((long)t);
+               bool isBuy = dir > 0;
+               lastArr = g_tsx + "arr_" + id;
+               lastSl  = g_tsx + "sl_" + id;
+               lastTp  = g_tsx + "tp_" + id;
+               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+               entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+               lastMarkerPrice = entryPrice; lastMarkerTime = t;
+               DrawTrendStochArrow(lastArr, t, entryPrice, isBuy);
+               DrawSigLevel(lastSl, t, t + InpTSLineBars * perSec, stop, InpTSStopCol, STYLE_SOLID,
+                            "Trend-stoch SL: recent " + IntegerToString(InpTSSwingBars) + "-bar swing (UNVALIDATED)");
+               DrawSigLevel(lastTp, t, t + (InpTSLineBars + 2) * perSec, tp, InpTSTPCol, STYLE_DASH,
+                            "Trend-stoch TP: 1:" + DoubleToString(InpTSRR, 1) + " R:R example (UNVALIDATED)");
+              }
+           }
+        }
+     }
+
+   g_tsxLastDir = lastDir; g_tsxPosDir = posDir;
+   g_tsxLastArr = lastArr; g_tsxLastSl = lastSl; g_tsxLastTp = lastTp;
+   g_tsxLastProcessedBar = r[n - 1].time;
+   g_tsxLastMarkerPrice = lastMarkerPrice; g_tsxLastMarkerTime = lastMarkerTime;
+  }
+
+void PurgeOldTrendStochObjects()
+  {
+   PurgeOldPrefixedObjects(g_tsx);
+  }
+
+void ResyncTrendStochSignals()
+  {
+   ObjectsDeleteAll(0, g_tsx);
+   g_tsxLastDir = 0; g_tsxPosDir = 0;
+   g_tsxLastArr = ""; g_tsxLastSl = ""; g_tsxLastTp = "";
+   g_tsxLastProcessedBar = 0;
+   g_tsxLastMarkerPrice = 0.0; g_tsxLastMarkerTime = 0;
+   if(InpShowTrendStochSignals) ComputeTrendStochSignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- handles are needed for the cross-proximity alert even when the lines
@@ -2937,14 +3188,14 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.48 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s",
+   PrintFormat("TradePanel v1.49 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
                InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false",
                InpShowEmaCrossSignals ? "true" : "false", InpShowCandleSignals ? "true" : "false",
                InpShowStackSignals ? "true" : "false", InpShowRejectSignals ? "true" : "false",
-               InpShowSnapbackSignals ? "true" : "false");
+               InpShowSnapbackSignals ? "true" : "false", InpShowTrendStochSignals ? "true" : "false");
 
    ApplyTheme();
    SetupMAs();
@@ -2964,6 +3215,9 @@ int OnInit()
    ResyncStackSignals();
    ResyncRejectSignals();
    ResyncSnapbackSignals();
+   //--- v1.49: Trend-Aligned Stochastic overlay - own namespace,
+   //--- reversible via InpShowTrendStochSignals alone
+   ResyncTrendStochSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -2985,6 +3239,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_stk);
    ObjectsDeleteAll(0, g_rej);
    ObjectsDeleteAll(0, g_snp);
+   ObjectsDeleteAll(0, g_tsx);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -3055,6 +3310,11 @@ void CheckNewBar()
      {
       ComputeSnapbackSignals(false);
       PurgeOldPrefixedObjects(g_snp);
+     }
+   if(InpShowTrendStochSignals)
+     {
+      ComputeTrendStochSignals(false);
+      PurgeOldTrendStochObjects();
      }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
