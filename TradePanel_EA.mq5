@@ -19,7 +19,15 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.38"
+#property version   "1.39"
+//--- 1.39: InpSigDrawBars (1.38) replaced with InpSigDrawDays (default 7),
+//--- per direct request - "limit it to 1 week". A raw bar count means a
+//--- different real-world window on every timeframe (2000 bars was ~20
+//--- days on M15 but only ~7 on M5); days converted to bars against
+//--- PERIOD_CURRENT fixes that. Purging already ran every new bar (1.38),
+//--- which is tighter than a once-a-day sweep - a day's backlog never
+//--- gets the chance to build up before being dropped, so no separate
+//--- "delete the last day" step was needed, just the unit change.
 //--- 1.38: CHART HANG - user reported charts freezing after running a
 //--- while. Live per-tick/per-bar path was checked and IS bounded
 //--- (minBars+500 window, new-bar guard). The real problem was the
@@ -354,8 +362,13 @@ input bool   InpSigUseInterpCross  = true;    // TRUE (v1.37, NEW): qualify usin
 input int    InpSigSwingBars       = 10;      // "recent swing" = plain N-bar lowest low / highest high
                                                // for the stop, as retail articles typically describe
 input double InpSigRR              = 2.0;     // R:R convention - a representative example, not validated
-input int    InpSigDrawBars        = 2000;    // v1.38: only the last N bars of signals are drawn/logged/kept
-                                               // on the chart (older ones purged each new bar) - see header
+input int    InpSigDrawDays         = 7;      // v1.39: only signals from the last N CALENDAR DAYS are
+                                               // drawn/logged/kept on the chart - converted to a bar count
+                                               // internally per the chart's own timeframe (so "7" means the
+                                               // same real time on M5 or M15, unlike a raw bar count), and
+                                               // purged continuously every new bar (not just once a day -
+                                               // tighter than a daily sweep, never lets a day's backlog
+                                               // build up first) - see 1.39 header note
 input int    InpSigLineBars        = 8;      // stop-line length in bars; the TP line runs 2 bars longer
                                                // so the two levels stay readable when they sit close together
 input color  InpSigBuyCol          = C'0,150,255';
@@ -1353,12 +1366,17 @@ void ComputeStochSignals(const bool backfill)
          from = p;
         }
      }
-   //--- 1.38: backfill still WALKS the whole history (cheap, O(n) array
-   //--- math - keeps lastDir/posDir reconstructed correctly), but only
-   //--- DRAWS (and logs) the last InpSigDrawBars bars. Drawing everything
-   //--- put tens of thousands of permanent objects on the chart, plus one
-   //--- log line per historical cross - see the 1.38 header note.
-   int drawFrom = backfill ? MathMax(from, n - InpSigDrawBars) : from;
+   //--- 1.38/1.39: backfill still WALKS the whole history (cheap, O(n)
+   //--- array math - keeps lastDir/posDir reconstructed correctly), but
+   //--- only DRAWS (and logs) the last InpSigDrawDays worth of bars.
+   //--- Drawing everything put tens of thousands of permanent objects on
+   //--- the chart, plus one log line per historical cross - see the 1.38
+   //--- header note. Days converted to bars per THIS chart's own
+   //--- PERIOD_CURRENT, so the real time window is the same across
+   //--- timeframes (a raw bar count was NOT - 2000 bars is ~20 days on
+   //--- M15 but only ~7 on M5).
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
 
    int lastDir, posDir;
    string lastArr, lastSl, lastTp;
@@ -1638,8 +1656,10 @@ void ComputeStochSignals(const bool backfill)
 //+------------------------------------------------------------------+
 void PurgeOldSigObjects()
   {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1)
-                     - (datetime)((long)InpSigDrawBars * PeriodSeconds(PERIOD_CURRENT));
+   //--- 1.39: cutoff is now a straight calendar-time window (InpSigDrawDays),
+   //--- not bars*periodSeconds - simpler and timeframe-independent by
+   //--- construction, no conversion needed here.
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
    for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
      {
       string nm = ObjectName(0, i, 0, -1);
@@ -1924,7 +1944,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.38 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.39 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
