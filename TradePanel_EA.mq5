@@ -19,7 +19,34 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.52"
+#property version   "1.53"
+//--- 1.53: fixes from an Opus hang-risk audit (requested after all the
+//--- signal overlays were added, per direct request to "get opus to
+//--- check these, i dont want the chart hanging"). Verdict: no active
+//--- hang bug found, but worth being precise about the numbers - M1
+//--- with every overlay on at default settings holds ~5,300 live chart
+//--- objects (same order of magnitude as the ~7,500 that caused the
+//--- ORIGINAL documented hang pre-1.38; M5/M15 are comfortable at
+//--- ~1,050/~340). The EMA21-reject marker alone accounts for ~1,900 of
+//--- that on M1 (fires on ~28% of M1 candles) - turn it off or lower
+//--- InpSigDrawDays if running M1 with everything on.
+//--- Two real (bounded, non-hanging) bugs fixed:
+//--- (a) CheckNewBar() now refuses to treat iTime()==0 (a brief
+//--- reconnect/history-sync hiccup) as a new bar - previously this could
+//--- reset g_lastBarTime and make every live Compute*Signals(false) call
+//--- replay its full ~500-bar window on the next tick, re-firing every
+//--- alert already seen and potentially corrupting open-position state.
+//--- (b) AddNativeIndicatorOnce()/RemoveNativeIndicatorByName() replace
+//--- the original handle-matching duplicate-guard for the native MA/VWAP
+//--- indicators (1.50) - the old approach could match the WRONG
+//--- indicator instance (ChartIndicatorGet(name) only ever returns the
+//--- FIRST indicator with a given short name), e.g. after manually
+//--- recoloring an MA or SessionVWAP from the chart's own indicator
+//--- properties, which risked a duplicate MA/VWAP accumulating on every
+//--- timeframe switch/reattach. Now remembers the exact chart-indicator
+//--- name this EA itself created and only ever looks for that.
+//--- Also fixed: a copy/paste duplicate "closeNLbl" label creation that
+//--- quietly added an extra 18px gap to the panel's height.
 //--- 1.52: %K/%D cross-PROXIMITY push alert, per direct request ("send
 //--- the notification before they cross") - new CheckStochCrossProximity(),
 //--- same reset-on-divergence/cooldown pattern as the existing 21/50 MA
@@ -712,6 +739,14 @@ CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
 int g_vwapHandle = INVALID_HANDLE;   // v1.49: SessionVWAP.mq5 custom indicator handle
+//--- v1.52: remembered chart-indicator short names, one per native
+//--- indicator this EA ever added - see AddNativeIndicatorOnce()'s own
+//--- header for why matching by remembered NAME replaced the original
+//--- handle-matching approach (Opus audit: ChartIndicatorGet(name)
+//--- returns only the FIRST indicator with that name, so a handle-match
+//--- loop could silently match the wrong instance, or miss ours entirely
+//--- after a manual recolor elsewhere created a second same-named one).
+string g_maName21 = "", g_maName50 = "", g_maName200 = "", g_vwapName = "";
 int g_atrHandleCross = INVALID_HANDLE;
 bool     g_crossAlerted = false;     // true while the current approach has already fired its one
                                       // alert - cleared once the gap widens back out or the cross
@@ -3109,52 +3144,63 @@ void SetupMAs()
    //--- manually recolored from the chart's indicator list after attach.
    //--- VWAP stays hand-drawn below (no native MT5 VWAP indicator exists).
    //--- Guarded against duplicate adds (e.g. OnInit re-running on a
-   //--- timeframe switch without a full detach) by checking for an
-   //--- already-added indicator at the same handle first.
+   //--- timeframe switch without a full detach) via AddNativeIndicatorOnce()
+   //--- below - see its own header for why this replaced the original
+   //--- handle-matching approach (Opus audit finding, v1.52).
    if(InpShowMAs)
      {
-      if(g_maHandle21 != INVALID_HANDLE && !NativeIndicatorAlreadyAdded(g_maHandle21))
-         ChartIndicatorAdd(0, 0, g_maHandle21);
-      if(g_maHandle50 != INVALID_HANDLE && !NativeIndicatorAlreadyAdded(g_maHandle50))
-         ChartIndicatorAdd(0, 0, g_maHandle50);
-      if(g_maHandle200 != INVALID_HANDLE && !NativeIndicatorAlreadyAdded(g_maHandle200))
-         ChartIndicatorAdd(0, 0, g_maHandle200);
+      AddNativeIndicatorOnce(g_maHandle21,  g_maName21);
+      AddNativeIndicatorOnce(g_maHandle50,  g_maName50);
+      AddNativeIndicatorOnce(g_maHandle200, g_maName200);
      }
   }
 
 //+------------------------------------------------------------------+
-//| v1.49: true if a chart indicator built from this exact handle is   |
-//| already plotted on subwindow 0 - ChartIndicatorAdd has no built-in  |
-//| "don't duplicate" option, and SetupMAs() can run again on a         |
-//| timeframe switch without the chart ever fully detaching.            |
+//| v1.52: adds a native chart indicator exactly once, remembering the  |
+//| chart's own short name for it (rememberedName, passed by reference) |
+//| rather than re-matching by handle on every call. REPLACES the       |
+//| original NativeIndicatorAlreadyAdded()/ChartIndicatorGet(name)==     |
+//| handle approach, which an Opus audit found could match the WRONG    |
+//| indicator (ChartIndicatorGet returns only the FIRST indicator with   |
+//| a given short name) if a second same-named instance ever appeared   |
+//| on the chart - e.g. from manually recoloring an MA or SessionVWAP   |
+//| from the chart's own indicator properties, which creates a genuinely|
+//| separate instance MT5 may still report under the same short name.   |
+//| Remembering OUR OWN exact name the moment we add it sidesteps that  |
+//| ambiguity entirely - we only ever look for the one we created.      |
 //+------------------------------------------------------------------+
-bool NativeIndicatorAlreadyAdded(const int handle)
+bool AddNativeIndicatorOnce(const int handle, string &rememberedName)
   {
-   for(int i = 0; i < ChartIndicatorsTotal(0, 0); i++)
+   if(handle == INVALID_HANDLE) return false;
+   if(rememberedName != "")
      {
-      string nm = ChartIndicatorName(0, 0, i);
-      if(ChartIndicatorGet(0, 0, nm) == handle) return true;
+      for(int i = 0; i < ChartIndicatorsTotal(0, 0); i++)
+         if(ChartIndicatorName(0, 0, i) == rememberedName) return true;   // still present, nothing to do
+      rememberedName = "";   // it's gone (manually removed?) - fall through and re-add
      }
-   return false;
+   if(!ChartIndicatorAdd(0, 0, handle)) return false;
+   rememberedName = ChartIndicatorName(0, 0, ChartIndicatorsTotal(0, 0) - 1);
+   return true;
   }
 
 //+------------------------------------------------------------------+
-//| v1.49: counterpart to NativeIndicatorAlreadyAdded() - find the      |
-//| chart indicator built from this handle (if any) and remove it, so   |
-//| OnDeinit() doesn't leave MA/VWAP lines behind after the EA detaches. |
+//| v1.52: counterpart to AddNativeIndicatorOnce() - remove the          |
+//| remembered indicator (if still present) and clear the name, so       |
+//| OnDeinit() doesn't leave MA/VWAP lines behind after detach, and a     |
+//| later re-add starts clean.                                           |
 //+------------------------------------------------------------------+
-void RemoveNativeIndicatorIfPresent(const int handle)
+void RemoveNativeIndicatorByName(string &rememberedName)
   {
-   if(handle == INVALID_HANDLE) return;
+   if(rememberedName == "") return;
    for(int i = ChartIndicatorsTotal(0, 0) - 1; i >= 0; i--)
      {
-      string nm = ChartIndicatorName(0, 0, i);
-      if(ChartIndicatorGet(0, 0, nm) == handle)
+      if(ChartIndicatorName(0, 0, i) == rememberedName)
         {
-         ChartIndicatorDelete(0, 0, nm);
+         ChartIndicatorDelete(0, 0, rememberedName);
          break;
         }
      }
+   rememberedName = "";
   }
 
 //+------------------------------------------------------------------+
@@ -3177,8 +3223,7 @@ void SetupVWAP()
             "iCustom() path in SetupVWAP() to match) for the VWAP line to show.");
       return;
      }
-   if(!NativeIndicatorAlreadyAdded(g_vwapHandle))
-      ChartIndicatorAdd(0, 0, g_vwapHandle);
+   AddNativeIndicatorOnce(g_vwapHandle, g_vwapName);
   }
 
 //+------------------------------------------------------------------+
@@ -3333,9 +3378,12 @@ void BuildPanel()
    //--- equal-size trades from one PLACE xN batch, "close N%" can only
    //--- ever approximate a whole number of positions anyway, so exact
    //--- count is both simpler and more precise.
+   //--- v1.52: this used to create "closeNLbl" twice in a row (copy/paste
+   //--- slip) - the second call silently re-created/moved the same-named
+   //--- object and added a spurious extra 18px gap, which made the panel
+   //--- taller than intended and doubled this one label's effective drag
+   //--- sensitivity if it was ever dragged by (Opus audit finding).
    y += 34;
-   MkLabel("closeNLbl", 12, y, "Close N oldest position(s):", InpTextColor, 9);
-   y += 18;
    MkLabel("closeNLbl", 12, y, "Close N oldest position(s):", InpTextColor, 9);
    y += 18;
      {
@@ -3420,7 +3468,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.52 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.53 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
@@ -3477,10 +3525,10 @@ void OnDeinit(const int reason)
    //--- SetupMAs()/SetupVWAP() - IndicatorRelease() alone frees the handle
    //--- but does NOT remove an indicator ChartIndicatorAdd() already placed
    //--- on the chart, which would otherwise be left behind after removal.
-   RemoveNativeIndicatorIfPresent(g_maHandle21);
-   RemoveNativeIndicatorIfPresent(g_maHandle50);
-   RemoveNativeIndicatorIfPresent(g_maHandle200);
-   RemoveNativeIndicatorIfPresent(g_vwapHandle);
+   RemoveNativeIndicatorByName(g_maName21);
+   RemoveNativeIndicatorByName(g_maName50);
+   RemoveNativeIndicatorByName(g_maName200);
+   RemoveNativeIndicatorByName(g_vwapName);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -3520,6 +3568,18 @@ bool AnyEditFocused()
 void CheckNewBar()
   {
    datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
+   //--- v1.52: iTime() briefly returning 0 (a reconnect/history-sync
+   //--- hiccup) must NEVER be treated as a new bar - g_lastBarTime would
+   //--- otherwise get reset to 0, and the VERY NEXT tick's real t0 would
+   //--- then look "new" relative to that reset, firing every live
+   //--- Compute*Signals(false) call below with a g_xLastProcessedBar that
+   //--- no longer matches anything in the current window - each one's own
+   //--- fallback then replays its FULL ~500-bar window, re-printing every
+   //--- signal in it and re-firing every alert for signals already seen
+   //--- (Opus audit finding - bounded, never hangs, but real alert/log
+   //--- spam and can corrupt the open-position state via the "repeat
+   //--- same-direction cross replaces the previous signal" delete logic).
+   if(t0 == 0) return;
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
    UpdateOverlayLines();
