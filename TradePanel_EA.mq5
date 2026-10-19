@@ -19,7 +19,31 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.58"
+#property version   "2.00"
+//--- 2.00: MAJOR SIMPLIFICATION, per direct request ("remove the stochastic
+//--- and engulfing and other completely from tradepanel ea, lets only keep
+//--- the buy and sell signals with the crossing of the moving average...").
+//--- Completely REMOVED (not just disabled) every signal overlay except the
+//--- EMA21/50 crossover: the baseline stochastic overlay, the Trend-Aligned
+//--- Stochastic overlay, the candlestick engulfing overlay, and the three
+//--- EXPERIMENTAL marker overlays (stack/reject/snapback) plus the separate
+//--- midline-cross overlay. That means every function, input group and
+//--- global-variable block tied to any of those is gone from the file, not
+//--- left in place and switched off - 28 functions, 7 input groups, ~15
+//--- global blocks removed in total. The only signal overlay left on the
+//--- chart is now EMA21/50 crossover: entry arrow in the direction of the
+//--- cross, SL line, TP/RR line, and an exit dot on the next opposite cross.
+//--- Added a brand-new "trend weakening" warning marker, per direct request
+//--- ("i want a signal printed when...the 21 and 50 pull closer towards
+//--- each other...of the 21ema start to loose its angle"): while a position
+//--- from an EMA cross is open, the 21/50 gap is tracked bar by bar: if the
+//--- gap stops widening and narrows for InpEmaWeakenConfirmBars (default 2)
+//--- consecutive bars, a gold diamond-dot marker fires once per open run,
+//--- with its own push alert (InpEmaWeakenAlert). This is NOT an exit signal
+//--- - just an early caution that the trend may be losing momentum, printed
+//--- before the actual opposite cross would occur. MA/VWAP display, the
+//--- MA21/50 cross-proximity alert, and the full manual trade panel (buttons,
+//--- lot sizing, SL/TP editing, position management) are all untouched.
 //--- 1.58: REVERTED the v1.49-1.56 native-ChartIndicatorAdd approach for
 //--- MAs/VWAP back to hand-drawn OBJ_TREND segments - per direct request
 //--- ("check the aurelius ea, those moving averages and vwap are built
@@ -575,16 +599,6 @@ input int    InpCrossATRPeriod     = 14;
 input int    InpCrossAlertCooldownMin = 30;  // minimum minutes between alerts for the SAME approach,
                                               // so a gap oscillating right at the threshold doesn't spam
 
-input group "=== Stochastic %K/%D cross-proximity push alert (v1.51, per direct request: warn BEFORE the cross, not after it's already printed) - applies to BOTH the baseline stochastic overlay AND the Trend-Aligned Stochastic overlay ==="
-input bool   InpStochProximityAlert       = true;
-input double InpStochProximityPts         = 3.0;   // "near" threshold, in raw %K/%D points (0-100 scale,
-                                                     // NOT ATR - an oscillator has no price-scale
-                                                     // equivalent) - smaller = later/tighter warning,
-                                                     // larger = earlier but noisier
-input int    InpStochProximityCooldownMin = 10;     // minimum minutes between alerts for the SAME approach,
-                                                     // per overlay, so a gap oscillating near the
-                                                     // threshold doesn't spam
-
 input group "=== Session VWAP (MT5 has no built-in VWAP - hand-drawn, same construction/idiom as Aurelius_EA.mq5) ==="
 input bool   InpShowVWAP           = true;
 input color  InpColVWAP            = C'0,255,255';    // neon aqua - same family as the other EAs' VWAP
@@ -616,116 +630,19 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
                                                // the ONLY thing the light checks (spread only, not a
                                                // trade signal of any kind - this panel has no strategy)
 
-input group "=== Classic/textbook Stochastic signal overlay - UNVALIDATED (VISUAL ONLY - never places, modifies or closes anything) ==="
-input bool   InpShowStochSignals   = false;   // v1.55: default OFF per direct request, after a live chart
-                                               // showed it firing BUY signals straight into a clean
-                                               // downtrend - this overlay has NO trend filter at all (by
-                                               // design, it only ever checks the stochastic zone-cross,
-                                               // never price vs EMA), which is exactly the behavior the
-                                               // new Trend-Aligned Stochastic overlay (InpShowTrendStochSignals)
-                                               // exists to avoid - turn this back on only if you specifically
-                                               // want to compare it against the baseline construction again
-input int    InpSigKPeriod         = 21;      // %K period
-input int    InpSigSlowing         = 5;       // slowing
-input int    InpSigDPeriod         = 5;       // %D period
-enum ENUM_SIG_STOCH_METHOD
-  {
-   SIG_STOCH_SUM      = 0,   // Simple - sum num/den separately over the slowing window then divide
-   SIG_STOCH_SMA      = 1,   // Simple - plain SMA of the raw per-bar %K ("textbook" convention)
-   SIG_STOCH_SMOOTHED = 2    // Smoothed (SMMA) - matches MT5's native Stochastic "Method: Smoothed"
-  };
-input ENUM_SIG_STOCH_METHOD InpSigStochMethod = SIG_STOCH_SMA;
-                                               // v1.34: confirmed via user's native MT5 Stochastic Properties
-                                               // dialog screenshot that their indicator's Method is set to
-                                               // "Smoothed", not "Simple" - neither of the two old SMA-family
-                                               // options (SIG_STOCH_SUM/SIG_STOCH_SMA, formerly toggled by
-                                               // InpSigUseSumSlowing) could ever have matched that, which is
-                                               // exactly why that toggle produced "nothing changed." Smoothed
-                                               // (SMMA) is a different recursive formula, not an SMA variant -
-                                               // this now implements it properly for both the %K slowing step
-                                               // and the %D line (MT5 applies the same Method to both).
-input double InpSigZoneLow         = 20.0;    // oversold zone (buy cross must be below this)
-input double InpSigZoneHigh        = 80.0;    // overbought zone (sell cross must be above this)
-input bool   InpSigUseInterpCross  = true;    // TRUE (v1.37, NEW): qualify using the INTERPOLATED point
-                                               // where the %K/%D line segments actually cross between
-                                               // bar i-1 and bar i (linear interpolation, matching the
-                                               // literal "X" where the two lines visually meet on the
-                                               // chart) - instead of either bar's raw endpoint value. A
-                                               // fast-moving bar can jump from inside the zone to outside
-                                               // it between two closes; the endpoint-only check (FALSE)
-                                               // can miss that cross entirely even though the lines
-                                               // visually crossed well inside the zone. Per direct request
-                                               // after a disputed real chart cross: K[i-1]=24.550 (inside
-                                               // a 30 zone) -> K[i]=36.706 (not) - the interpolated
-                                               // crossing value computed to ~33.3, which does NOT qualify
-                                               // even under a 30 zone (still above it) - this mode gets
-                                               // closer to "where the lines visually meet" than the old
-                                               // endpoint-only check, but it's still a real number from
-                                               // the actual bar data, not a guarantee every visually-close
-                                               // cross will now qualify.
-input int    InpSigSwingBars       = 10;      // "recent swing" = plain N-bar lowest low / highest high
-                                               // for the stop, as retail articles typically describe
-input double InpSigRR              = 2.0;     // R:R convention - a representative example, not validated
-input int    InpSigDrawDays         = 7;      // v1.39: only signals from the last N CALENDAR DAYS are
+input group "=== Shared signal-marker settings (used by the EMA21/50 crossover overlay's markers/alerts) ==="
+input int    InpSigDrawDays         = 7;      // only signals from the last N CALENDAR DAYS are
                                                // drawn/logged/kept on the chart - converted to a bar count
                                                // internally per the chart's own timeframe (so "7" means the
                                                // same real time on M5 or M15, unlike a raw bar count), and
-                                               // purged continuously every new bar (not just once a day -
-                                               // tighter than a daily sweep, never lets a day's backlog
-                                               // build up first) - see 1.39 header note
-input int    InpSigLineBars        = 8;      // stop-line length in bars; the TP line runs 2 bars longer
-                                               // so the two levels stay readable when they sit close together
-input double InpSigMinMarkerGapATR = 1.0;     // v1.40: minimum price gap (in ATR) kept between ANY two
-                                               // signal markers that land close together in time - fixes
-                                               // a reported buy-arrow/exit-dot overlap during a tight,
-                                               // low-range consolidation
-input int    InpSigMarkerLookbackBars = 5;    // v1.40: only markers within this many bars of each other are
+                                               // purged continuously every new bar (not just once a day)
+input double InpSigMinMarkerGapATR = 1.0;     // minimum price gap (in ATR) kept between ANY two signal
+                                               // markers that land close together in time
+input int    InpSigMarkerLookbackBars = 5;    // only markers within this many bars of each other are
                                                // checked for the above - markers far apart in time are left
                                                // alone even if coincidentally close in price
-input int    InpSigArrowSize        = 1;      // v1.44: entry arrow width/size (MT5 OBJPROP_WIDTH, 1-5)
-input int    InpSigDotSize          = 2;      // v1.44: exit dot width/size (MT5 OBJPROP_WIDTH, 1-5)
-input color  InpSigBuyCol          = C'0,150,255';
-input color  InpSigSellCol         = C'255,0,200';
-input color  InpSigStopCol         = clrRed;
-input color  InpSigTPCol           = C'0,255,0';
-input bool   InpSigZoneAlert       = true;    // EARLY heads-up push+sound when %K first enters the
-                                               // oversold/overbought zone - before any cross is confirmed,
-                                               // so before an arrow/signal is printed
-input bool   InpSigCrossAlert      = true;    // push+sound when the actual cross-in-zone signal prints
-input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder
-input double InpSigArrowOffsetATR  = 0.5;     // how far ENTRY arrows sit from the candle, in ATR(14) multiples
-                                               // (0 = touching the candle like before)
-
-input group "=== Classic/textbook Stochastic EXIT signal overlay - UNVALIDATED (own settings, independent of entry) ==="
-input bool   InpShowExitSignals    = true;    // master on/off for exit dots - entry overlay above is unaffected
-input int    InpExitKPeriod        = 21;      // exit stochastic %K period (can differ from the entry one)
-input int    InpExitSlowing        = 5;       // exit stochastic slowing
-input int    InpExitDPeriod        = 5;       // exit stochastic %D period
-input bool   InpSigExitAlert       = true;    // push+sound when an exit dot prints (live only)
-input double InpSigExitOffsetATR   = 1.0;     // how far EXIT dots sit from the candle, in ATR(14) multiples -
-                                               // bigger than the entry offset so the two never overlap
-
-input group "=== Midline-cross signal overlay - EXPERIMENTAL, UNVALIDATED (separate construction, not combined with the entry/exit above) ==="
-input bool   InpShowMidlineSignals = false;   // v1.57: default OFF again, per direct request - the only
-                                               // signals that should show by default are EMA21/50
-                                               // crossover, candlestick engulfing, and Trend-Aligned
-                                               // Stochastic. Backtested full-history %PF~0.65, a net loser
-                                               // - see project research notes.
-input double InpMidlineBandLow     = 20.0;    // v1.46 (was 40.0): %K must be inside this band on the cross
-input double InpMidlineBandHigh    = 80.0;    // bar (was 60.0) - per direct request, widened to cover ANY
-                                               // cross between the 20/80 zone levels, not just a tight band
-                                               // right around 50. The zone-cross entry overlay above already
-                                               // owns crosses AT the 20/80 extremes themselves (k[i]<20 or
-                                               // >80) - this widened band means the midline overlay now
-                                               // picks up essentially every cross that ISN'T one of those,
-                                               // not just ones near the midline.
-input int    InpMidlinePriorLookback = 10;    // %K must have dipped (buy) / risen (sell) to 50 within this
-                                               // many preceding bars - confirms a genuine pullback, not noise
-                                               // sitting near 50
-input color  InpMidlineBuyCol      = clrYellow;
-input color  InpMidlineSellCol     = clrOrange;
-input double InpMidlineOffsetATR   = 0.8;     // own offset so it never sits on top of the entry arrows/exit dots
-input int    InpMidlineMarkerSize  = 1;       // v1.46: diamond size (was hardcoded 3), per direct request
+input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder - leave
+                                                     // blank to disable the sound (push notification still fires)
 
 input group "=== EMA21/50 Crossover signal overlay - the ONLY construction tonight that showed a real, validated edge (Gold longs, hold-to-next-cross, %PF=1.031) - VISUAL ONLY, never places/modifies/closes anything ==="
 input bool   InpShowEmaCrossSignals = true;   // per direct request - entry on EMA21/50 cross, held until
@@ -748,84 +665,21 @@ input int    InpEmaCrossArrowSize  = 1;
 input int    InpEmaCrossDotSize    = 2;
 input int    InpEmaCrossLineBars   = 8;       // stop-line length in bars; the TP line runs 2 bars longer
 input bool   InpEmaCrossAlert      = true;    // push notification on entry AND exit (next opposite cross)
+input bool   InpShowEmaWeakenSignals = true;  // per direct request: a SEPARATE warning signal, fired
+                                               // once per open EMA-cross run, when the 21/50 gap (which
+                                               // widens as a healthy trend continues) stops widening and
+                                               // starts pulling back together again - i.e. the 21EMA
+                                               // losing its angle / momentum fading - BEFORE the actual
+                                               // opposite cross that would close the position outright
+input int    InpEmaWeakenConfirmBars = 2;     // consecutive bars the gap must shrink (from its run's own
+                                               // peak) before this fires - 1 bar is noisy, raise if still
+                                               // too trigger-happy
+input color  InpEmaWeakenCol        = clrGold;
+input double InpEmaWeakenOffsetATR  = 1.6;    // own offset, bigger than entry/exit so it never sits on
+                                               // top of either of those markers
+input int    InpEmaWeakenSize       = 2;
+input bool   InpEmaWeakenAlert      = true;   // push notification when this fires
 
-input group "=== Candlestick engulfing-at-extreme signal overlay - validated on GOLD ONLY tonight (p=0.0010) - Silver/BTC are NOT real (p=0.8511/0.5564), shown anyway for comparison - VISUAL ONLY ==="
-input bool   InpShowCandleSignals = true;    // bullish/bearish engulfing where the pattern bar IS the
-                                              // N-bar swing extreme - entry only, NO opposite-signal exit
-                                              // in this construction (candlestick_engulfing_reversal_test.py)
-input int    InpCdlSwingBars       = 10;     // swing/stop-loss lookback, same N used for the pattern's own
-                                              // "is this bar the swing extreme" qualification
-input double InpCdlRR              = 2.0;    // fixed 1:2 R:R target - this IS the validated exit (plus the
-                                              // swing stop), there is no opposite-pattern exit to wait for
-input color  InpCdlBuyCol          = clrAqua;
-input color  InpCdlSellCol         = clrMagenta;
-input color  InpCdlStopCol         = clrRed;
-input color  InpCdlTPCol           = clrYellow;
-input double InpCdlArrowOffsetATR  = 1.0;
-input int    InpCdlArrowSize       = 1;
-input int    InpCdlLineBars        = 8;
-input bool   InpCdlAlert           = true;    // push notification on entry (no exit alert - this
-                                               // construction has no opposite-signal exit to wait for)
-
-input group "=== EXPERIMENTAL marker-only overlays, per direct request - NONE of these passed tonight's honest random-timing/net-PF testing as standalone filters (see v1.48 version-history comment + each marker's own tooltip) - for VISUAL INSPECTION ONLY, no SL/TP lines, no claim of an edge ==="
-input bool   InpShowStackSignals    = false;  // v1.57: default OFF per direct request - the only signals
-                                               // that should show by default are EMA21/50 crossover,
-                                               // candlestick engulfing, and Trend-Aligned Stochastic.
-                                               // Fresh EMA21/50/200 stack transition (trend-following) -
-                                               // tested tonight: net losing on all 3 instruments
-input color  InpStackBuyCol         = clrDeepSkyBlue;
-input color  InpStackSellCol        = clrOrangeRed;
-input bool   InpShowRejectSignals   = false;  // v1.57: default OFF, same reason as InpShowStackSignals
-                                               // above. Price touches EMA21 then closes back on the same
-                                               // side - NOT yet separately null-tested as its own signal
-input color  InpRejBuyCol           = clrTurquoise;
-input color  InpRejSellCol          = clrHotPink;
-input int    InpRejCooldownBars     = 5;      // v1.53: minimum bars between two SAME-DIRECTION reject
-                                               // markers - without this, a choppy multi-bar consolidation
-                                               // right on EMA21 fires one marker per bar, which an Opus
-                                               // audit found accounts for ~1,900 of ~5,300 live chart
-                                               // objects on M1 with every overlay on. 0 disables the
-                                               // cooldown (back to the original every-touch behavior).
-input bool   InpShowSnapbackSignals = false;  // v1.57: default OFF, same reason as InpShowStackSignals
-                                               // above. Fresh extension from EMA21 (mean-reversion bet) -
-                                               // NOT yet separately null-tested
-input double InpSnapExtATR          = 2.0;    // how many ATR from EMA21 counts as "extended"
-input color  InpSnapBuyCol          = clrSpringGreen;
-input color  InpSnapSellCol         = clrOrchid;
-input int    InpExpMarkerSize       = 2;
-input bool   InpExpAlert            = false;  // push notification for the 3 experimental overlays - OFF by
-                                               // default (the reject condition especially fires often, per
-                                               // the live chart you've already seen - turn on deliberately,
-                                               // not a default "just in case" setting)
-
-input group "=== Trend-Aligned Stochastic overlay - own settings, separate from the baseline stochastic overlay above ==="
-input bool   InpShowTrendStochSignals = true;   // per direct request: stochastic cross only fires in the
-                                                 // direction the trend is already aligned in - no opposite
-                                                 // signals. NOT the same construction as anything tested
-                                                 // tonight (closest relatives - price-vs-EMA21 alone and
-                                                 // EMA21-reject alone - were tested as FILTERS on the
-                                                 // zone-cross stochastic and both failed; this is a
-                                                 // different combination: 2-EMA alignment, ANY stoch cross,
-                                                 // no zone restriction - UNVALIDATED until checked)
-input int    InpTSKPeriod          = 21;
-input int    InpTSSlowing          = 5;
-input int    InpTSDPeriod          = 5;
-input ENUM_SIG_STOCH_METHOD InpTSStochMethod = SIG_STOCH_SMA;
-input int    InpTSEmaFast          = 21;
-input int    InpTSEmaSlow          = 50;
-input ENUM_MA_METHOD InpTSEmaMethod = MODE_EMA;
-input int    InpTSSwingBars        = 10;
-input double InpTSRR               = 2.0;
-input color  InpTSBuyCol           = clrLime;
-input color  InpTSSellCol          = clrRed;
-input color  InpTSStopCol          = C'255,80,0';
-input color  InpTSTPCol            = clrYellow;
-input double InpTSArrowOffsetATR   = 1.0;
-input double InpTSExitOffsetATR    = 1.2;
-input int    InpTSArrowSize        = 1;
-input int    InpTSDotSize          = 2;
-input int    InpTSLineBars         = 8;
-input bool   InpTSAlert            = true;    // push notification on entry AND exit
 
 CTrade trade;
 
@@ -843,52 +697,10 @@ datetime g_lastCrossAlertAt = 0;     // cooldown - see InpCrossAlertCooldownMin
 //--- the panel. Keep this prefix namespace-disjoint from PFX.
 string g_pm = "TPMA_";
 datetime g_lastBarTime = 0;
-//--- own prefix, disjoint from both PFX and g_pm, for the same reason as above:
-//--- neither RebuildPanel()'s sweep nor PurgeOldSegments() may touch these.
-string g_sig = "TPSIG_";
-//--- an EA's globals SURVIVE a timeframe switch (only OnDeinit/OnInit re-run),
-//--- so this is what lets CHARTEVENT_CHART_CHANGE tell a real period change
-//--- apart from an ordinary scroll/zoom.
-ENUM_TIMEFRAMES g_sigPeriod = PERIOD_CURRENT;
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
-//--- latches for the two stoch-overlay alert stages, so each only fires
-//--- ONCE per excursion/signal rather than spamming every tick it stays
-//--- true. Cleared back to false once %K leaves the zone again.
-bool g_sigZoneAlertedLong  = false;
-bool g_sigZoneAlertedShort = false;
-//--- v1.51: %K/%D cross-PROXIMITY alert latches (separate from the zone-
-//--- entry latches above) - one pair per stochastic overlay (baseline +
-//--- Trend-Aligned), same reset-on-divergence/cooldown pattern as the
-//--- existing 21/50 MA proximity alert (CheckCrossProximity/g_crossAlerted).
-bool     g_sigCrossApproachAlerted = false;
-datetime g_sigLastCrossApproachAt  = 0;
-bool     g_tsxCrossApproachAlerted = false;
-datetime g_tsxLastCrossApproachAt  = 0;
-//--- persisted entry/exit overlay state, carried across LIVE calls to
-//--- ComputeStochSignals() so a live call only ever needs to look at a
-//--- small recent window instead of re-walking the WHOLE loaded chart
-//--- history on every new bar - see that function's own header for why
-//--- this matters (it was the real cause of charts hanging).
-int    g_sigLastDir = 0;
-string g_sigLastArr = "", g_sigLastSl = "", g_sigLastTp = "";
-int    g_sigPosDir  = 0;
-//--- the newest bar a LIVE call has actually processed - lets the next
-//--- live call catch up on every bar since, not just assume exactly one
-//--- new bar happened (a stall/hang, or the EA being briefly detached,
-//--- can let several bars close in between)
-datetime g_sigLastProcessedBar = 0;
-//--- 1.40: the price/time of the most recently drawn signal marker (entry
-//--- arrow OR exit dot), persisted across live calls the same way as the
-//--- state above - lets a new marker check for a near-collision against
-//--- whatever was drawn just before it, even on a DIFFERENT bar (not just
-//--- the same-bar case the old stacking logic handled) - see
-//--- NudgeAwayFromLastMarker()'s own header for why this was needed.
-double   g_sigLastMarkerPrice = 0.0;
-datetime g_sigLastMarkerTime  = 0;
-
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
-//--- g_sig above. Validated construction: entry on a fresh EMA21/50 cross,
+//--- own namespace, fully independent of the manual panel. Validated construction: entry on a fresh EMA21/50 cross,
 //--- held until the NEXT opposite EMA21/50 cross (ema21_50_pure_crossover_test.py,
 //--- GOLD longs %PF=1.031) - NOT the faster EMA21-touch exit, which was tested
 //--- and found WORSE (ema21_50_crossover_fast_exit_test.py).
@@ -899,55 +711,11 @@ string   g_emaxLastArr = "", g_emaxLastSl = "", g_emaxLastTp = "";
 datetime g_emaxLastProcessedBar = 0;
 double   g_emaxLastMarkerPrice = 0.0;
 datetime g_emaxLastMarkerTime  = 0;
-
-//--- v1.47: candlestick engulfing-at-extreme overlay - own namespace. Entry
-//--- only (no opposite-signal exit exists in the validated construction) -
-//--- swing stop + fixed 1:2 R:R target only (candlestick_engulfing_reversal_test.py).
-//--- Validated on GOLD only (p=0.0010) - Silver/BTC are NOT real (p=0.8511/0.5564).
-string   g_cdl = "TPCDL_";
-ENUM_TIMEFRAMES g_cdlPeriod = PERIOD_CURRENT;
-datetime g_cdlLastProcessedBar = 0;
-double   g_cdlLastMarkerPrice = 0.0;
-datetime g_cdlLastMarkerTime  = 0;
-
-//--- v1.48: three EXPERIMENTAL/UNVALIDATED marker-only overlays, per direct
-//--- request to see each described condition on the real chart (none of
-//--- these passed tonight's honest testing as standalone filters - see the
-//--- version-history comment below and the tooltip on every marker - this
-//--- is for visual inspection only, NOT a claim any of them works).
-string   g_stk = "TPSTK_";   // fresh EMA21/50/200 stack transition
-datetime g_stkLastProcessedBar = 0;
-double   g_stkLastMarkerPrice = 0.0;
-datetime g_stkLastMarkerTime  = 0;
-
-string   g_rej = "TPREJ_";   // price touches EMA21 then closes back (rejection)
-datetime g_rejLastProcessedBar = 0;
-double   g_rejLastMarkerPrice = 0.0;
-datetime g_rejLastMarkerTime  = 0;
-//--- v1.53: per-direction cooldown state, added after an Opus audit found
-//--- this overlay alone accounts for ~1,900 of the ~5,300 live chart
-//--- objects on M1 with everything on (it was firing on EVERY bar that
-//--- touched EMA21, including every bar of a choppy multi-bar
-//--- consolidation right on the line) - see InpRejCooldownBars' own
-//--- comment and ComputeRejectSignals() for the fix.
-datetime g_rejLastFiredUp   = 0;
-datetime g_rejLastFiredDown = 0;
-
-string   g_snp = "TPSNP_";   // fresh extension from EMA21, betting on snap-back
-datetime g_snpLastProcessedBar = 0;
-double   g_snpLastMarkerPrice = 0.0;
-datetime g_snpLastMarkerTime  = 0;
-
-//--- v1.49: Trend-Aligned Stochastic overlay - own namespace, own posDir
-//--- state machine (same pattern as the baseline stochastic/EMA-cross
-//--- overlays: one open signal at a time per direction, exit dot on the
-//--- next qualifying opposite signal).
-string   g_tsx = "TPTSX_";
-int      g_tsxLastDir = 0, g_tsxPosDir = 0;
-string   g_tsxLastArr = "", g_tsxLastSl = "", g_tsxLastTp = "";
-datetime g_tsxLastProcessedBar = 0;
-double   g_tsxLastMarkerPrice = 0.0;
-datetime g_tsxLastMarkerTime  = 0;
+//--- v2.0: "trend weakening" marker state - tracks the 21/50 gap's own
+//--- running peak WITHIN the current open run, reset on every fresh entry
+double   g_emaxRunMaxGap    = 0.0;
+int      g_emaxDeclineCount = 0;
+bool     g_emaxWeakenFired  = false;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1550,87 +1318,6 @@ void BackfillOverlayLines()
 //| ordered like the rest of this file.                                 |
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//| Price field Low/High: lowest LOW / highest HIGH over kp bars.      |
-//| Slowing as MT5 does it: sum(close-LL)/sum(HH-LL) over `slow` bars, |
-//| i.e. a simple (SMA) smoothing; %D = SMA(dp) of %K.                 |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Three stochastic averaging conventions, selectable via            |
-//| InpSigStochMethod:                                                 |
-//|  SIG_STOCH_SUM/SIG_STOCH_SMA - both Simple/SMA-family (see enum    |
-//|  comments above) - these were the only two options before v1.34.  |
-//|  SIG_STOCH_SMOOTHED - MT5 native "Method: Smoothed" (SMMA), a      |
-//|  genuinely different recursive formula, applied to BOTH the %K     |
-//|  slowing step and the %D line (MT5 applies the same Method to      |
-//|  both - confirmed from the user's own Properties dialog showing    |
-//|  a single Method dropdown governing the whole indicator).          |
-//|  SMMA: seed = SMA of the first `period` values; thereafter         |
-//|  smma[i] = (smma[i-1]*(period-1) + value[i]) / period.             |
-//+------------------------------------------------------------------+
-void SigClassicStoch(const double &h[], const double &l[], const double &c[], const int n,
-                     const int kp, const int slow, const int dp, double &k[], double &d[],
-                     const ENUM_SIG_STOCH_METHOD method = SIG_STOCH_SMOOTHED)
-  {
-   ArrayResize(k, n); ArrayInitialize(k, SIG_NA);
-   ArrayResize(d, n); ArrayInitialize(d, SIG_NA);
-   double num[], den[], rawK[];
-   ArrayResize(num, n); ArrayResize(den, n); ArrayResize(rawK, n);
-   ArrayInitialize(num, 0.0); ArrayInitialize(den, 0.0); ArrayInitialize(rawK, 0.0);
-   for(int i = kp - 1; i < n; i++)
-     {
-      double lo = l[i], hi = h[i];
-      for(int j = i - kp + 1; j < i; j++) { if(l[j] < lo) lo = l[j]; if(h[j] > hi) hi = h[j]; }
-      num[i] = c[i] - lo;
-      den[i] = hi - lo;
-      rawK[i] = (den[i] > 0.0) ? 100.0 * num[i] / den[i] : 100.0;
-     }
-   int kStart = kp + slow - 2;
-   if(method == SIG_STOCH_SUM)
-     {
-      for(int i = kStart; i < n; i++)
-        {
-         double sn = 0.0, sd = 0.0;
-         for(int j = i - slow + 1; j <= i; j++) { sn += num[j]; sd += den[j]; }
-         k[i] = (sd > 0.0) ? 100.0 * sn / sd : 100.0;   // MT5 returns 100 on a zero range
-        }
-     }
-   else if(method == SIG_STOCH_SMA)
-     {
-      for(int i = kStart; i < n; i++)
-        {
-         double s = 0.0;
-         for(int j = i - slow + 1; j <= i; j++) s += rawK[j];
-         k[i] = s / slow;   // plain SMA of the raw per-bar %K ("textbook" convention)
-        }
-     }
-   else // SIG_STOCH_SMOOTHED
-     {
-      double seed = 0.0;
-      for(int j = kStart - slow + 1; j <= kStart; j++) seed += rawK[j];
-      k[kStart] = seed / slow;
-      for(int i = kStart + 1; i < n; i++)
-         k[i] = (k[i - 1] * (slow - 1) + rawK[i]) / slow;
-     }
-   int dStart = kp + slow + dp - 3;
-   if(method == SIG_STOCH_SMOOTHED)
-     {
-      double seed = 0.0;
-      for(int j = dStart - dp + 1; j <= dStart; j++) seed += k[j];
-      d[dStart] = seed / dp;
-      for(int i = dStart + 1; i < n; i++)
-         d[i] = (d[i - 1] * (dp - 1) + k[i]) / dp;
-     }
-   else
-     {
-      for(int i = dStart; i < n; i++)
-        {
-         double s = 0.0;
-         for(int j = i - dp + 1; j <= i; j++) s += k[j];
-         d[i] = s / dp;
-        }
-     }
-  }
 
 //+------------------------------------------------------------------+
 void DrawSigLevel(const string nm, const datetime t1, const datetime t2, const double price,
@@ -1672,62 +1359,6 @@ double NudgeAwayFromLastMarker(double candidatePrice, datetime candidateTime, bo
    return pushUp ? lastMarkerPrice + minGap : lastMarkerPrice - minGap;
   }
 
-//+------------------------------------------------------------------+
-void DrawSigArrow(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpSigBuyCol : InpSigSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   //--- 1.44: now user-settable (InpSigArrowSize, was hardcoded 1 in 1.41) -
-   //--- OBJ_ARROW_UP/DOWN are already solid filled triangles, not outlines,
-   //--- so there's nothing further to do for "solid colour" beyond this
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpSigArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Classic stoch BUY signal (textbook rule, UNVALIDATED, visual only)" : "Classic stoch SELL signal (textbook rule, UNVALIDATED, visual only)");
-  }
-
-//+------------------------------------------------------------------+
-//| Solid dot for an EXIT signal - same color family as the position   |
-//| being exited, Wingdings code 159 = filled circle.                  |
-//+------------------------------------------------------------------+
-void DrawSigDot(const string nm, const datetime t, const double price, const bool wasLong)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpSigBuyCol : InpSigSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpSigDotSize);   // 1.44: now user-settable (was hardcoded 2 in 1.41)
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "Classic stoch EXIT-LONG signal (own settings, UNVALIDATED, visual only)"
-                                                     : "Classic stoch EXIT-SHORT signal (own settings, UNVALIDATED, visual only)");
-  }
-
-//+------------------------------------------------------------------+
-//| Diamond marker (Wingdings 117) for a MIDLINE-CROSS signal -           |
-//| deliberately a different shape from both the arrows (zone-cross       |
-//| entry) and the dots (exit), so this separate/experimental overlay     |
-//| can never be visually confused with the main one.                     |
-//+------------------------------------------------------------------+
-void DrawMidlineMarker(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpMidlineBuyCol : InpMidlineSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpMidlineMarkerSize);   // v1.46: was hardcoded 3
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, (isBuy ? "MIDLINE-CROSS BUY" : "MIDLINE-CROSS SELL") +
-                   " (experimental, UNVALIDATED - backtested net loser, visual only, not combined with the entry/exit overlay above)");
-  }
 
 //+------------------------------------------------------------------+
 //| v1.47: EMA21/50 crossover overlay's own entry arrow / exit dot -     |
@@ -1765,142 +1396,29 @@ void DrawEmaCrossDot(const string nm, const datetime t, const double price, cons
   }
 
 //+------------------------------------------------------------------+
-//| v1.47: candlestick engulfing-at-extreme overlay's own entry arrow -  |
-//| no exit dot exists for this overlay - the validated construction     |
-//| has no opposite-signal exit, only the swing-stop/1:2RR lines below.  |
+//| v2.0: "trend weakening" marker - the 21/50 gap stopped widening and  |
+//| started pulling back together again WITHIN the current open run,     |
+//| before the actual opposite cross that would close the position -     |
+//| a distinct shape/color from the entry arrow and exit dot so it's      |
+//| never confused with either.                                           |
 //+------------------------------------------------------------------+
-void DrawCandleArrow(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpCdlBuyCol : InpCdlSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpCdlArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Engulfing-at-swing-low BUY (validated GOLD only, p=0.0010 - Silver/BTC NOT real)"
-                                                   : "Engulfing-at-swing-high SELL (validated GOLD only, p=0.0010 - Silver/BTC NOT real)");
-  }
-
-//+------------------------------------------------------------------+
-//| v1.49: Trend-Aligned Stochastic overlay's own entry arrow / exit    |
-//| dot. Buy only fires when close>EMA_fast>EMA_slow (uptrend aligned); |
-//| sell only fires when close<EMA_fast<EMA_slow (downtrend aligned) -  |
-//| mirror conditions, per direct request ("obviously vice versa for    |
-//| the sell"). UNVALIDATED - see the input group's own comment.        |
-//+------------------------------------------------------------------+
-void DrawTrendStochArrow(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpTSBuyCol : InpTSSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpTSArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Trend-aligned stoch BUY (close>EMA_fast>EMA_slow, UNVALIDATED, visual only)"
-                                                   : "Trend-aligned stoch SELL (close<EMA_fast<EMA_slow, UNVALIDATED, visual only)");
-  }
-
-void DrawTrendStochDot(const string nm, const datetime t, const double price, const bool wasLong)
+void DrawEmaWeakenMarker(const string nm, const datetime t, const double price, const bool wasLong)
   {
    if(ObjectFind(0, nm) >= 0) return;
    ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpTSBuyCol : InpTSSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 108);   // warning-ish diamond-dot shape, distinct from
+                                                        // the entry triangle (OBJ_ARROW_UP/DOWN) and
+                                                        // exit filled circle (code 159)
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, InpEmaWeakenCol);
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpTSDotSize);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaWeakenSize);
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "Trend-aligned stoch EXIT-LONG (opposite trend-aligned cross)"
-                                                     : "Trend-aligned stoch EXIT-SHORT (opposite trend-aligned cross)");
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "EMA21/50 WEAKENING - gap narrowing again in the LONG run (21EMA losing its angle) - not an exit, just a caution"
+                                                     : "EMA21/50 WEAKENING - gap narrowing again in the SHORT run (21EMA losing its angle) - not an exit, just a caution");
   }
 
-//+------------------------------------------------------------------+
-//| v1.48: fresh EMA21/50/200 STACK transition marker - EXPERIMENTAL/   |
-//| UNVALIDATED (tested net-losing on all 3 instruments, see             |
-//| ema_stack_pure_entry_test.py) - marker only, no SL/TP lines.         |
-//+------------------------------------------------------------------+
-void DrawStackMarker(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpStackBuyCol : InpStackSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpExpMarkerSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, "EXPERIMENTAL/UNVALIDATED - fresh EMA21/50/200 stack " +
-                   string(isBuy ? "BUY (bullish order)" : "SELL (bearish order)") +
-                   " - tested net-losing tonight (Gold %PF=0.92, Silver 0.70, BTC 0.70) - visual only");
-  }
-
-//+------------------------------------------------------------------+
-//| v1.48: EMA21 touch-and-reject marker - price's high/low touches     |
-//| EMA21 but the bar CLOSES back on the same side it came from         |
-//| (rejection, not a clean cross) - EXPERIMENTAL/UNVALIDATED, has NOT  |
-//| been separately null-tested as its own signal (distinct from the    |
-//| MA-order-flip-confirmation construction tested and dropped earlier  |
-//| tonight, which required BOTH EMA21 and EMA50 order to flip).        |
-//+------------------------------------------------------------------+
-void DrawRejectMarker(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);   // diamond - same shape family as the midline
-                                                        // overlay's own experimental marker, own colors
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejBuyCol : InpRejSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpExpMarkerSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, "EXPERIMENTAL/UNVALIDATED - EMA21 touch-and-reject " +
-                   string(isBuy ? "BUY (held above)" : "SELL (held below)") + " - not yet null-tested, visual only");
-  }
-
-//+------------------------------------------------------------------+
-//| v1.48: extension snap-back marker - price is freshly InpSnapExtATR  |
-//| ATR away from EMA21, marked in the MEAN-REVERSION direction (the    |
-//| OPPOSITE of the extension) - EXPERIMENTAL/UNVALIDATED, not yet       |
-//| null-tested. This is the only MEAN-REVERSION idea on the chart -    |
-//| every other overlay here is trend-following.                        |
-//+------------------------------------------------------------------+
-void DrawSnapbackMarker(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);   // filled circle
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpSnapBuyCol : InpSnapSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpExpMarkerSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, "EXPERIMENTAL/UNVALIDATED - mean-reversion snap-back " +
-                   string(isBuy ? "BUY (was extended below)" : "SELL (was extended above)") +
-                   " - not yet null-tested, visual only");
-  }
-
-//+------------------------------------------------------------------+
-//| v1.48: shared purge helper for the three experimental overlays -    |
-//| same rolling-cap idea as PurgeOldSigObjects()/etc above, factored   |
-//| out since none of these three need their own per-overlay tuning.    |
-//+------------------------------------------------------------------+
-void PurgeOldPrefixedObjects(const string prefix)
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, prefix) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
-  }
 
 //+------------------------------------------------------------------+
 //| Plain Wilder ATR(period), used only to push the arrows/dots a      |
@@ -1963,543 +1481,6 @@ void FireSigAlert(const string msg)
    if(StringLen(InpSigSoundFile) > 0) PlaySound(InpSigSoundFile);
   }
 
-//+------------------------------------------------------------------+
-//| EARLY heads-up, fired the moment %K first enters the oversold/     |
-//| overbought zone on a newly-closed bar - i.e. BEFORE any cross is   |
-//| confirmed and BEFORE ComputeStochSignals() below would print an    |
-//| arrow. Latches so it fires once per excursion into the zone, not   |
-//| every bar it stays there; clears once %K leaves the zone again so  |
-//| the NEXT excursion can alert too.                                  |
-//+------------------------------------------------------------------+
-void CheckStochZoneAlert(const double kCur)
-  {
-   if(!InpSigZoneAlert || kCur == SIG_NA) return;
-   string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-
-   if(kCur <= InpSigZoneLow)
-     {
-      if(!g_sigZoneAlertedLong)
-        {
-         FireSigAlert(StringFormat(
-            "%s %s: Stochastic %%K=%.1f entered OVERSOLD (<=%.0f) - watch for a BUY cross-in-zone "
-            "signal (not printed yet - UNVALIDATED, visual only)", _Symbol, tf, kCur, InpSigZoneLow));
-         g_sigZoneAlertedLong = true;
-        }
-     }
-   else g_sigZoneAlertedLong = false;
-
-   if(kCur >= InpSigZoneHigh)
-     {
-      if(!g_sigZoneAlertedShort)
-        {
-         FireSigAlert(StringFormat(
-            "%s %s: Stochastic %%K=%.1f entered OVERBOUGHT (>=%.0f) - watch for a SELL cross-in-zone "
-            "signal (not printed yet - UNVALIDATED, visual only)", _Symbol, tf, kCur, InpSigZoneHigh));
-         g_sigZoneAlertedShort = true;
-        }
-     }
-   else g_sigZoneAlertedShort = false;
-  }
-
-//+------------------------------------------------------------------+
-//| v1.51: EARLY heads-up fired when %K and %D are CONVERGING and close |
-//| to crossing, BEFORE the cross is confirmed - per direct request     |
-//| ("send the notification before they cross"), same reset-on-         |
-//| divergence/cooldown pattern as the existing 21/50 MA proximity      |
-//| alert (CheckCrossProximity). Generic/shared - called once per live  |
-//| bar from BOTH ComputeStochSignals() and ComputeTrendStochSignals(), |
-//| each passing its own K/D arrays and its own latch/cooldown globals  |
-//| so the two overlays' alerts never interfere with each other.        |
-//+------------------------------------------------------------------+
-void CheckStochCrossProximity(const string overlayLabel, const double kCur, const double dCur,
-                               const double kPrev, const double dPrev,
-                               bool &alertedFlag, datetime &lastAlertAt)
-  {
-   if(!InpStochProximityAlert) return;
-   if(kCur == SIG_NA || dCur == SIG_NA || kPrev == SIG_NA || dPrev == SIG_NA) return;
-
-   double gapNow  = kCur - dCur;
-   double gapPrev = kPrev - dPrev;
-   bool alreadyCrossed = (gapNow >= 0.0) != (gapPrev >= 0.0);
-   double threshold = InpStochProximityPts;
-
-   if(alreadyCrossed || MathAbs(gapNow) > threshold * 1.5)
-     {
-      alertedFlag = false;   // clear reset - diverged again, or the cross already happened
-      return;
-     }
-
-   bool narrowing = MathAbs(gapNow) < MathAbs(gapPrev);
-   bool near       = MathAbs(gapNow) <= threshold;
-   if(!narrowing || !near) return;
-   if(alertedFlag) return;   // already warned for this approach, waiting for a reset
-   if(TimeCurrent() - lastAlertAt < InpStochProximityCooldownMin * 60) return;
-
-   string dir = (gapNow > 0.0) ? "%K crossing DOWN through %D (bearish) likely soon"
-                                 : "%K crossing UP through %D (bullish) likely soon";
-   string tf  = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-   string msg = StringFormat("%s %s: %s stochastic %%K/%%D gap closing, %s (gap %.1f%% of threshold) - "
-                              "not printed yet, UNVALIDATED, visual only",
-                              _Symbol, tf, overlayLabel, dir, 100.0 * MathAbs(gapNow) / threshold);
-   FireSigAlert(msg);
-   alertedFlag = true;
-   lastAlertAt = TimeCurrent();
-  }
-
-//+------------------------------------------------------------------+
-//| Recomputes the ENTRY stochastic (and, if enabled, a fully           |
-//| independent EXIT stochastic with its own K/slowing/D settings)      |
-//| over the whole loaded CLOSED history (the forming bar is excluded,  |
-//| so nothing here can repaint), then draws either every signal        |
-//| (backfill) or only the newest closed bar's.                         |
-//|                                                                     |
-//| EXIT RULE (own settings, no zone requirement - the usual "textbook" |
-//| exit-on-opposite-cross, not restricted to 20/80): fires the first   |
-//| time the EXIT stochastic crosses against the currently-shown ENTRY  |
-//| direction, i.e. only while an entry arrow is "open" (no entry has   |
-//| fired yet in the other direction). A single pass walks the whole    |
-//| history in time order so the entry/exit state machine (long / short |
-//| / flat) is reconstructed correctly either way - during backfill it  |
-//| draws as it goes; for a live single-bar call it replays silently    |
-//| up to the last-but-one bar to recover state, then draws only the    |
-//| newest bar.                                                         |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| backfill=true (attach / timeframe switch, runs ONCE): walks the      |
-//| whole loaded chart history, same as always.                          |
-//| backfill=false (every new bar, now also polled every 2s by the       |
-//| timer): used to ALSO re-copy and re-compute the stochastic (TWICE,   |
-//| since 1.24 added the exit one) plus ATR over that SAME entire        |
-//| history, every single call - on a full-history low-timeframe chart   |
-//| (hundreds of thousands of bars) that is real, repeated, heavy work   |
-//| landing on the UI thread every time a bar closes, and was the real   |
-//| cause of charts hanging. A live call only ever needs the ONE newest  |
-//| closed bar's cross, so it now copies/computes a small bounded        |
-//| window instead, and lastDir/lastArr/lastSl/lastTp/posDir are         |
-//| persisted in g_sigLastDir/g_sigLastArr/.../g_sigPosDir ACROSS live   |
-//| calls (reset in ResyncStochSignals(), same as the zone-alert         |
-//| latches) instead of being reconstructed by re-walking history every  |
-//| time.                                                                 |
-//+------------------------------------------------------------------+
-void ComputeStochSignals(const bool backfill)
-  {
-   int minBarsEntry = InpSigKPeriod + InpSigSlowing + InpSigDPeriod + InpSigSwingBars;
-   int minBarsExit  = InpShowExitSignals ? (InpExitKPeriod + InpExitSlowing + InpExitDPeriod) : 0;
-   int minBars = MathMax(minBarsEntry, minBarsExit);
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   //--- live calls need enough trailing bars for k[n-1]/k[n-2] (and the
-   //--- exit/ATR equivalents) to be valid, PLUS enough slack to catch up
-   //--- on every bar since g_sigLastProcessedBar in one go if several
-   //--- closed back-to-back (a stall/hang, or the EA being briefly
-   //--- detached, can do that) - NOT the whole multi-year history, but
-   //--- comfortably more than "just the one newest bar"
-   int total = backfill ? available : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-
-   double k[], d[];
-   SigClassicStoch(h, l, c, n, InpSigKPeriod, InpSigSlowing, InpSigDPeriod, k, d, InpSigStochMethod);
-   double kE[], dE[];
-   if(InpShowExitSignals) SigClassicStoch(h, l, c, n, InpExitKPeriod, InpExitSlowing, InpExitDPeriod, kE, dE, InpSigStochMethod);
-   double atr[];
-   SigATR(h, l, c, n, 14, atr);
-
-   //--- early zone-entry alert - live only (not during backfill, which
-   //--- would otherwise fire hundreds of alerts for old history on attach)
-   if(!backfill) CheckStochZoneAlert(k[n - 1]);
-   if(!backfill && n >= 2)
-      CheckStochCrossProximity("baseline", k[n - 1], d[n - 1], k[n - 2], d[n - 2],
-                                g_sigCrossApproachAlerted, g_sigLastCrossApproachAt);
-
-   int perSec = PeriodSeconds(PERIOD_CURRENT);
-   //--- backfill draws/alerts for every qualifying bar across the whole
-   //--- history. A live call draws/alerts for every bar NEWER than
-   //--- g_sigLastProcessedBar - normally just the one newest bar, but
-   //--- catches up properly if more than one closed since the last call
-   //--- (see g_sigLastProcessedBar's own comment). Falls back to the
-   //--- start of this window if nothing's been processed yet, or if the
-   //--- gap is bigger than the window itself (a genuinely long stall) -
-   //--- bounded by the window size either way, never the whole history.
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_sigLastProcessedBar) break;
-         from = p;
-        }
-     }
-   //--- 1.38/1.39: backfill still WALKS the whole history (cheap, O(n)
-   //--- array math - keeps lastDir/posDir reconstructed correctly), but
-   //--- only DRAWS (and logs) the last InpSigDrawDays worth of bars.
-   //--- Drawing everything put tens of thousands of permanent objects on
-   //--- the chart, plus one log line per historical cross - see the 1.38
-   //--- header note. Days converted to bars per THIS chart's own
-   //--- PERIOD_CURRENT, so the real time window is the same across
-   //--- timeframes (a raw bar count was NOT - 2000 bars is ~20 days on
-   //--- M15 but only ~7 on M5).
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-
-   int lastDir, posDir;
-   string lastArr, lastSl, lastTp;
-   double lastMarkerPrice;
-   datetime lastMarkerTime;
-   if(backfill)
-     {
-      lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
-      lastMarkerPrice = 0.0; lastMarkerTime = 0;
-     }
-   else
-     {
-      lastDir = g_sigLastDir; posDir = g_sigPosDir;
-      lastArr = g_sigLastArr; lastSl = g_sigLastSl; lastTp = g_sigLastTp;
-      lastMarkerPrice = g_sigLastMarkerPrice; lastMarkerTime = g_sigLastMarkerTime;
-     }
-
-   for(int i = from; i < n; i++)
-     {
-      bool draw = (i >= drawFrom);
-      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
-      double offExit   = (atr[i] == SIG_NA) ? 0.0 : InpSigExitOffsetATR  * atr[i];
-
-      //--- tracked only when an entry ARROW is actually drawn this bar (see
-      //--- the risk<=0.0 note below) - lets a same-bar exit stack off the
-      //--- arrow instead of colliding with it
-      bool entryDrawnThisBar = false;
-      double entryDrawnPrice = 0.0;
-      bool entryDrawnAbove = false;
-
-      //--- 1.35: snapshot the position held coming INTO this bar, before the
-      //--- ENTRY block below can overwrite posDir. The EXIT block must judge
-      //--- (and label/color/stack) the exit against the OLD position - not a
-      //--- brand-new one opened on this same bar. Before this fix: long, then
-      //--- a bar with BOTH a sell cross-in-zone AND an exit-stoch cross down
-      //--- flipped posDir to -1 first, so the exit check then demanded a
-      //--- cross UP and the exit-long dot silently never drew (user-reported).
-      //--- It also let a fresh entry from flat be "exited" on its own entry
-      //--- bar by an opposite exit cross, wiping its lastArr/Sl/Tp.
-      int  prevPosDir = posDir;
-      bool entryFiredThisBar = false;   // qualifying entry (risk>0), drawn or not
-
-      //--- ENTRY: %K/%D cross WITHIN the extreme zone (not a zone-exit rule)
-      if(k[i] != SIG_NA && d[i] != SIG_NA && k[i - 1] != SIG_NA && d[i - 1] != SIG_NA)
-        {
-         bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
-         bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
-
-         //--- 1.37: the value actually tested against the zone. Either the
-         //--- plain bar-close k[i] (old behavior), or the value at the
-         //--- INTERPOLATED point where the K/D line segments cross between
-         //--- bar i-1 and bar i - linear interpolation on where (K-D) hits
-         //--- zero, matching the literal "X" point where the two lines
-         //--- visually meet on the chart, which can sit well inside the
-         //--- zone even when the bar-CLOSE value has already moved outside
-         //--- it (a fast-moving bar can jump straight through the zone).
-         double zoneTestVal = k[i];
-         if(InpSigUseInterpCross && (crossUp || crossDown))
-           {
-            double diffPrev = k[i - 1] - d[i - 1];
-            double diffCur  = k[i] - d[i];
-            double denom = diffPrev - diffCur;
-            if(MathAbs(denom) > 0.0000001)
-              {
-               double t = diffPrev / denom;
-               if(t < 0.0) t = 0.0;
-               if(t > 1.0) t = 1.0;
-               zoneTestVal = k[i - 1] + t * (k[i] - k[i - 1]);
-              }
-           }
-         int dir = 0;
-         if(crossUp && zoneTestVal < InpSigZoneLow) dir = 1;
-         else if(crossDown && zoneTestVal > InpSigZoneHigh) dir = -1;
-
-         //--- 1.36: diagnostic only - every raw %K/%D cross on the entry
-         //--- stoch gets logged unconditionally (not just ones that qualify
-         //--- and draw), so a "the chart clearly crossed under 30 but no
-         //--- entry fired" dispute can be settled from real numbers instead
-         //--- of a chart screenshot. Separate from the cross+zone-qualifying
-         //--- ENTRY log further below, which only prints when dir!=0.
-         //--- Runs during backfill too (not just live) - a reattach re-walks
-         //--- recent history, so this is the only way to get real numbers
-         //--- for a cross that already happened before you went looking for
-         //--- it, not just ones from this point forward. Crosses are rare
-         //--- enough (a handful per day) that this isn't meaningful spam.
-         if(draw && (crossUp || crossDown))
-            PrintFormat("StochSignal RAWCROSS: %s %s  K[i-1]=%.3f D[i-1]=%.3f -> K[i]=%.3f D[i]=%.3f  "
-                        "interpCrossVal=%.3f (interpUsed=%s)  zoneLow=%.1f zoneHigh=%.1f  qualifies=%s",
-                        TimeToString(r[i].time, TIME_DATE | TIME_MINUTES), crossUp ? "crossUp" : "crossDown",
-                        k[i - 1], d[i - 1], k[i], d[i], zoneTestVal, InpSigUseInterpCross ? "true" : "false",
-                        InpSigZoneLow, InpSigZoneHigh, (dir != 0) ? "YES" : "NO(outside zone)");
-
-         if(dir != 0)
-           {
-            //--- recent swing = lowest low / highest high of the last
-            //--- InpSigSwingBars closed bars, signal bar included
-            double swing = (dir > 0) ? l[i] : h[i];
-            for(int j = i - InpSigSwingBars + 1; j < i; j++)
-               swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-            double risk = dir * (c[i] - swing);
-            //--- risk<=0.0 (close sits exactly on the swing extreme - no sane
-            //--- stop) now skips this bar ENTIRELY, not just the drawing: a
-            //--- disqualified cross must NOT flip lastDir/posDir either, or
-            //--- the exit overlay ends up "watching" a position that was
-            //--- never actually shown, and later prints an exit in the
-            //--- wrong direction/color with no entry arrow to explain it -
-            //--- exactly what was happening before this fix.
-            if(risk > 0.0)
-              {
-               if(draw)
-                 {
-                  if(!backfill && InpSigCrossAlert)
-                    {
-                     string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                     FireSigAlert(StringFormat(
-                        "%s %s: Classic stoch cross-in-zone %s signal PRINTED (K=%.1f) - chart overlay only, "
-                        "UNVALIDATED, does not place/modify/close anything", _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
-                    }
-                  //--- a repeat same-direction cross (e.g. %K/%D whipsawing against
-                  //--- each other while both still sit inside the zone) REPLACES the
-                  //--- previous same-run signal instead of adding a second one - the
-                  //--- first one is often a premature whipsaw that goes against price
-                  //--- before the real move starts
-                  if(dir == lastDir && lastArr != "")
-                    {
-                     ObjectDelete(0, lastArr);
-                     ObjectDelete(0, lastSl);
-                     ObjectDelete(0, lastTp);
-                    }
-                 }
-               lastDir = dir;
-               posDir  = dir;   // new entry opens/flips the "position" the exit overlay watches
-               entryFiredThisBar = true;
-
-               if(draw)
-                 {
-                  double stop = swing;
-                  double tp   = c[i] + dir * InpSigRR * risk;
-                  datetime t = r[i].time;
-                  string id = IntegerToString((long)t);
-                  bool isBuy = dir > 0;
-                  lastArr = g_sig + "arr_" + id;
-                  lastSl  = g_sig + "sl_" + id;
-                  lastTp  = g_sig + "tp_" + id;
-                  entryDrawnThisBar = true;
-                  entryDrawnAbove   = !isBuy;   // buy arrow sits BELOW, sell arrow ABOVE
-                  entryDrawnPrice   = isBuy ? r[i].low - offEntry : r[i].high + offEntry;
-                  //--- 1.40: general anti-collision against whatever marker was drawn
-                  //--- just before this one (any type, possibly a different bar) - see
-                  //--- NudgeAwayFromLastMarker()'s own header
-                  double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-                  entryDrawnPrice = NudgeAwayFromLastMarker(entryDrawnPrice, t, !isBuy,
-                                                             lastMarkerPrice, lastMarkerTime, minGap);
-                  lastMarkerPrice = entryDrawnPrice; lastMarkerTime = t;
-                  DrawSigArrow(lastArr, t, entryDrawnPrice, isBuy);
-                  DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
-                               "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
-                  DrawSigLevel(lastTp, t, t + (InpSigLineBars + 2) * perSec, tp,   InpSigTPCol,   STYLE_DASH,
-                               "Classic TP: 1:" + DoubleToString(InpSigRR, 1) + " R:R example (unvalidated)");
-                  //--- unconditional ground-truth log line (both backfill AND
-                  //--- live, independent of InpSigCrossAlert) - scroll the
-                  //--- Experts tab to see the EXACT entry/exit sequence the
-                  //--- code actually recognized, if the chart's own colors/
-                  //--- placement ever look wrong again
-                  PrintFormat("StochSignal LOG: %s ENTRY %s @ %s  K[i-1]=%.3f D[i-1]=%.3f -> K[i]=%.3f D[i]=%.3f  posDir->%d",
-                               TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                               DoubleToString(c[i], _Digits), k[i - 1], d[i - 1], k[i], d[i], posDir);
-                 }
-              }
-           }
-        }
-
-      //--- MIDLINE-CROSS: fully independent experimental overlay - a cross
-      //--- back through the 50 midline (not a deep 20/80 zone extreme)
-      //--- after a genuine pullback, per direct request. Uses the SAME
-      //--- entry stochastic (k/d) but a different trigger condition. Does
-      //--- NOT touch posDir/lastDir/lastArr or interact with the entry/
-      //--- exit overlay above in any way - purely additive, its own marker
-      //--- shape, drawn (or not) independent of everything else in this loop.
-      if(InpShowMidlineSignals && draw &&
-         k[i] != SIG_NA && d[i] != SIG_NA && k[i - 1] != SIG_NA && d[i - 1] != SIG_NA &&
-         k[i] >= InpMidlineBandLow && k[i] <= InpMidlineBandHigh)
-        {
-         bool mCrossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
-         bool mCrossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
-         bool mDir = false; bool mFire = false;
-         if(mCrossUp)
-           {
-            double lo = k[i];
-            for(int j = MathMax(i - InpMidlinePriorLookback, 0); j < i; j++)
-               if(k[j] != SIG_NA && k[j] < lo) lo = k[j];
-            if(lo <= 50.0) { mFire = true; mDir = true; }
-           }
-         else if(mCrossDown)
-           {
-            double hi = k[i];
-            for(int j = MathMax(i - InpMidlinePriorLookback, 0); j < i; j++)
-               if(k[j] != SIG_NA && k[j] > hi) hi = k[j];
-            if(hi >= 50.0) { mFire = true; mDir = false; }
-           }
-         if(mFire)
-           {
-            datetime mt = r[i].time;
-            string mid = g_sig + "mid_" + IntegerToString((long)mt);
-            double offMid = (atr[i] == SIG_NA) ? 0.0 : InpMidlineOffsetATR * atr[i];
-            double mPrice = mDir ? r[i].low - offMid : r[i].high + offMid;
-            DrawMidlineMarker(mid, mt, mPrice, mDir);
-           }
-        }
-
-      //--- EXIT: only while "in position" per the entry overlay above, on
-      //--- the EXIT stochastic's own (independently-set) %K/%D cross, in
-      //--- the direction that closes that position - no zone requirement
-      //--- (1.35: everything below reads prevPosDir - the position held
-      //--- coming into this bar - never the possibly-just-flipped posDir)
-      if(InpShowExitSignals && prevPosDir != 0 &&
-         kE[i] != SIG_NA && dE[i] != SIG_NA && kE[i - 1] != SIG_NA && dE[i - 1] != SIG_NA)
-        {
-         bool exCrossUp   = kE[i - 1] <= dE[i - 1] && kE[i] > dE[i];
-         bool exCrossDown = kE[i - 1] >= dE[i - 1] && kE[i] < dE[i];
-         bool exitFires = (prevPosDir > 0 && exCrossDown) || (prevPosDir < 0 && exCrossUp);
-         if(exitFires)
-           {
-            if(draw)
-              {
-               if(!backfill && InpSigExitAlert)
-                 {
-                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                  FireSigAlert(StringFormat(
-                     "%s %s: Classic stoch EXIT-%s signal PRINTED (ExitK=%.1f) - chart overlay only, "
-                     "UNVALIDATED, does not place/modify/close anything", _Symbol, tf,
-                     (prevPosDir > 0 ? "LONG" : "SHORT"), kE[i]));
-                 }
-               datetime t = r[i].time;
-               string exId = g_sig + "exit_" + IntegerToString((long)t);
-               bool wasLong = prevPosDir > 0;
-               //--- 1.45: REVERTED the 1.43 "always anchor to the entry arrow's
-               //--- own price" idea for the DIFFERENT-candle case - it broke
-               //--- badly on any position that ran a real distance before
-               //--- exiting (completely normal for a trending move): the exit
-               //--- dot ended up pinned near the OLD entry price, floating in
-               //--- empty space far from the actual exit candle, nowhere near
-               //--- where the exit happened - confirmed from a live chart
-               //--- showing dots stranded well above/below price action.
-               //--- Two rules now:
-               //--- (a) SAME-CANDLE case (1.44, kept - "a buy arrow printed,
-               //--- and on the same candle an exit signal - the exit dot below
-               //--- the buy arrow; same candle sell arrow - dot above the sell
-               //--- arrow"): when a NEW entry arrow ALSO lands on this exact
-               //--- bar, the dot follows THAT arrow's side and price.
-               //--- (b) DIFFERENT-CANDLE case: back to the THIS bar's own
-               //--- candle high/low (1.42's approach) - same side as the
-               //--- direction being closed, but anchored to where the exit is
-               //--- actually happening, not where the entry happened.
-               bool dotAbove;
-               double dotPrice;
-               if(entryDrawnThisBar)
-                 {
-                  dotAbove = entryDrawnAbove;
-                  dotPrice = dotAbove ? entryDrawnPrice + offExit : entryDrawnPrice - offExit;
-                 }
-               else
-                 {
-                  dotAbove = !wasLong;
-                  dotPrice = dotAbove ? r[i].high + offExit : r[i].low - offExit;
-                 }
-               //--- 1.40: general anti-collision (covers the case above too, plus
-               //--- any other marker combination/different-bar case the same-bar
-               //--- stacking above doesn't reach) - see NudgeAwayFromLastMarker()'s
-               //--- own header
-               double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-               dotPrice = NudgeAwayFromLastMarker(dotPrice, t, dotAbove,
-                                                   lastMarkerPrice, lastMarkerTime, minGapExit);
-               lastMarkerPrice = dotPrice; lastMarkerTime = t;
-               DrawSigDot(exId, t, dotPrice, wasLong);
-               //--- same unconditional ground-truth log line as the entry side
-               PrintFormat("StochSignal LOG: %s EXIT-%s @ %s  ExitK[i-1]=%.3f ExitD[i-1]=%.3f -> ExitK[i]=%.3f ExitD[i]=%.3f  (closing posDir %d -> 0)",
-                            TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                            DoubleToString(c[i], _Digits), kE[i - 1], dE[i - 1], kE[i], dE[i], prevPosDir);
-              }
-            //--- 1.35: if an entry ALSO fired this bar, this is "exit the old
-            //--- position AND open the new one on the same bar" - posDir and
-            //--- lastArr/Sl/Tp already belong to that NEW entry (and the old
-            //--- run's objects were never put back into lastArr), so leave
-            //--- them alone. Only go flat/clear when no entry fired this bar.
-            if(!entryFiredThisBar)
-              {
-               posDir = 0;   // flat again - next entry (either direction) re-arms the exit watch
-               //--- 1.29: the previous entry's run is now CLOSED by this exit, so
-               //--- its arrow/SL/TP must never again be eligible for the "repeat
-               //--- same-direction cross replaces the previous signal" delete -
-               //--- otherwise a later same-side entry erases an arrow whose exit
-               //--- dot is still on the chart (an orphaned exit dot)
-               lastArr = ""; lastSl = ""; lastTp = "";
-              }
-           }
-        }
-     }
-
-   //--- always write back (backfill included) - a backfill run freshly
-   //--- reconstructs the correct end-of-history state, so the very next
-   //--- LIVE call must continue from THAT, not from zero/empty
-   g_sigLastDir = lastDir; g_sigPosDir = posDir;
-   g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
-   g_sigLastProcessedBar = r[n - 1].time;
-   g_sigLastMarkerPrice = lastMarkerPrice; g_sigLastMarkerTime = lastMarkerTime;
-  }
-
-//+------------------------------------------------------------------+
-//| 1.38: rolling cap on overlay objects, same idea as PurgeOldSegments |
-//| for the MA/VWAP lines. Without it every arrow/SL/TP/dot ever drawn  |
-//| stayed on the chart until the next full resync, so the object count |
-//| only ever grew over a long live session. Uses OBJPROP_TIME (the     |
-//| signal bar) - an object whose name is still held in g_sigLastArr    |
-//| may get purged here; the later ObjectDelete on it is a harmless     |
-//| no-op.                                                               |
-//+------------------------------------------------------------------+
-void PurgeOldSigObjects()
-  {
-   //--- 1.39: cutoff is now a straight calendar-time window (InpSigDrawDays),
-   //--- not bars*periodSeconds - simpler and timeframe-independent by
-   //--- construction, no conversion needed here.
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_sig) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| Full wipe + backfill - on attach, and on a timeframe switch, since |
-//| every level is timeframe-specific and must not be left stale.      |
-//+------------------------------------------------------------------+
-void ResyncStochSignals()
-  {
-   ObjectsDeleteAll(0, g_sig);
-   g_sigPeriod = (ENUM_TIMEFRAMES)_Period;
-   //--- zone-alert latches are per-timeframe state; a fresh timeframe's
-   //--- %K has nothing to do with the old one's zone excursion. The
-   //--- persisted entry/exit state (g_sigLastDir/g_sigPosDir/...) doesn't
-   //--- need an explicit reset here - ComputeStochSignals(true) right
-   //--- below always writes it back, freshly reconstructed for the new
-   //--- timeframe's own history, so this is just a safe default in case
-   //--- that backfill bails out early (too little history loaded yet).
-   g_sigZoneAlertedLong  = false;
-   g_sigZoneAlertedShort = false;
-   g_sigLastDir = 0; g_sigPosDir = 0;
-   g_sigLastArr = ""; g_sigLastSl = ""; g_sigLastTp = "";
-   g_sigLastProcessedBar = 0;
-   g_sigLastMarkerPrice = 0.0; g_sigLastMarkerTime = 0;
-   if(InpShowStochSignals) ComputeStochSignals(true);
-  }
 
 //+------------------------------------------------------------------+
 //| v1.47: EMA21/50 crossover overlay. Entry = a fresh EMA21/50 cross,  |
@@ -2550,16 +1531,21 @@ void ComputeEmaCrossSignals(const bool backfill)
    string lastArr, lastSl, lastTp;
    double lastMarkerPrice;
    datetime lastMarkerTime;
+   double runMaxGap;
+   int    declineCount;
+   bool   weakenFired;
    if(backfill)
      {
       lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
       lastMarkerPrice = 0.0; lastMarkerTime = 0;
+      runMaxGap = 0.0; declineCount = 0; weakenFired = false;
      }
    else
      {
       lastDir = g_emaxLastDir; posDir = g_emaxPosDir;
       lastArr = g_emaxLastArr; lastSl = g_emaxLastSl; lastTp = g_emaxLastTp;
       lastMarkerPrice = g_emaxLastMarkerPrice; lastMarkerTime = g_emaxLastMarkerTime;
+      runMaxGap = g_emaxRunMaxGap; declineCount = g_emaxDeclineCount; weakenFired = g_emaxWeakenFired;
      }
 
    for(int i = from; i < n; i++)
@@ -2572,13 +1558,13 @@ void ComputeEmaCrossSignals(const bool backfill)
       bool crossUp   = e21[i - 1] <= e50[i - 1] && e21[i] > e50[i];
       bool crossDown = e21[i - 1] >= e50[i - 1] && e21[i] < e50[i];
       int dir = crossUp ? 1 : (crossDown ? -1 : 0);
-      if(dir == 0) continue;
 
       int prevPosDir = posDir;
+      bool entryFiredThisBar = false;
 
       //--- EXIT: an opposite cross closes whatever position the ENTRY block
       //--- below opened - the validated exit, held all the way to here.
-      if(prevPosDir != 0 && dir != prevPosDir)
+      if(dir != 0 && prevPosDir != 0 && dir != prevPosDir)
         {
          if(draw)
            {
@@ -2616,6 +1602,7 @@ void ComputeEmaCrossSignals(const bool backfill)
            {
             posDir = dir;
             lastDir = dir;
+            entryFiredThisBar = true;
             if(draw)
               {
                double stop = swing;
@@ -2648,12 +1635,62 @@ void ComputeEmaCrossSignals(const bool backfill)
               }
            }
         }
+
+      //--- v2.0: "trend weakening" check - runs on EVERY bar while a
+      //--- position from the entry block above is still open (posDir!=0),
+      //--- not just on cross bars. Tracks the gap's own running peak
+      //--- WITHIN this open run; a fresh entry this bar resets tracking.
+      if(posDir != 0)
+        {
+         double gap = MathAbs(e21[i] - e50[i]);
+         if(entryFiredThisBar)
+           {
+            runMaxGap = gap; declineCount = 0; weakenFired = false;
+           }
+         else
+           {
+            if(gap > runMaxGap) { runMaxGap = gap; declineCount = 0; }
+            else if(gap < runMaxGap) declineCount++;
+            if(!weakenFired && declineCount >= InpEmaWeakenConfirmBars)
+              {
+               weakenFired = true;
+               if(draw && InpShowEmaWeakenSignals)
+                 {
+                  bool wasLong = posDir > 0;
+                  double offWeaken = (atr[i] == SIG_NA) ? 0.0 : InpEmaWeakenOffsetATR * atr[i];
+                  datetime t = r[i].time;
+                  string wkId = g_emax + "weak_" + IntegerToString((long)t);
+                  double wkPrice = wasLong ? h[i] + offWeaken : l[i] - offWeaken;
+                  double minGapWk = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+                  wkPrice = NudgeAwayFromLastMarker(wkPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
+                  lastMarkerPrice = wkPrice; lastMarkerTime = t;
+                  DrawEmaWeakenMarker(wkId, t, wkPrice, wasLong);
+                  PrintFormat("EmaWeakenSignal LOG: %s WEAKENING in %s run @ %s  gap=%s (peak was %s, %d declining bars)",
+                              TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
+                              DoubleToString(c[i], _Digits), DoubleToString(gap, _Digits),
+                              DoubleToString(runMaxGap, _Digits), declineCount);
+                  if(!backfill && InpEmaWeakenAlert)
+                    {
+                     string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                     FireSigAlert(StringFormat("%s %s: EMA21/50 gap WEAKENING in the %s run (21EMA losing its "
+                                                "angle) - not an exit, just a caution, chart overlay only",
+                                                _Symbol, tf, wasLong ? "LONG" : "SHORT"));
+                    }
+                 }
+              }
+           }
+        }
+      else
+        {
+         runMaxGap = 0.0; declineCount = 0; weakenFired = false;
+        }
      }
 
    g_emaxLastDir = lastDir; g_emaxPosDir = posDir;
    g_emaxLastArr = lastArr; g_emaxLastSl = lastSl; g_emaxLastTp = lastTp;
    g_emaxLastProcessedBar = r[n - 1].time;
    g_emaxLastMarkerPrice = lastMarkerPrice; g_emaxLastMarkerTime = lastMarkerTime;
+   g_emaxRunMaxGap = runMaxGap; g_emaxDeclineCount = declineCount; g_emaxWeakenFired = weakenFired;
   }
 
 //+------------------------------------------------------------------+
@@ -2683,593 +1720,10 @@ void ResyncEmaCrossSignals()
    g_emaxLastArr = ""; g_emaxLastSl = ""; g_emaxLastTp = "";
    g_emaxLastProcessedBar = 0;
    g_emaxLastMarkerPrice = 0.0; g_emaxLastMarkerTime = 0;
+   g_emaxRunMaxGap = 0.0; g_emaxDeclineCount = 0; g_emaxWeakenFired = false;
    if(InpShowEmaCrossSignals) ComputeEmaCrossSignals(true);
   }
 
-//+------------------------------------------------------------------+
-//| v1.47: candlestick engulfing-at-extreme overlay. Entry only - the    |
-//| validated construction (candlestick_engulfing_reversal_test.py) has  |
-//| NO opposite-signal exit, just the swing-stop/1:2RR lines drawn here,  |
-//| so there is no exit dot and no posDir state machine to maintain -    |
-//| multiple overlapping signals can legitimately show at once, same as  |
-//| the Python reference (which only serialized trades for bookkeeping,  |
-//| not because a second signal is invalid). Validated on GOLD ONLY      |
-//| (p=0.0010) - Silver/BTC are shown too (per InpShowCandleSignals) but  |
-//| are NOT real (p=0.8511/0.5564) - see tooltip/log text.                |
-//+------------------------------------------------------------------+
-void ComputeCandleSignals(const bool backfill)
-  {
-   int minBars = InpCdlSwingBars + 5;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[], o[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n); ArrayResize(o, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; o[i] = r[i].open; }
-   double atr[];
-   SigATR(h, l, c, n, 14, atr);
-
-   int perSec = PeriodSeconds(PERIOD_CURRENT);
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_cdlLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-
-   double lastMarkerPrice = backfill ? 0.0 : g_cdlLastMarkerPrice;
-   datetime lastMarkerTime = backfill ? 0 : g_cdlLastMarkerTime;
-
-   for(int i = from; i < n; i++)
-     {
-      if(i < InpCdlSwingBars) continue;
-      bool draw = (i >= drawFrom);
-
-      bool bearPrev = c[i - 1] < o[i - 1];
-      bool bullCur  = c[i] > o[i];
-      bool bullEngulf = bearPrev && bullCur && o[i] <= c[i - 1] && c[i] >= o[i - 1];
-      bool bullPrev = c[i - 1] > o[i - 1];
-      bool bearCur  = c[i] < o[i];
-      bool bearEngulf = bullPrev && bearCur && o[i] >= c[i - 1] && c[i] <= o[i - 1];
-
-      double swingLow = l[i], swingHigh = h[i];
-      for(int j = i - InpCdlSwingBars; j < i; j++)
-        {
-         swingLow  = MathMin(swingLow, l[j]);
-         swingHigh = MathMax(swingHigh, h[j]);
-        }
-
-      int dir = 0;
-      if(bullEngulf && l[i] <= swingLow) dir = 1;
-      else if(bearEngulf && h[i] >= swingHigh) dir = -1;
-      if(dir == 0) continue;
-
-      double swing = (dir > 0) ? l[i] : h[i];
-      double risk = dir * (c[i] - swing);
-      if(risk <= 0.0) continue;
-
-      if(draw)
-        {
-         double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpCdlArrowOffsetATR * atr[i];
-         double stop = swing;
-         double tp   = c[i] + dir * InpCdlRR * risk;
-         datetime t = r[i].time;
-         string id = IntegerToString((long)t);
-         bool isBuy = dir > 0;
-         string arrNm = g_cdl + "arr_" + id;
-         string slNm  = g_cdl + "sl_"  + id;
-         string tpNm  = g_cdl + "tp_"  + id;
-         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-         lastMarkerPrice = entryPrice; lastMarkerTime = t;
-         DrawCandleArrow(arrNm, t, entryPrice, isBuy);
-         DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
-                      "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
-         DrawSigLevel(tpNm, t, t + (InpCdlLineBars + 2) * perSec, tp, InpCdlTPCol, STYLE_DASH,
-                      "Engulfing TP: 1:" + DoubleToString(InpCdlRR, 1) + " R:R (fixed target IS the validated exit - no opposite-signal exit exists)");
-         PrintFormat("CandleSignal LOG: %s ENTRY %s @ %s  (validated GOLD only - Silver/BTC p=0.8511/0.5564, not real)",
-                     TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL");
-         if(!backfill && InpCdlAlert)
-           {
-            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-            FireSigAlert(StringFormat("%s %s: Engulfing-at-extreme %s PRINTED (validated GOLD only, p=0.0010 - "
-                                       "Silver/BTC NOT real) - chart overlay only, does not place/modify/close anything",
-                                       _Symbol, tf, isBuy ? "BUY" : "SELL"));
-           }
-        }
-     }
-
-   g_cdlLastProcessedBar = r[n - 1].time;
-   g_cdlLastMarkerPrice = lastMarkerPrice; g_cdlLastMarkerTime = lastMarkerTime;
-  }
-
-//+------------------------------------------------------------------+
-//| v1.47: rolling cap on candlestick overlay objects, same idea as      |
-//| PurgeOldSigObjects() above.                                          |
-//+------------------------------------------------------------------+
-void PurgeOldCandleObjects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_cdl) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| Full wipe + backfill for the candlestick overlay - same reasoning    |
-//| as ResyncStochSignals() above.                                       |
-//+------------------------------------------------------------------+
-void ResyncCandleSignals()
-  {
-   ObjectsDeleteAll(0, g_cdl);
-   g_cdlPeriod = (ENUM_TIMEFRAMES)_Period;
-   g_cdlLastProcessedBar = 0;
-   g_cdlLastMarkerPrice = 0.0; g_cdlLastMarkerTime = 0;
-   if(InpShowCandleSignals) ComputeCandleSignals(true);
-  }
-
-//+------------------------------------------------------------------+
-//| v1.48: EXPERIMENTAL/UNVALIDATED stack-transition marker overlay.    |
-//| Marks the FIRST bar where EMA21/50/200 become freshly stacked in    |
-//| trend order - no SL/TP, no exit, no posDir - just marks where the   |
-//| condition fires so it can be eyeballed against the stochastic       |
-//| overlay's own crosses on the same chart. Tested net-losing as a     |
-//| standalone entry (ema_stack_pure_entry_test.py) - shown anyway per  |
-//| direct request, to check by eye whether it still helps as a FILTER  |
-//| (vs. a standalone system) in a way the blunt statistical test above |
-//| could have missed (wrong threshold/lookback/combination untried).   |
-//+------------------------------------------------------------------+
-void ComputeStackSignals(const bool backfill)
-  {
-   int minBars = InpMA200 + 5;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[];
-   ArrayResize(c, n);
-   for(int i = 0; i < n; i++) c[i] = r[i].close;
-
-   double e21[], e50[], e200[];
-   SigEMA(c, n, InpMA21, e21);
-   SigEMA(c, n, InpMA50, e50);
-   SigEMA(c, n, InpMA200, e200);
-   double h[], l[], atr[];
-   ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { h[i] = r[i].high; l[i] = r[i].low; }
-   SigATR(h, l, c, n, 14, atr);
-
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_stkLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-   double lastMarkerPrice = backfill ? 0.0 : g_stkLastMarkerPrice;
-   datetime lastMarkerTime = backfill ? 0 : g_stkLastMarkerTime;
-
-   for(int i = from; i < n; i++)
-     {
-      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e200[i] == SIG_NA ||
-         e21[i - 1] == SIG_NA || e50[i - 1] == SIG_NA || e200[i - 1] == SIG_NA) continue;
-      bool draw = (i >= drawFrom);
-
-      int sdPrev = (e21[i - 1] > e50[i - 1] && e50[i - 1] > e200[i - 1]) ? 1 :
-                   (e21[i - 1] < e50[i - 1] && e50[i - 1] < e200[i - 1]) ? -1 : 0;
-      int sdCur  = (e21[i] > e50[i] && e50[i] > e200[i]) ? 1 :
-                   (e21[i] < e50[i] && e50[i] < e200[i]) ? -1 : 0;
-      if(sdCur == 0 || sdCur == sdPrev) continue;
-
-      if(draw)
-        {
-         bool isBuy = sdCur > 0;
-         double off = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
-         datetime t = r[i].time;
-         string nm = g_stk + "m_" + IntegerToString((long)t);
-         double price = isBuy ? l[i] - off : h[i] + off;
-         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-         price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-         lastMarkerPrice = price; lastMarkerTime = t;
-         DrawStackMarker(nm, t, price, isBuy);
-         if(!backfill && InpExpAlert)
-           {
-            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-            FireSigAlert(StringFormat("%s %s: EXPERIMENTAL EMA stack %s PRINTED (UNVALIDATED, tested net-losing) - "
-                                       "visual only, does not place/modify/close anything", _Symbol, tf, isBuy ? "BUY" : "SELL"));
-           }
-        }
-     }
-
-   g_stkLastProcessedBar = r[n - 1].time;
-   g_stkLastMarkerPrice = lastMarkerPrice; g_stkLastMarkerTime = lastMarkerTime;
-  }
-
-void ResyncStackSignals()
-  {
-   ObjectsDeleteAll(0, g_stk);
-   g_stkLastProcessedBar = 0;
-   g_stkLastMarkerPrice = 0.0; g_stkLastMarkerTime = 0;
-   if(InpShowStackSignals) ComputeStackSignals(true);
-  }
-
-//+------------------------------------------------------------------+
-//| v1.48: EXPERIMENTAL/UNVALIDATED EMA21 touch-and-reject marker       |
-//| overlay. Marks any bar whose high/low touches EMA21 but whose       |
-//| CLOSE ends back on the same side it approached from (a rejection,   |
-//| not a clean cross) - no trend/stochastic condition attached, pure   |
-//| price-vs-EMA21 geometry, so it can be compared by eye against both  |
-//| the stochastic crosses and the stack markers above.                 |
-//+------------------------------------------------------------------+
-void ComputeRejectSignals(const bool backfill)
-  {
-   int minBars = InpMA21 + 5;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-   double e21[], atr[];
-   SigEMA(c, n, InpMA21, e21);
-   SigATR(h, l, c, n, 14, atr);
-
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_rejLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-   double lastMarkerPrice = backfill ? 0.0 : g_rejLastMarkerPrice;
-   datetime lastMarkerTime = backfill ? 0 : g_rejLastMarkerTime;
-   datetime lastFiredUp   = backfill ? 0 : g_rejLastFiredUp;
-   datetime lastFiredDown = backfill ? 0 : g_rejLastFiredDown;
-   int cooldownSec = InpRejCooldownBars * PeriodSeconds(PERIOD_CURRENT);
-
-   for(int i = from; i < n; i++)
-     {
-      if(e21[i] == SIG_NA) continue;
-      bool draw = (i >= drawFrom);
-
-      bool touchedFromBelow = l[i] <= e21[i] && c[i] > e21[i];   // dipped to/through EMA21, closed above -> reject up
-      bool touchedFromAbove = h[i] >= e21[i] && c[i] < e21[i];   // poked up to/through EMA21, closed below -> reject down
-      if(!touchedFromBelow && !touchedFromAbove) continue;
-
-      //--- v1.53: cooldown - skip a same-direction reject that's too soon
-      //--- after the last one (see InpRejCooldownBars' own comment)
-      if(touchedFromBelow && (r[i].time - lastFiredUp) < cooldownSec) continue;
-      if(touchedFromAbove && (r[i].time - lastFiredDown) < cooldownSec) continue;
-      if(touchedFromBelow) lastFiredUp = r[i].time; else lastFiredDown = r[i].time;
-
-      if(draw)
-        {
-         bool isBuy = touchedFromBelow;
-         double off = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
-         datetime t = r[i].time;
-         string nm = g_rej + "m_" + IntegerToString((long)t);
-         double price = isBuy ? l[i] - off : h[i] + off;
-         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-         price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-         lastMarkerPrice = price; lastMarkerTime = t;
-         DrawRejectMarker(nm, t, price, isBuy);
-         if(!backfill && InpExpAlert)
-           {
-            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-            FireSigAlert(StringFormat("%s %s: EXPERIMENTAL EMA21 reject %s PRINTED (UNVALIDATED) - "
-                                       "visual only, does not place/modify/close anything", _Symbol, tf, isBuy ? "BUY" : "SELL"));
-           }
-        }
-     }
-
-   g_rejLastProcessedBar = r[n - 1].time;
-   g_rejLastMarkerPrice = lastMarkerPrice; g_rejLastMarkerTime = lastMarkerTime;
-   g_rejLastFiredUp = lastFiredUp; g_rejLastFiredDown = lastFiredDown;
-  }
-
-void ResyncRejectSignals()
-  {
-   ObjectsDeleteAll(0, g_rej);
-   g_rejLastProcessedBar = 0;
-   g_rejLastMarkerPrice = 0.0; g_rejLastMarkerTime = 0;
-   g_rejLastFiredUp = 0; g_rejLastFiredDown = 0;
-   if(InpShowRejectSignals) ComputeRejectSignals(true);
-  }
-
-//+------------------------------------------------------------------+
-//| v1.48: EXPERIMENTAL/UNVALIDATED mean-reversion snap-back marker     |
-//| overlay. Marks the FIRST bar where price gets InpSnapExtATR ATR     |
-//| away from EMA21 (a fresh extension event), in the REVERSION         |
-//| direction (opposite the extension) - "price pulled far away from    |
-//| the moving average, then the snap back" per direct request. The     |
-//| only mean-reversion idea on the chart - everything else here is     |
-//| trend-following.                                                      |
-//+------------------------------------------------------------------+
-void ComputeSnapbackSignals(const bool backfill)
-  {
-   int minBars = InpMA21 + 5;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-   double e21[], atr[];
-   SigEMA(c, n, InpMA21, e21);
-   SigATR(h, l, c, n, 14, atr);
-
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_snpLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-   double lastMarkerPrice = backfill ? 0.0 : g_snpLastMarkerPrice;
-   datetime lastMarkerTime = backfill ? 0 : g_snpLastMarkerTime;
-
-   for(int i = from; i < n; i++)
-     {
-      if(e21[i] == SIG_NA || atr[i] == SIG_NA || atr[i] <= 0.0 ||
-         e21[i - 1] == SIG_NA || atr[i - 1] == SIG_NA || atr[i - 1] <= 0.0) continue;
-      bool draw = (i >= drawFrom);
-
-      double gapPrev = (c[i - 1] - e21[i - 1]) / atr[i - 1];
-      double gapCur  = (c[i] - e21[i]) / atr[i];
-      int esPrev = (gapPrev >= InpSnapExtATR) ? 1 : (gapPrev <= -InpSnapExtATR) ? -1 : 0;
-      int esCur  = (gapCur  >= InpSnapExtATR) ? 1 : (gapCur  <= -InpSnapExtATR) ? -1 : 0;
-      if(esCur == 0 || esCur == esPrev) continue;
-
-      if(draw)
-        {
-         bool isBuy = esCur < 0;   // extended BELOW -> betting on a BUY snap-back
-         double off = InpSigArrowOffsetATR * atr[i];
-         datetime t = r[i].time;
-         string nm = g_snp + "m_" + IntegerToString((long)t);
-         double price = isBuy ? l[i] - off : h[i] + off;
-         double minGap = InpSigMinMarkerGapATR * atr[i];
-         price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-         lastMarkerPrice = price; lastMarkerTime = t;
-         DrawSnapbackMarker(nm, t, price, isBuy);
-         if(!backfill && InpExpAlert)
-           {
-            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-            FireSigAlert(StringFormat("%s %s: EXPERIMENTAL snap-back %s PRINTED (UNVALIDATED) - "
-                                       "visual only, does not place/modify/close anything", _Symbol, tf, isBuy ? "BUY" : "SELL"));
-           }
-        }
-     }
-
-   g_snpLastProcessedBar = r[n - 1].time;
-   g_snpLastMarkerPrice = lastMarkerPrice; g_snpLastMarkerTime = lastMarkerTime;
-  }
-
-void ResyncSnapbackSignals()
-  {
-   ObjectsDeleteAll(0, g_snp);
-   g_snpLastProcessedBar = 0;
-   g_snpLastMarkerPrice = 0.0; g_snpLastMarkerTime = 0;
-   if(InpShowSnapbackSignals) ComputeSnapbackSignals(true);
-  }
-
-//+------------------------------------------------------------------+
-//| v1.49: Trend-Aligned Stochastic overlay. Entry: a %K/%D cross (ANY  |
-//| level, no zone restriction) that matches the trend already aligned  |
-//| via the 2-EMA check - BUY only when close>EMA_fast>EMA_slow and the |
-//| cross is up; SELL only when close<EMA_fast<EMA_slow and the cross   |
-//| is down (mirror, per direct request). A disagreeing cross (e.g. a   |
-//| down-cross while the trend is aligned bullish) is simply ignored -  |
-//| never produces an opposite signal. Exit: the next qualifying        |
-//| opposite-direction signal (same posDir state-machine pattern as the |
-//| EMA-cross overlay). UNVALIDATED - see the input group's own         |
-//| comment; closest relatives (price-vs-EMA21 alone, EMA21-reject      |
-//| alone) were tested as filters on the zone-cross stochastic tonight  |
-//| and both failed - this is a different combination, not yet checked. |
-//+------------------------------------------------------------------+
-void ComputeTrendStochSignals(const bool backfill)
-  {
-   int minBars = MathMax(InpTSKPeriod + InpTSSlowing + InpTSDPeriod, InpTSEmaSlow) + InpTSSwingBars + 5;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-
-   double k[], d[];
-   SigClassicStoch(h, l, c, n, InpTSKPeriod, InpTSSlowing, InpTSDPeriod, k, d, InpTSStochMethod);
-   double eFast[], eSlow[];
-   SigEMA(c, n, InpTSEmaFast, eFast);
-   SigEMA(c, n, InpTSEmaSlow, eSlow);
-   double atr[];
-   SigATR(h, l, c, n, 14, atr);
-
-   if(!backfill && n >= 2)
-      CheckStochCrossProximity("trend-aligned", k[n - 1], d[n - 1], k[n - 2], d[n - 2],
-                                g_tsxCrossApproachAlerted, g_tsxLastCrossApproachAt);
-
-   int perSec = PeriodSeconds(PERIOD_CURRENT);
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_tsxLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-
-   int lastDir, posDir;
-   string lastArr, lastSl, lastTp;
-   double lastMarkerPrice;
-   datetime lastMarkerTime;
-   if(backfill)
-     {
-      lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
-      lastMarkerPrice = 0.0; lastMarkerTime = 0;
-     }
-   else
-     {
-      lastDir = g_tsxLastDir; posDir = g_tsxPosDir;
-      lastArr = g_tsxLastArr; lastSl = g_tsxLastSl; lastTp = g_tsxLastTp;
-      lastMarkerPrice = g_tsxLastMarkerPrice; lastMarkerTime = g_tsxLastMarkerTime;
-     }
-
-   for(int i = from; i < n; i++)
-     {
-      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA ||
-         eFast[i] == SIG_NA || eSlow[i] == SIG_NA) continue;
-      bool draw = (i >= drawFrom);
-      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpTSArrowOffsetATR * atr[i];
-      double offExit   = (atr[i] == SIG_NA) ? 0.0 : InpTSExitOffsetATR  * atr[i];
-
-      bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
-      bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
-      bool trendUp   = c[i] > eFast[i] && eFast[i] > eSlow[i];
-      bool trendDown = c[i] < eFast[i] && eFast[i] < eSlow[i];
-
-      int dir = 0;
-      if(crossUp && trendUp) dir = 1;
-      else if(crossDown && trendDown) dir = -1;
-      if(dir == 0) continue;
-
-      int prevPosDir = posDir;
-
-      //--- EXIT: the next qualifying opposite-direction signal closes
-      //--- whatever the ENTRY block below opened
-      if(prevPosDir != 0 && dir != prevPosDir)
-        {
-         if(draw)
-           {
-            datetime t = r[i].time;
-            string exId = g_tsx + "exit_" + IntegerToString((long)t);
-            bool wasLong = prevPosDir > 0;
-            double dotPrice = wasLong ? h[i] + offExit : l[i] - offExit;
-            double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-            dotPrice = NudgeAwayFromLastMarker(dotPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
-            lastMarkerPrice = dotPrice; lastMarkerTime = t;
-            DrawTrendStochDot(exId, t, dotPrice, wasLong);
-            PrintFormat("TrendStochSignal LOG: %s EXIT-%s @ %s  K=%s D=%s (closing posDir %d -> 0, UNVALIDATED)",
-                        TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                        DoubleToString(k[i], 2), DoubleToString(d[i], 2), prevPosDir);
-            if(!backfill && InpTSAlert)
-              {
-               string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-               FireSigAlert(StringFormat("%s %s: Trend-aligned stoch EXIT-%s PRINTED (UNVALIDATED) - chart "
-                                          "overlay only, does not place/modify/close anything",
-                                          _Symbol, tf, wasLong ? "LONG" : "SHORT"));
-              }
-           }
-         posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
-        }
-
-      //--- ENTRY: only while flat
-      if(dir != 0 && posDir == 0)
-        {
-         double swing = (dir > 0) ? l[i] : h[i];
-         for(int j = i - InpTSSwingBars + 1; j < i; j++)
-            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-         double risk = dir * (c[i] - swing);
-         if(risk > 0.0)
-           {
-            posDir = dir;
-            lastDir = dir;
-            if(draw)
-              {
-               double stop = swing;
-               double tp   = c[i] + dir * InpTSRR * risk;
-               datetime t = r[i].time;
-               string id = IntegerToString((long)t);
-               bool isBuy = dir > 0;
-               lastArr = g_tsx + "arr_" + id;
-               lastSl  = g_tsx + "sl_" + id;
-               lastTp  = g_tsx + "tp_" + id;
-               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-               entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-               lastMarkerPrice = entryPrice; lastMarkerTime = t;
-               DrawTrendStochArrow(lastArr, t, entryPrice, isBuy);
-               DrawSigLevel(lastSl, t, t + InpTSLineBars * perSec, stop, InpTSStopCol, STYLE_SOLID,
-                            "Trend-stoch SL: recent " + IntegerToString(InpTSSwingBars) + "-bar swing (UNVALIDATED)");
-               DrawSigLevel(lastTp, t, t + (InpTSLineBars + 2) * perSec, tp, InpTSTPCol, STYLE_DASH,
-                            "Trend-stoch TP: 1:" + DoubleToString(InpTSRR, 1) + " R:R example (UNVALIDATED)");
-               PrintFormat("TrendStochSignal LOG: %s ENTRY %s @ %s  K=%s D=%s  posDir->%d (UNVALIDATED)",
-                           TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                           DoubleToString(k[i], 2), DoubleToString(d[i], 2), posDir);
-               if(!backfill && InpTSAlert)
-                 {
-                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                  FireSigAlert(StringFormat("%s %s: Trend-aligned stoch %s PRINTED (UNVALIDATED) - chart "
-                                             "overlay only, does not place/modify/close anything",
-                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
-                 }
-              }
-           }
-        }
-     }
-
-   g_tsxLastDir = lastDir; g_tsxPosDir = posDir;
-   g_tsxLastArr = lastArr; g_tsxLastSl = lastSl; g_tsxLastTp = lastTp;
-   g_tsxLastProcessedBar = r[n - 1].time;
-   g_tsxLastMarkerPrice = lastMarkerPrice; g_tsxLastMarkerTime = lastMarkerTime;
-  }
-
-void PurgeOldTrendStochObjects()
-  {
-   PurgeOldPrefixedObjects(g_tsx);
-  }
-
-void ResyncTrendStochSignals()
-  {
-   ObjectsDeleteAll(0, g_tsx);
-   g_tsxLastDir = 0; g_tsxPosDir = 0;
-   g_tsxLastArr = ""; g_tsxLastSl = ""; g_tsxLastTp = "";
-   g_tsxLastProcessedBar = 0;
-   g_tsxLastMarkerPrice = 0.0; g_tsxLastMarkerTime = 0;
-   if(InpShowTrendStochSignals) ComputeTrendStochSignals(true);
-  }
 
 //+------------------------------------------------------------------+
 void SetupMAs()
@@ -3526,16 +1980,8 @@ int OnInit()
    //--- with - check this line in the Experts log any time there's doubt
    //--- about whether a changed input actually took effect, rather than
    //--- trusting the Properties dialog alone
-   string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
-                      (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.58 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
-               InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
-               InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
-               methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
-               InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false",
-               InpShowEmaCrossSignals ? "true" : "false", InpShowCandleSignals ? "true" : "false",
-               InpShowStackSignals ? "true" : "false", InpShowRejectSignals ? "true" : "false",
-               InpShowSnapbackSignals ? "true" : "false", InpShowTrendStochSignals ? "true" : "false");
+   PrintFormat("TradePanel v2.0 OnInit: showEmaCross=%s",
+               InpShowEmaCrossSignals ? "true" : "false");
 
    ApplyTheme();
    SetupMAs();
@@ -3544,20 +1990,7 @@ int OnInit()
    //--- moment of attach, not just until the first new bar's RebuildPanel()
    //--- call (same creation-order reasoning as RebuildPanel's own header).
    BackfillOverlayLines();
-   ResyncStochSignals();
-   //--- v1.47: the two new overlays below - fully independent namespaces/
-   //--- state, reversible by simply setting InpShowEmaCrossSignals/
-   //--- InpShowCandleSignals false (nothing else in the file changed)
    ResyncEmaCrossSignals();
-   ResyncCandleSignals();
-   //--- v1.48: three EXPERIMENTAL/UNVALIDATED marker-only overlays - see
-   //--- their own compute-function headers and version-history comment
-   ResyncStackSignals();
-   ResyncRejectSignals();
-   ResyncSnapbackSignals();
-   //--- v1.49: Trend-Aligned Stochastic overlay - own namespace,
-   //--- reversible via InpShowTrendStochSignals alone
-   ResyncTrendStochSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -3573,13 +2006,7 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, g_pm);
-   ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_emax);
-   ObjectsDeleteAll(0, g_cdl);
-   ObjectsDeleteAll(0, g_stk);
-   ObjectsDeleteAll(0, g_rej);
-   ObjectsDeleteAll(0, g_snp);
-   ObjectsDeleteAll(0, g_tsx);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -3633,40 +2060,10 @@ void CheckNewBar()
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
    UpdateOverlayLines();
-   if(InpShowStochSignals)
-     {
-      ComputeStochSignals(false);
-      PurgeOldSigObjects();
-     }
    if(InpShowEmaCrossSignals)
      {
       ComputeEmaCrossSignals(false);
       PurgeOldEmaCrossObjects();
-     }
-   if(InpShowCandleSignals)
-     {
-      ComputeCandleSignals(false);
-      PurgeOldCandleObjects();
-     }
-   if(InpShowStackSignals)
-     {
-      ComputeStackSignals(false);
-      PurgeOldPrefixedObjects(g_stk);
-     }
-   if(InpShowRejectSignals)
-     {
-      ComputeRejectSignals(false);
-      PurgeOldPrefixedObjects(g_rej);
-     }
-   if(InpShowSnapbackSignals)
-     {
-      ComputeSnapbackSignals(false);
-      PurgeOldPrefixedObjects(g_snp);
-     }
-   if(InpShowTrendStochSignals)
-     {
-      ComputeTrendStochSignals(false);
-      PurgeOldTrendStochObjects();
      }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
@@ -3840,9 +2237,9 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    //--- CHART_CHANGE. The period comparison filters out plain scroll/zoom.
    if(id == CHARTEVENT_CHART_CHANGE)
      {
-      if(g_sigPeriod != (ENUM_TIMEFRAMES)_Period)
+      if(g_emaxPeriod != (ENUM_TIMEFRAMES)_Period)
         {
-         ResyncStochSignals();
+         ResyncEmaCrossSignals();
          if(!g_dragging && !AnyEditFocused()) RebuildPanel();
         }
       return;
