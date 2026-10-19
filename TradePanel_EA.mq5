@@ -19,7 +19,25 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.55"
+#property version   "1.56"
+//--- 1.56: MA colors actually work now, per direct request ("can we set
+//--- the colours of the moving averages and the vwap?" - the MAs were
+//--- all showing red since 1.50 because the built-in iMA indicator can
+//--- never be recolored by an EA, a limitation that was documented but
+//--- apparently not obvious enough from the chart alone). New companion
+//--- file ColoredMA.mq5 (ships alongside this EA - compile it into your
+//--- Indicators folder, same as SessionVWAP.mq5) is a generic colored/
+//--- width-configurable MA supporting all 4 standard MT5 methods
+//--- (SMA/EMA/SMMA/LWMA); the EA now adds THREE separate instances of
+//--- it (21/50/200) via iCustom(), each with its own InpCol21/50/200 +
+//--- new InpMALineWidth passed straight through as that instance's own
+//--- parameters - real color/width control, same mechanism VWAP already
+//--- had. The original g_maHandle21/50/200 built-in iMA handles are kept
+//--- separately, used ONLY for the cross-proximity alert's CopyBuffer
+//--- reads (that calc doesn't care about color, no reason to duplicate
+//--- ColoredMA's own calc a second time just to read values back out).
+//--- Defaults per direct request: 21=yellow, 50=WHITE (was orange),
+//--- 200=purple, VWAP=aqua (unchanged, already was).
 //--- 1.55: InpShowStochSignals default changed to FALSE, per direct
 //--- request after a live chart showed the baseline stochastic overlay
 //--- firing BUY arrows straight into a clean, established downtrend -
@@ -490,9 +508,14 @@ input ENUM_MA_METHOD InpMAMethod   = MODE_EMA;    // MODE_EMA = exponential, MOD
 input int            InpMA21      = 21;
 input int            InpMA50      = 50;
 input int            InpMA200     = 200;
-input color          InpCol21     = clrYellow;        // same colour family as the other EAs' MA21
-input color          InpCol50     = C'255,140,0';     // neon orange - same family as the other EAs' MA50
+input color          InpCol21     = clrYellow;
+input color          InpCol50     = clrWhite;         // v1.56: changed from orange to white, per direct request
 input color          InpCol200    = C'191,0,255';     // neon purple
+//--- v1.56: these 3 colors now actually apply again - see ColoredMA.mq5
+//--- and SetupMAs() below. The native built-in iMA (v1.50) couldn't be
+//--- recolored by an EA at all once added - this now works the same way
+//--- VWAP already does, via our own custom indicator file instead.
+input int            InpMALineWidth = 1;
 input int            InpMAHistoryBars = 2000;         // rolling window of drawn MA history, PER LINE -
                                                        // v1.49: raised from 150 to 2000 per direct request
                                                        // ("need them to go back longer" / "make the default
@@ -528,12 +551,6 @@ input double InpStochProximityPts         = 3.0;   // "near" threshold, in raw %
 input int    InpStochProximityCooldownMin = 10;     // minimum minutes between alerts for the SAME approach,
                                                      // per overlay, so a gap oscillating near the
                                                      // threshold doesn't spam
-
-//--- v1.50: NO line-thickness input here for the 21/50/200 MAs - now
-//--- native chart indicators (see SetupMAs()), and MT5 gives an EA no
-//--- way to set a built-in indicator's line width any more than its
-//--- color; set width manually from the chart's indicator properties
-//--- if you want something other than MT5's own default.
 
 input group "=== Session VWAP (MT5 has no built-in VWAP - now a native custom indicator, SessionVWAP.mq5, ships alongside this EA and compiles separately - set its color/width from ITS OWN inputs, not here) ==="
 input bool   InpShowVWAP           = true;
@@ -778,6 +795,10 @@ int g_vwapHandle = INVALID_HANDLE;   // v1.49: SessionVWAP.mq5 custom indicator 
 //--- loop could silently match the wrong instance, or miss ours entirely
 //--- after a manual recolor elsewhere created a second same-named one).
 string g_maName21 = "", g_maName50 = "", g_maName200 = "", g_vwapName = "";
+//--- v1.56: ColoredMA.mq5 handles used ONLY for display (ChartIndicatorAdd) -
+//--- separate from g_maHandle21/50/200 above, which stay on the built-in
+//--- iMA and are used ONLY for the cross-proximity alert's CopyBuffer reads
+int g_maDisplayHandle21 = INVALID_HANDLE, g_maDisplayHandle50 = INVALID_HANDLE, g_maDisplayHandle200 = INVALID_HANDLE;
 int g_atrHandleCross = INVALID_HANDLE;
 bool     g_crossAlerted = false;     // true while the current approach has already fired its one
                                       // alert - cleared once the gap widens back out or the cross
@@ -3183,25 +3204,34 @@ void SetupMAs()
    if(InpEnableCrossAlert)
       g_atrHandleCross = iATR(_Symbol, PERIOD_CURRENT, InpCrossATRPeriod);
 
-   //--- v1.49: MAs now plotted as NATIVE chart indicators (ChartIndicatorAdd),
-   //--- not hand-drawn OBJ_TREND segments, per direct request - a native
-   //--- indicator plots over the WHOLE chart history automatically, with
-   //--- zero extra chart objects and no hang risk, unlike the hand-drawn
-   //--- approach this file used before (see InpMAHistoryBars's own comment
-   //--- for that history). The one real cost: MT5 doesn't let an EA set a
-   //--- built-in indicator's line color once added, so these will NOT use
-   //--- InpCol21/50/200 - they'll show in MT5's own default colors unless
-   //--- manually recolored from the chart's indicator list after attach.
-   //--- VWAP stays hand-drawn below (no native MT5 VWAP indicator exists).
-   //--- Guarded against duplicate adds (e.g. OnInit re-running on a
-   //--- timeframe switch without a full detach) via AddNativeIndicatorOnce()
-   //--- below - see its own header for why this replaced the original
-   //--- handle-matching approach (Opus audit finding, v1.52).
+   //--- v1.56: MAs now plotted via ColoredMA.mq5 (ships alongside this EA -
+   //--- compile it into your Indicators folder, same as SessionVWAP.mq5),
+   //--- NOT the bare built-in iMA indicator (v1.50-1.55). Native
+   //--- ChartIndicatorAdd still gives the unlimited-history/zero-extra-
+   //--- chart-object benefit, but because ColoredMA is OUR OWN indicator
+   //--- (not a built-in one), it DOES keep full color/width control via
+   //--- InpCol21/50/200 and InpMALineWidth - passed straight through as
+   //--- ColoredMA's own input parameters at the iCustom() call below. The
+   //--- plain g_maHandle21/50/200 iMA handles above are kept separately
+   //--- and ONLY used for the cross-proximity alert's own CopyBuffer reads
+   //--- (MAValue()) - that calculation doesn't care about color, so it
+   //--- stays on the cheaper built-in indicator rather than duplicating
+   //--- ColoredMA's own calc a second time just to read values back out.
+   //--- VWAP stays on its own separate file (SessionVWAP.mq5, no native
+   //--- MT5 VWAP indicator exists to build on). Guarded against duplicate
+   //--- adds via AddNativeIndicatorOnce() - see its own header (Opus audit
+   //--- finding, v1.52).
    if(InpShowMAs)
      {
-      AddNativeIndicatorOnce(g_maHandle21,  g_maName21);
-      AddNativeIndicatorOnce(g_maHandle50,  g_maName50);
-      AddNativeIndicatorOnce(g_maHandle200, g_maName200);
+      g_maDisplayHandle21  = iCustom(_Symbol, PERIOD_CURRENT, "ColoredMA", InpMA21,  InpMAMethod, InpCol21,  InpMALineWidth);
+      g_maDisplayHandle50  = iCustom(_Symbol, PERIOD_CURRENT, "ColoredMA", InpMA50,  InpMAMethod, InpCol50,  InpMALineWidth);
+      g_maDisplayHandle200 = iCustom(_Symbol, PERIOD_CURRENT, "ColoredMA", InpMA200, InpMAMethod, InpCol200, InpMALineWidth);
+      if(g_maDisplayHandle21 == INVALID_HANDLE || g_maDisplayHandle50 == INVALID_HANDLE || g_maDisplayHandle200 == INVALID_HANDLE)
+         Print("TradePanel: ColoredMA custom indicator not found/failed to load - compile ColoredMA.mq5 "
+               "into your Indicators folder (same place as SessionVWAP.mq5) for the MA lines to show.");
+      AddNativeIndicatorOnce(g_maDisplayHandle21,  g_maName21);
+      AddNativeIndicatorOnce(g_maDisplayHandle50,  g_maName50);
+      AddNativeIndicatorOnce(g_maDisplayHandle200, g_maName200);
      }
   }
 
@@ -3518,7 +3548,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.55 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.56 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
@@ -3582,6 +3612,9 @@ void OnDeinit(const int reason)
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
+   if(g_maDisplayHandle21  != INVALID_HANDLE) IndicatorRelease(g_maDisplayHandle21);
+   if(g_maDisplayHandle50  != INVALID_HANDLE) IndicatorRelease(g_maDisplayHandle50);
+   if(g_maDisplayHandle200 != INVALID_HANDLE) IndicatorRelease(g_maDisplayHandle200);
    if(g_vwapHandle  != INVALID_HANDLE) IndicatorRelease(g_vwapHandle);
    if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
   }
