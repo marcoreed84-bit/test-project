@@ -19,23 +19,28 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.44"
+#property version   "1.45"
+//--- 1.45: REVERTED part of 1.43/1.44 - "anchor the exit dot to its own
+//--- entry arrow's price" broke badly on any position that ran a real
+//--- distance before exiting (normal for a trending move): the dot ended
+//--- up pinned near the OLD entry price, floating in empty space far from
+//--- the actual exit candle - confirmed from a live chart showing several
+//--- dots stranded well above/below the real price action. Removed
+//--- g_sigLastEntryPrice and the anchor-to-entry-price logic entirely for
+//--- the DIFFERENT-candle case, which is now back to the exit bar's OWN
+//--- candle high/low (1.42's approach - same side as the direction being
+//--- closed, anchored where the exit actually happens). The SAME-candle
+//--- case (1.44, kept - dot follows a same-bar entry arrow's own price)
+//--- is unaffected and was never the problem.
 //--- 1.44: three changes, per direct request.
 //--- (a) Exit dot placement refined further: when a NEW entry arrow lands
 //--- on the SAME candle as an exit, the dot now follows THAT arrow's side
 //--- (buy arrow -> dot below it; sell arrow -> dot above it), regardless
 //--- of which direction is being closed - this is what's actually visible
-//--- together and must read cleanly. When no entry fires on that bar, the
-//--- dot anchors to its OWN entry arrow's actual price (lastEntryPrice,
-//--- 1.43 - possibly set many bars earlier, in a different price range),
-//--- same side as that original entry - not the exit bar's own candle.
+//--- together and must read cleanly.
 //--- (b) New InpSigArrowSize / InpSigDotSize inputs - arrow and dot width
 //--- are now user-settable instead of hardcoded (was fixed at 1 and 2
 //--- since 1.41).
-//--- 1.43 (folded into this version - not separately released): added
-//--- g_sigLastEntryPrice, persisted the same way as lastArr/Sl/Tp, so an
-//--- exit dot on a DIFFERENT bar than its entry can still anchor to that
-//--- entry's real price instead of the exit bar's own candle high/low.
 //--- 1.42: per direct request ("like we said with the buy signal arrow,
 //--- the exit dot must be below it") - an exit dot now draws on the SAME
 //--- side as the direction it's closing: EXIT-LONG (closing a BUY, which
@@ -504,13 +509,6 @@ bool g_sigZoneAlertedShort = false;
 int    g_sigLastDir = 0;
 string g_sigLastArr = "", g_sigLastSl = "", g_sigLastTp = "";
 int    g_sigPosDir  = 0;
-//--- 1.43: the PRICE of the entry arrow for the currently-open run,
-//--- persisted the same way as lastArr/Sl/Tp - per direct request, the
-//--- exit dot must be anchored to the arrow's OWN price (stacked directly
-//--- below a buy arrow / above a sell arrow), not computed from whatever
-//--- candle the exit happens to fire on (which can be many bars later,
-//--- during a totally different, possibly much tighter, price range).
-double g_sigLastEntryPrice = 0.0;
 //--- the newest bar a LIVE call has actually processed - lets the next
 //--- live call catch up on every bar since, not just assume exactly one
 //--- new bar happened (a stall/hang, or the EA being briefly detached,
@@ -1485,19 +1483,16 @@ void ComputeStochSignals(const bool backfill)
    string lastArr, lastSl, lastTp;
    double lastMarkerPrice;
    datetime lastMarkerTime;
-   double lastEntryPrice;
    if(backfill)
      {
       lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
       lastMarkerPrice = 0.0; lastMarkerTime = 0;
-      lastEntryPrice = 0.0;
      }
    else
      {
       lastDir = g_sigLastDir; posDir = g_sigPosDir;
       lastArr = g_sigLastArr; lastSl = g_sigLastSl; lastTp = g_sigLastTp;
       lastMarkerPrice = g_sigLastMarkerPrice; lastMarkerTime = g_sigLastMarkerTime;
-      lastEntryPrice = g_sigLastEntryPrice;
      }
 
    for(int i = from; i < n; i++)
@@ -1637,7 +1632,6 @@ void ComputeStochSignals(const bool backfill)
                   entryDrawnPrice = NudgeAwayFromLastMarker(entryDrawnPrice, t, !isBuy,
                                                              lastMarkerPrice, lastMarkerTime, minGap);
                   lastMarkerPrice = entryDrawnPrice; lastMarkerTime = t;
-                  lastEntryPrice = entryDrawnPrice;   // 1.43: the exit dot for THIS run anchors here
                   DrawSigArrow(lastArr, t, entryDrawnPrice, isBuy);
                   DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
                                "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
@@ -1720,40 +1714,36 @@ void ComputeStochSignals(const bool backfill)
                datetime t = r[i].time;
                string exId = g_sig + "exit_" + IntegerToString((long)t);
                bool wasLong = prevPosDir > 0;
-               //--- 1.44: two rules, per two direct, explicit requests:
-               //--- (a) SAME-CANDLE case ("a buy arrow printed, and on the same
-               //--- candle an exit signal - the exit dot below the buy arrow;
-               //--- same candle sell arrow - dot above the sell arrow") - when a
-               //--- NEW entry arrow ALSO lands on this exact bar, the dot follows
-               //--- THAT arrow's side, no matter which direction it's closing -
-               //--- this is what's actually on screen together and what must
-               //--- read cleanly, overriding rule (b) below for this bar only.
-               //--- (b) DIFFERENT-CANDLE case (1.43, per the earlier direct
-               //--- request) - when no entry fires on this exact bar, the dot
-               //--- anchors to its OWN entry arrow's actual price (lastEntryPrice,
-               //--- possibly set many bars ago in a different price range), on
-               //--- the same side as that original entry - not the exit bar's
-               //--- own candle.
+               //--- 1.45: REVERTED the 1.43 "always anchor to the entry arrow's
+               //--- own price" idea for the DIFFERENT-candle case - it broke
+               //--- badly on any position that ran a real distance before
+               //--- exiting (completely normal for a trending move): the exit
+               //--- dot ended up pinned near the OLD entry price, floating in
+               //--- empty space far from the actual exit candle, nowhere near
+               //--- where the exit happened - confirmed from a live chart
+               //--- showing dots stranded well above/below price action.
+               //--- Two rules now:
+               //--- (a) SAME-CANDLE case (1.44, kept - "a buy arrow printed,
+               //--- and on the same candle an exit signal - the exit dot below
+               //--- the buy arrow; same candle sell arrow - dot above the sell
+               //--- arrow"): when a NEW entry arrow ALSO lands on this exact
+               //--- bar, the dot follows THAT arrow's side and price.
+               //--- (b) DIFFERENT-CANDLE case: back to the THIS bar's own
+               //--- candle high/low (1.42's approach) - same side as the
+               //--- direction being closed, but anchored to where the exit is
+               //--- actually happening, not where the entry happened.
                bool dotAbove;
-               double anchorPrice;
+               double dotPrice;
                if(entryDrawnThisBar)
                  {
-                  dotAbove   = entryDrawnAbove;
-                  anchorPrice = entryDrawnPrice;
+                  dotAbove = entryDrawnAbove;
+                  dotPrice = dotAbove ? entryDrawnPrice + offExit : entryDrawnPrice - offExit;
                  }
                else
                  {
-                  dotAbove   = !wasLong;
-                  anchorPrice = lastEntryPrice;
-                 }
-               //--- falls back to the candle's own high/low only when there's no
-               //--- recorded entry price at all (e.g. the EA was attached mid-
-               //--- position, so no entry arrow for this run was ever drawn)
-               double dotPrice;
-               if(anchorPrice != 0.0)
-                  dotPrice = dotAbove ? anchorPrice + offExit : anchorPrice - offExit;
-               else
+                  dotAbove = !wasLong;
                   dotPrice = dotAbove ? r[i].high + offExit : r[i].low - offExit;
+                 }
                //--- 1.40: general anti-collision (covers the case above too, plus
                //--- any other marker combination/different-bar case the same-bar
                //--- stacking above doesn't reach) - see NudgeAwayFromLastMarker()'s
@@ -1782,7 +1772,6 @@ void ComputeStochSignals(const bool backfill)
                //--- otherwise a later same-side entry erases an arrow whose exit
                //--- dot is still on the chart (an orphaned exit dot)
                lastArr = ""; lastSl = ""; lastTp = "";
-               lastEntryPrice = 0.0;   // 1.43: that run is closed - its anchor goes with it
               }
            }
         }
@@ -1795,7 +1784,6 @@ void ComputeStochSignals(const bool backfill)
    g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
    g_sigLastProcessedBar = r[n - 1].time;
    g_sigLastMarkerPrice = lastMarkerPrice; g_sigLastMarkerTime = lastMarkerTime;
-   g_sigLastEntryPrice = lastEntryPrice;
   }
 
 //+------------------------------------------------------------------+
@@ -1842,7 +1830,6 @@ void ResyncStochSignals()
    g_sigLastArr = ""; g_sigLastSl = ""; g_sigLastTp = "";
    g_sigLastProcessedBar = 0;
    g_sigLastMarkerPrice = 0.0; g_sigLastMarkerTime = 0;
-   g_sigLastEntryPrice = 0.0;
    if(InpShowStochSignals) ComputeStochSignals(true);
   }
 
@@ -2099,7 +2086,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.44 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.45 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
