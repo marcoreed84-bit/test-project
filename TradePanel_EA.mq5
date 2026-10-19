@@ -19,7 +19,26 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.39"
+#property version   "1.40"
+//--- 1.40: two changes, per direct request.
+//--- (a) Default inputs changed: entry stoch 14/3/3 -> 21/5/5, exit stoch
+//--- 14/3/3 -> 21/5/5, InpSigStochMethod SMOOTHED -> SIG_STOCH_SMA ("Simple"
+//--- in MT5's own dropdown terms - plain SMA of %K and %D, not the SUM
+//--- variant), InpShowMidlineSignals false -> true (its band was already
+//--- 40/60 by default).
+//--- (b) Fixed a reported signal-marker overlap (a buy arrow and an
+//--- EXIT-SHORT dot sitting on top of each other during a tight, low-range
+//--- consolidation). The old anti-collision logic ONLY handled an entry
+//--- and exit landing on the exact SAME bar on the SAME side - it had no
+//--- answer for two markers on nearby-but-different bars ending up close
+//--- in price purely because ATR/range was small. New general
+//--- NudgeAwayFromLastMarker(), applied to every entry arrow AND every
+//--- exit dot: checks the most recently drawn marker of ANY kind, and if
+//--- it's both close in price (< InpSigMinMarkerGapATR x ATR) and close in
+//--- time (within InpSigMarkerLookbackBars bars), pushes the new one
+//--- further out in its own natural direction instead of letting them
+//--- overlap. Markers far apart in time are left alone even if
+//--- coincidentally similar in price - not visual clutter, a coincidence.
 //--- 1.39: InpSigDrawBars (1.38) replaced with InpSigDrawDays (default 7),
 //--- per direct request - "limit it to 1 week". A raw bar count means a
 //--- different real-world window on every timeframe (2000 bars was ~20
@@ -321,16 +340,16 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
 
 input group "=== Classic/textbook Stochastic signal overlay - UNVALIDATED (VISUAL ONLY - never places, modifies or closes anything) ==="
 input bool   InpShowStochSignals   = true;
-input int    InpSigKPeriod         = 14;      // %K period
-input int    InpSigSlowing         = 3;       // slowing
-input int    InpSigDPeriod         = 3;       // %D period
+input int    InpSigKPeriod         = 21;      // %K period
+input int    InpSigSlowing         = 5;       // slowing
+input int    InpSigDPeriod         = 5;       // %D period
 enum ENUM_SIG_STOCH_METHOD
   {
    SIG_STOCH_SUM      = 0,   // Simple - sum num/den separately over the slowing window then divide
    SIG_STOCH_SMA      = 1,   // Simple - plain SMA of the raw per-bar %K ("textbook" convention)
    SIG_STOCH_SMOOTHED = 2    // Smoothed (SMMA) - matches MT5's native Stochastic "Method: Smoothed"
   };
-input ENUM_SIG_STOCH_METHOD InpSigStochMethod = SIG_STOCH_SMOOTHED;
+input ENUM_SIG_STOCH_METHOD InpSigStochMethod = SIG_STOCH_SMA;
                                                // v1.34: confirmed via user's native MT5 Stochastic Properties
                                                // dialog screenshot that their indicator's Method is set to
                                                // "Smoothed", not "Simple" - neither of the two old SMA-family
@@ -371,6 +390,13 @@ input int    InpSigDrawDays         = 7;      // v1.39: only signals from the la
                                                // build up first) - see 1.39 header note
 input int    InpSigLineBars        = 8;      // stop-line length in bars; the TP line runs 2 bars longer
                                                // so the two levels stay readable when they sit close together
+input double InpSigMinMarkerGapATR = 1.0;     // v1.40: minimum price gap (in ATR) kept between ANY two
+                                               // signal markers that land close together in time - fixes
+                                               // a reported buy-arrow/exit-dot overlap during a tight,
+                                               // low-range consolidation
+input int    InpSigMarkerLookbackBars = 5;    // v1.40: only markers within this many bars of each other are
+                                               // checked for the above - markers far apart in time are left
+                                               // alone even if coincidentally close in price
 input color  InpSigBuyCol          = C'0,150,255';
 input color  InpSigSellCol         = C'255,0,200';
 input color  InpSigStopCol         = clrRed;
@@ -385,15 +411,15 @@ input double InpSigArrowOffsetATR  = 0.5;     // how far ENTRY arrows sit from t
 
 input group "=== Classic/textbook Stochastic EXIT signal overlay - UNVALIDATED (own settings, independent of entry) ==="
 input bool   InpShowExitSignals    = true;    // master on/off for exit dots - entry overlay above is unaffected
-input int    InpExitKPeriod        = 14;      // exit stochastic %K period (can differ from the entry one)
-input int    InpExitSlowing        = 3;       // exit stochastic slowing
-input int    InpExitDPeriod        = 3;       // exit stochastic %D period
+input int    InpExitKPeriod        = 21;      // exit stochastic %K period (can differ from the entry one)
+input int    InpExitSlowing        = 5;       // exit stochastic slowing
+input int    InpExitDPeriod        = 5;       // exit stochastic %D period
 input bool   InpSigExitAlert       = true;    // push+sound when an exit dot prints (live only)
 input double InpSigExitOffsetATR   = 1.0;     // how far EXIT dots sit from the candle, in ATR(14) multiples -
                                                // bigger than the entry offset so the two never overlap
 
 input group "=== Midline-cross signal overlay - EXPERIMENTAL, UNVALIDATED (separate construction, not combined with the entry/exit above) ==="
-input bool   InpShowMidlineSignals = false;   // off by default - a genuinely different, less-tested idea than
+input bool   InpShowMidlineSignals = true;    // per direct request, now on by default (was off) - a genuinely different, less-tested idea than
                                                // the zone-cross entry above (backtested full-history %PF~0.65,
                                                // still a net loser - see project research notes)
 input double InpMidlineBandLow     = 40.0;    // %K must be inside this band on the cross bar (not a deep
@@ -448,6 +474,14 @@ int    g_sigPosDir  = 0;
 //--- new bar happened (a stall/hang, or the EA being briefly detached,
 //--- can let several bars close in between)
 datetime g_sigLastProcessedBar = 0;
+//--- 1.40: the price/time of the most recently drawn signal marker (entry
+//--- arrow OR exit dot), persisted across live calls the same way as the
+//--- state above - lets a new marker check for a near-collision against
+//--- whatever was drawn just before it, even on a DIFFERENT bar (not just
+//--- the same-bar case the old stacking logic handled) - see
+//--- NudgeAwayFromLastMarker()'s own header for why this was needed.
+double   g_sigLastMarkerPrice = 0.0;
+datetime g_sigLastMarkerTime  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1148,6 +1182,30 @@ void DrawSigLevel(const string nm, const datetime t1, const datetime t2, const d
   }
 
 //+------------------------------------------------------------------+
+//| 1.40: general anti-collision for ANY two signal markers (entry     |
+//| arrow or exit dot, any combination), not just the old special case |
+//| of an entry+exit landing on the exact same bar. A tight/compressed |
+//| consolidation (small ATR, small candle range) can put two markers  |
+//| from DIFFERENT nearby bars close enough in price to visually       |
+//| overlap even though nothing about the same-bar stacking logic      |
+//| applies - reported from a live chart (a buy arrow and an           |
+//| EXIT-SHORT dot sitting right on top of each other at the bottom of |
+//| a shallow dip). Only nudges when the two markers are BOTH close in |
+//| price (< minGap) AND close in time (within InpSigMarkerLookbackBars|
+//| bars) - far-apart-in-time markers at a similar price are a         |
+//| coincidence, not visual clutter, and must not be pushed around.    |
+//+------------------------------------------------------------------+
+double NudgeAwayFromLastMarker(double candidatePrice, datetime candidateTime, bool pushUp,
+                               double lastMarkerPrice, datetime lastMarkerTime, double minGap)
+  {
+   if(lastMarkerTime == 0 || minGap <= 0.0) return candidatePrice;
+   double barsApart = MathAbs((double)(candidateTime - lastMarkerTime)) / (double)PeriodSeconds(PERIOD_CURRENT);
+   if(barsApart > InpSigMarkerLookbackBars) return candidatePrice;
+   if(MathAbs(candidatePrice - lastMarkerPrice) >= minGap) return candidatePrice;
+   return pushUp ? lastMarkerPrice + minGap : lastMarkerPrice - minGap;
+  }
+
+//+------------------------------------------------------------------+
 void DrawSigArrow(const string nm, const datetime t, const double price, const bool isBuy)
   {
    if(ObjectFind(0, nm) >= 0) return;
@@ -1380,14 +1438,18 @@ void ComputeStochSignals(const bool backfill)
 
    int lastDir, posDir;
    string lastArr, lastSl, lastTp;
+   double lastMarkerPrice;
+   datetime lastMarkerTime;
    if(backfill)
      {
       lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+      lastMarkerPrice = 0.0; lastMarkerTime = 0;
      }
    else
      {
       lastDir = g_sigLastDir; posDir = g_sigPosDir;
       lastArr = g_sigLastArr; lastSl = g_sigLastSl; lastTp = g_sigLastTp;
+      lastMarkerPrice = g_sigLastMarkerPrice; lastMarkerTime = g_sigLastMarkerTime;
      }
 
    for(int i = from; i < n; i++)
@@ -1520,6 +1582,13 @@ void ComputeStochSignals(const bool backfill)
                   entryDrawnThisBar = true;
                   entryDrawnAbove   = !isBuy;   // buy arrow sits BELOW, sell arrow ABOVE
                   entryDrawnPrice   = isBuy ? r[i].low - offEntry : r[i].high + offEntry;
+                  //--- 1.40: general anti-collision against whatever marker was drawn
+                  //--- just before this one (any type, possibly a different bar) - see
+                  //--- NudgeAwayFromLastMarker()'s own header
+                  double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+                  entryDrawnPrice = NudgeAwayFromLastMarker(entryDrawnPrice, t, !isBuy,
+                                                             lastMarkerPrice, lastMarkerTime, minGap);
+                  lastMarkerPrice = entryDrawnPrice; lastMarkerTime = t;
                   DrawSigArrow(lastArr, t, entryDrawnPrice, isBuy);
                   DrawSigLevel(lastSl, t, t + (InpSigLineBars)     * perSec, stop, InpSigStopCol, STYLE_SOLID,
                                "Classic SL: recent " + IntegerToString(InpSigSwingBars) + "-bar swing (unvalidated)");
@@ -1612,6 +1681,14 @@ void ComputeStochSignals(const bool backfill)
                   dotPrice = wasLong ? entryDrawnPrice + offExit : entryDrawnPrice - offExit;
                else
                   dotPrice = wasLong ? r[i].high + offExit : r[i].low - offExit;
+               //--- 1.40: general anti-collision (covers the case above too, plus
+               //--- any other marker combination/opposite-side case/different-bar
+               //--- case the same-bar stacking above doesn't reach) - see
+               //--- NudgeAwayFromLastMarker()'s own header
+               double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+               dotPrice = NudgeAwayFromLastMarker(dotPrice, t, wasLong,
+                                                   lastMarkerPrice, lastMarkerTime, minGapExit);
+               lastMarkerPrice = dotPrice; lastMarkerTime = t;
                DrawSigDot(exId, t, dotPrice, wasLong);
                //--- same unconditional ground-truth log line as the entry side
                PrintFormat("StochSignal LOG: %s EXIT-%s @ %s  ExitK[i-1]=%.3f ExitD[i-1]=%.3f -> ExitK[i]=%.3f ExitD[i]=%.3f  (closing posDir %d -> 0)",
@@ -1643,6 +1720,7 @@ void ComputeStochSignals(const bool backfill)
    g_sigLastDir = lastDir; g_sigPosDir = posDir;
    g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
    g_sigLastProcessedBar = r[n - 1].time;
+   g_sigLastMarkerPrice = lastMarkerPrice; g_sigLastMarkerTime = lastMarkerTime;
   }
 
 //+------------------------------------------------------------------+
@@ -1688,6 +1766,7 @@ void ResyncStochSignals()
    g_sigLastDir = 0; g_sigPosDir = 0;
    g_sigLastArr = ""; g_sigLastSl = ""; g_sigLastTp = "";
    g_sigLastProcessedBar = 0;
+   g_sigLastMarkerPrice = 0.0; g_sigLastMarkerTime = 0;
    if(InpShowStochSignals) ComputeStochSignals(true);
   }
 
@@ -1944,7 +2023,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.39 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.40 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
