@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.54"
+#property version   "1.55"
+//--- 1.55: InpShowStochSignals default changed to FALSE, per direct
+//--- request after a live chart showed the baseline stochastic overlay
+//--- firing BUY arrows straight into a clean, established downtrend -
+//--- NOT a bug: that overlay has never had any trend filter, by design
+//--- (its own rule is only ever the %K/%D zone-cross, never price vs
+//--- EMA). The new Trend-Aligned Stochastic overlay
+//--- (InpShowTrendStochSignals, lime/red) exists specifically to only
+//--- fire in the direction the trend already agrees with - that one
+//--- stays default ON. Turn InpShowStochSignals back on only if you
+//--- specifically want the two constructions side by side again.
 //--- 1.54: cooldown added to the EMA21-reject overlay (InpRejCooldownBars,
 //--- default 5 bars) - the single biggest contributor to the ~5,300 live
 //--- chart objects the Opus audit found on M1 with every overlay on
@@ -553,7 +563,14 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
                                                // trade signal of any kind - this panel has no strategy)
 
 input group "=== Classic/textbook Stochastic signal overlay - UNVALIDATED (VISUAL ONLY - never places, modifies or closes anything) ==="
-input bool   InpShowStochSignals   = true;
+input bool   InpShowStochSignals   = false;   // v1.55: default OFF per direct request, after a live chart
+                                               // showed it firing BUY signals straight into a clean
+                                               // downtrend - this overlay has NO trend filter at all (by
+                                               // design, it only ever checks the stochastic zone-cross,
+                                               // never price vs EMA), which is exactly the behavior the
+                                               // new Trend-Aligned Stochastic overlay (InpShowTrendStochSignals)
+                                               // exists to avoid - turn this back on only if you specifically
+                                               // want to compare it against the baseline construction again
 input int    InpSigKPeriod         = 21;      // %K period
 input int    InpSigSlowing         = 5;       // slowing
 input int    InpSigDPeriod         = 5;       // %D period
@@ -3501,7 +3518,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.54 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.55 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
