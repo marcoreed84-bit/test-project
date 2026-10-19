@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.50"
+#property version   "1.51"
+//--- 1.51: push notifications added for the four new overlays from this
+//--- session (EMA21/50 crossover, candlestick engulfing, the three
+//--- EXPERIMENTAL markers, and the new Trend-Aligned Stochastic) - same
+//--- FireSigAlert() mechanism already used by the baseline stochastic
+//--- overlay, each gated by its own input (InpEmaCrossAlert, InpCdlAlert,
+//--- InpExpAlert, InpTSAlert). InpExpAlert defaults FALSE (the reject
+//--- condition fires often, per the live chart already seen tonight -
+//--- turn it on deliberately); everything else defaults true, matching
+//--- the baseline overlay's own convention. Candlestick overlay only
+//--- alerts on entry (no opposite-signal exit exists for it to wait on).
 //--- 1.50: MAs and VWAP switched from hand-drawn OBJ_TREND segments to
 //--- NATIVE chart indicators, per direct request ("need them to go back
 //--- longer" + "can you not set the EA to add the relevant moving
@@ -608,6 +618,7 @@ input double InpEmaCrossExitOffsetATR  = 1.2; // own markers (independent overla
 input int    InpEmaCrossArrowSize  = 1;
 input int    InpEmaCrossDotSize    = 2;
 input int    InpEmaCrossLineBars   = 8;       // stop-line length in bars; the TP line runs 2 bars longer
+input bool   InpEmaCrossAlert      = true;    // push notification on entry AND exit (next opposite cross)
 
 input group "=== Candlestick engulfing-at-extreme signal overlay - validated on GOLD ONLY tonight (p=0.0010) - Silver/BTC are NOT real (p=0.8511/0.5564), shown anyway for comparison - VISUAL ONLY ==="
 input bool   InpShowCandleSignals = true;    // bullish/bearish engulfing where the pattern bar IS the
@@ -624,6 +635,8 @@ input color  InpCdlTPCol           = clrYellow;
 input double InpCdlArrowOffsetATR  = 1.0;
 input int    InpCdlArrowSize       = 1;
 input int    InpCdlLineBars        = 8;
+input bool   InpCdlAlert           = true;    // push notification on entry (no exit alert - this
+                                               // construction has no opposite-signal exit to wait for)
 
 input group "=== EXPERIMENTAL marker-only overlays, per direct request - NONE of these passed tonight's honest random-timing/net-PF testing as standalone filters (see v1.48 version-history comment + each marker's own tooltip) - for VISUAL INSPECTION ONLY, no SL/TP lines, no claim of an edge ==="
 input bool   InpShowStackSignals    = true;   // fresh EMA21/50/200 stack transition (trend-following) -
@@ -640,6 +653,10 @@ input double InpSnapExtATR          = 2.0;    // how many ATR from EMA21 counts 
 input color  InpSnapBuyCol          = clrSpringGreen;
 input color  InpSnapSellCol         = clrOrchid;
 input int    InpExpMarkerSize       = 2;
+input bool   InpExpAlert            = false;  // push notification for the 3 experimental overlays - OFF by
+                                               // default (the reject condition especially fires often, per
+                                               // the live chart you've already seen - turn on deliberately,
+                                               // not a default "just in case" setting)
 
 input group "=== Trend-Aligned Stochastic overlay - own settings, separate from the baseline stochastic overlay above ==="
 input bool   InpShowTrendStochSignals = true;   // per direct request: stochastic cross only fires in the
@@ -668,6 +685,7 @@ input double InpTSExitOffsetATR    = 1.2;
 input int    InpTSArrowSize        = 1;
 input int    InpTSDotSize          = 2;
 input int    InpTSLineBars         = 8;
+input bool   InpTSAlert            = true;    // push notification on entry AND exit
 
 CTrade trade;
 
@@ -2323,6 +2341,13 @@ void ComputeEmaCrossSignals(const bool backfill)
             PrintFormat("EmaCrossSignal LOG: %s EXIT-%s @ %s  E21=%s E50=%s (closing posDir %d -> 0)",
                         TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
                         DoubleToString(e21[i], _Digits), DoubleToString(e50[i], _Digits), prevPosDir);
+            if(!backfill && InpEmaCrossAlert)
+              {
+               string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+               FireSigAlert(StringFormat("%s %s: EMA21/50 cross EXIT-%s PRINTED (held to this opposite cross) - "
+                                          "chart overlay only, does not place/modify/close anything",
+                                          _Symbol, tf, wasLong ? "LONG" : "SHORT"));
+              }
            }
          posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
         }
@@ -2361,6 +2386,13 @@ void ComputeEmaCrossSignals(const bool backfill)
                PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
                            TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                            DoubleToString(e21[i], _Digits), DoubleToString(e50[i], _Digits), posDir);
+               if(!backfill && InpEmaCrossAlert)
+                 {
+                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                  FireSigAlert(StringFormat("%s %s: EMA21/50 cross %s PRINTED (validated construction, hold to "
+                                             "next opposite cross) - chart overlay only, does not place/modify/close anything",
+                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                 }
               }
            }
         }
@@ -2495,6 +2527,13 @@ void ComputeCandleSignals(const bool backfill)
                       "Engulfing TP: 1:" + DoubleToString(InpCdlRR, 1) + " R:R (fixed target IS the validated exit - no opposite-signal exit exists)");
          PrintFormat("CandleSignal LOG: %s ENTRY %s @ %s  (validated GOLD only - Silver/BTC p=0.8511/0.5564, not real)",
                      TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL");
+         if(!backfill && InpCdlAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: Engulfing-at-extreme %s PRINTED (validated GOLD only, p=0.0010 - "
+                                       "Silver/BTC NOT real) - chart overlay only, does not place/modify/close anything",
+                                       _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
         }
      }
 
@@ -2601,6 +2640,12 @@ void ComputeStackSignals(const bool backfill)
          price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          lastMarkerPrice = price; lastMarkerTime = t;
          DrawStackMarker(nm, t, price, isBuy);
+         if(!backfill && InpExpAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: EXPERIMENTAL EMA stack %s PRINTED (UNVALIDATED, tested net-losing) - "
+                                       "visual only, does not place/modify/close anything", _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
         }
      }
 
@@ -2675,6 +2720,12 @@ void ComputeRejectSignals(const bool backfill)
          price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          lastMarkerPrice = price; lastMarkerTime = t;
          DrawRejectMarker(nm, t, price, isBuy);
+         if(!backfill && InpExpAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: EXPERIMENTAL EMA21 reject %s PRINTED (UNVALIDATED) - "
+                                       "visual only, does not place/modify/close anything", _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
         }
      }
 
@@ -2753,6 +2804,12 @@ void ComputeSnapbackSignals(const bool backfill)
          price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          lastMarkerPrice = price; lastMarkerTime = t;
          DrawSnapbackMarker(nm, t, price, isBuy);
+         if(!backfill && InpExpAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: EXPERIMENTAL snap-back %s PRINTED (UNVALIDATED) - "
+                                       "visual only, does not place/modify/close anything", _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
         }
      }
 
@@ -2867,6 +2924,16 @@ void ComputeTrendStochSignals(const bool backfill)
             dotPrice = NudgeAwayFromLastMarker(dotPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
             lastMarkerPrice = dotPrice; lastMarkerTime = t;
             DrawTrendStochDot(exId, t, dotPrice, wasLong);
+            PrintFormat("TrendStochSignal LOG: %s EXIT-%s @ %s  K=%s D=%s (closing posDir %d -> 0, UNVALIDATED)",
+                        TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
+                        DoubleToString(k[i], 2), DoubleToString(d[i], 2), prevPosDir);
+            if(!backfill && InpTSAlert)
+              {
+               string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+               FireSigAlert(StringFormat("%s %s: Trend-aligned stoch EXIT-%s PRINTED (UNVALIDATED) - chart "
+                                          "overlay only, does not place/modify/close anything",
+                                          _Symbol, tf, wasLong ? "LONG" : "SHORT"));
+              }
            }
          posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
         }
@@ -2901,6 +2968,16 @@ void ComputeTrendStochSignals(const bool backfill)
                             "Trend-stoch SL: recent " + IntegerToString(InpTSSwingBars) + "-bar swing (UNVALIDATED)");
                DrawSigLevel(lastTp, t, t + (InpTSLineBars + 2) * perSec, tp, InpTSTPCol, STYLE_DASH,
                             "Trend-stoch TP: 1:" + DoubleToString(InpTSRR, 1) + " R:R example (UNVALIDATED)");
+               PrintFormat("TrendStochSignal LOG: %s ENTRY %s @ %s  K=%s D=%s  posDir->%d (UNVALIDATED)",
+                           TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
+                           DoubleToString(k[i], 2), DoubleToString(d[i], 2), posDir);
+               if(!backfill && InpTSAlert)
+                 {
+                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                  FireSigAlert(StringFormat("%s %s: Trend-aligned stoch %s PRINTED (UNVALIDATED) - chart "
+                                             "overlay only, does not place/modify/close anything",
+                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                 }
               }
            }
         }
@@ -3262,7 +3339,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.50 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.51 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
