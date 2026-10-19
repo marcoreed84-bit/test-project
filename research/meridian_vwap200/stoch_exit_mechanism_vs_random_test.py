@@ -10,27 +10,36 @@ duration and closing out - or whether the exit logic itself is what's
 destroying the edge (stops too tight for noise, target cut short by
 the opposite-cross exit before it's reached, etc).
 
-Method: for each REAL entry (same bar, same direction as the real
-trade), draw a random hold_bars value from the REAL trades' own
-hold_bars distribution (shuffled, same real spread cost both legs) and
-exit flat after that many bars - no stop, no target, no opposite-cross
-rule. Same number of trades, same entries, same average holding time
-as the real construction - the ONLY thing varied is whether the exit
+Method: entries (bar, direction, swing/risk) are identical to the real
+construction and computed ONCE (they don't depend on the random exit
+draw at all). For each draw, every entry's exit is instead a flat
+close after a random hold_bars value drawn from the REAL trades' own
+holding-time distribution (shuffled) - no stop, no target, no
+opposite-cross rule. Same entries, same average holding time, same
+real spread cost both legs - the ONLY thing varied is whether the exit
 is the engineered rule or a random-duration flat close.
+
+PERFORMANCE NOTE: an earlier version of this file recomputed the
+stochastic and re-walked the full array on every one of 1000 draws,
+and (worse) called .tolist() on the FULL underlying array inside the
+per-entry loop on every iteration - converting a ~275k-290k element
+array to a list millions of times. That version was killed after 25+
+minutes of CPU time with nothing to show for it. This version computes
+entries/stochastic ONCE, reuses plain Python lists throughout, and
+only randomizes hold_bars per draw - runs in seconds, not tens of
+minutes.
 
 If the real engineered exit does BETTER than this random-duration
 exit, the exit logic is adding value (even if the overall system is
 still a net loser - entries alone might just be worse). If real does
 NO BETTER or WORSE, the exit mechanism itself is actively hurting
-performance, not helping, which is itself an actionable finding
-independent of the entry-timing question already tested tonight.
+performance, not helping.
 
 Tested on BTCUSD M15 (21,5,5, 20/80 - this project's most-cited,
 already-established construction) and GOLD M15 (14,3,3, 20/80 - one of
-the configs from the 9-combo table). Honest K=2 for
-this new exit-mechanism check (does not add to the entry-timing null
-tests already run on these same configs - genuinely different
-question).
+the configs from the 9-combo table). Honest K=2 for this new
+exit-mechanism check (genuinely different question from the
+entry-timing null tests already run on these configs).
 """
 import sys
 import os
@@ -39,22 +48,20 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "vwap_open"))
 from classic_stoch_14_3_3_test import stochastic_lowhigh_sma
-from stoch_table_claims_verify_test import load, build_trades, SWING_BARS, RR, TIME_CAP_BARS
+from stoch_table_claims_verify_test import load, build_trades, SWING_BARS, RR
 
 N_DRAWS = 1000
 
 
-def build_trades_random_exit(df, point, k_period, slowing, d_period, zone_low, zone_high,
-                              hold_bars_pool, rng):
-    """Same entries as build_trades(), but exit flat after a random
-    hold_bars (drawn from hold_bars_pool, shuffled) - no stop/target/
-    opposite-cross rule at all."""
+def precompute_entries(df, point, k_period, slowing, d_period, zone_low, zone_high):
+    """Entries are identical across every draw (they don't depend on
+    the random exit duration) - compute them exactly once."""
     close_a, high_a, low_a = df["close"].values, df["high"].values, df["low"].values
     spread_a = df["spread"].values
     n = len(df)
     k_a, d_a = stochastic_lowhigh_sma(high_a, low_a, close_a, k_period, slowing, d_period)
 
-    close, spread = close_a.tolist(), spread_a.tolist()
+    close, high, low, spread = close_a.tolist(), high_a.tolist(), low_a.tolist(), spread_a.tolist()
     k, d = k_a.tolist(), d_a.tolist()
     valid = (~(np.isnan(k_a) | np.isnan(d_a))).tolist()
     crossUp = [False] * n
@@ -64,12 +71,7 @@ def build_trades_random_exit(df, point, k_period, slowing, d_period, zone_low, z
             crossUp[i] = k[i - 1] <= d[i - 1] and k[i] > d[i]
             crossDown[i] = k[i - 1] >= d[i - 1] and k[i] < d[i]
 
-    hold_pool = list(hold_bars_pool)
-    rng.shuffle(hold_pool)
-    pool_i = 0
-
-    total = 0.0
-    taken = 0
+    entries = []
     start = k_period + slowing + d_period + SWING_BARS + 5
     i = start
     while i < n - 1:
@@ -84,8 +86,7 @@ def build_trades_random_exit(df, point, k_period, slowing, d_period, zone_low, z
         if dir_ == 0:
             i += 1
             continue
-
-        swing = min(low_a.tolist()[i - SWING_BARS:i]) if dir_ > 0 else max(high_a.tolist()[i - SWING_BARS:i])
+        swing = min(low[i - SWING_BARS:i]) if dir_ > 0 else max(high[i - SWING_BARS:i])
         risk = dir_ * (close[i] - swing)
         if risk <= 0.0:
             i += 1
@@ -94,20 +95,30 @@ def build_trades_random_exit(df, point, k_period, slowing, d_period, zone_low, z
         if fill_i >= n:
             i += 1
             continue
-        sc = spread[fill_i] * point
-        entry_px = close[fill_i] + (sc if dir_ > 0 else -sc)
+        entries.append((fill_i, dir_))
+        i += 1  # entries don't consume following bars here - exit timing varies per draw
 
-        hb = hold_pool[pool_i % len(hold_pool)]
-        pool_i += 1
-        exit_i = min(fill_i + max(hb, 1), n - 1)
-        scj = spread[exit_i] * point
-        exit_px = close[exit_i] - (scj if dir_ > 0 else -scj)
+    return entries, close, spread, n
 
-        total += ((exit_px - entry_px) / entry_px) * dir_
-        taken += 1
-        i = exit_i + 1
 
-    return total, taken
+def run_random_exit_draws(entries, close, spread, point, n, hold_bars_pool, n_draws, seed=0):
+    rng = np.random.default_rng(seed)
+    hold_pool_base = np.array(hold_bars_pool)
+    draw_nets = []
+    for _ in range(n_draws):
+        hold_pool = hold_pool_base.copy()
+        rng.shuffle(hold_pool)
+        total = 0.0
+        for idx, (fill_i, dir_) in enumerate(entries):
+            hb = int(hold_pool[idx % len(hold_pool)])
+            exit_i = min(fill_i + max(hb, 1), n - 1)
+            sc = spread[fill_i] * point
+            entry_px = close[fill_i] + (sc if dir_ > 0 else -sc)
+            scj = spread[exit_i] * point
+            exit_px = close[exit_i] - (scj if dir_ > 0 else -scj)
+            total += ((exit_px - entry_px) / entry_px) * dir_
+        draw_nets.append(total)
+    return np.array(draw_nets)
 
 
 def run_config(label, symbol_file, trim_gold, k_period, slowing, d_period, zone_low, zone_high):
@@ -120,15 +131,10 @@ def run_config(label, symbol_file, trim_gold, k_period, slowing, d_period, zone_
     print(f"  REAL (engineered exit): n={len(real_trades)}  net%={100*real_net:.2f}  "
           f"mean hold={hold_bars_real.mean():.1f} bars")
 
-    rng = np.random.default_rng(0)
-    draw_nets = []
-    draw_ns = []
-    for _ in range(N_DRAWS):
-        net, taken = build_trades_random_exit(df, point, k_period, slowing, d_period,
-                                               zone_low, zone_high, hold_bars_real, rng)
-        draw_nets.append(net)
-        draw_ns.append(taken)
-    draw_nets = np.array(draw_nets)
+    entries, close, spread, n = precompute_entries(df, point, k_period, slowing, d_period, zone_low, zone_high)
+    print(f"  (precomputed {len(entries)} entry bars for the random-duration draws)")
+
+    draw_nets = run_random_exit_draws(entries, close, spread, point, n, hold_bars_real, N_DRAWS)
 
     print(f"  RANDOM-DURATION exit (same entries, same avg hold, {N_DRAWS} draws):")
     print(f"    mean net%  = {100*draw_nets.mean():8.2f}")
