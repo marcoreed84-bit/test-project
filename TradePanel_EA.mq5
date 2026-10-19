@@ -19,7 +19,26 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.00"
+#property version   "2.01"
+//--- 2.01: Added InpEmaConfirmBars (default 2) - after the user asked "is
+//--- there a way to tell a good cross from a small criss-cross start of a
+//--- sideways market", an Opus audit confirmed the EMA21/50 overlay had
+//--- ZERO chop filtering (fired on any sign flip, however small). Tested
+//--- two candidate filters first (research/meridian_vwap200/
+//--- ema21_50_gap_confirm_filter_test.py, 22 configs on GOLD M15 full
+//--- history): a minimum-gap-vs-ATR threshold COLLAPSES the trade count to
+//--- near zero (or exactly zero above 0.5x ATR) on Gold, so it was
+//--- rejected outright; a confirmation-bars delay (wait N bars after the
+//--- cross, require price still past EMA50 before entering) gave a small
+//--- but walk-forward-STABLE improvement on longs (PF 0.920->0.927 in
+//--- 2014-2020, 1.134->1.167 in 2021+), so that's the one implemented.
+//--- This is a real but modest improvement, not a general chop solution -
+//--- it only screens out immediate one-bar fakeout reversals, not a
+//--- genuinely choppy multi-day range. The user's other ideas (cross
+//--- angle/steepness, EMAs running parallel before crossing, distance to
+//--- the 200EMA/VWAP) are NOT yet implemented - still need the same
+//--- honest walk-forward test before going in; flagged to the user as a
+//--- separate follow-up, not silently skipped.
 //--- 2.00: MAJOR SIMPLIFICATION, per direct request ("remove the stochastic
 //--- and engulfing and other completely from tradepanel ea, lets only keep
 //--- the buy and sell signals with the crossing of the moving average...").
@@ -650,6 +669,15 @@ input bool   InpShowEmaCrossSignals = true;   // per direct request - entry on E
                                                // validated in research tonight - a FASTER exit on EMA21
                                                // alone was tried and tested WORSE, so this overlay does NOT
                                                // offer that as an option)
+input int    InpEmaConfirmBars     = 2;       // per direct request, after research confirmed it holds up
+                                               // walk-forward (longs %PF 0.920->0.927 IS, 1.134->1.167 OOS):
+                                               // after a cross, wait this many bars and require price still
+                                               // past EMA50 in the cross direction before the entry fires -
+                                               // screens out immediate one-bar fakeout reversals. Set to 0
+                                               // to go back to firing on the cross bar itself. A separate
+                                               // min-gap-before-ATR filter was also tested and rejected -
+                                               // on Gold it collapses the trade count to near zero (or
+                                               // exactly zero above 0.5x ATR) with no edge to show for it.
 input int    InpEmaCrossSwingBars  = 10;      // stop-loss reference = N-bar swing low/high at the cross bar
 input double InpEmaCrossRR         = 2.0;     // R:R convention for the TP reference line - a representative
                                                // example only; the validated exit is the NEXT opposite
@@ -716,6 +744,13 @@ datetime g_emaxLastMarkerTime  = 0;
 double   g_emaxRunMaxGap    = 0.0;
 int      g_emaxDeclineCount = 0;
 bool     g_emaxWeakenFired  = false;
+//--- v2.01: confirmation-bars entry filter state - a cross starts a
+//--- "pending" countdown instead of entering immediately; entry only
+//--- fires if price is still past EMA50 in that direction once the
+//--- countdown reaches InpEmaConfirmBars. Persisted across live calls
+//--- since each call typically processes only one freshly-closed bar.
+int      g_emaxPendingDir         = 0;
+int      g_emaxPendingBarsElapsed = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1534,11 +1569,14 @@ void ComputeEmaCrossSignals(const bool backfill)
    double runMaxGap;
    int    declineCount;
    bool   weakenFired;
+   int    pendingDir;
+   int    pendingBarsElapsed;
    if(backfill)
      {
       lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
       lastMarkerPrice = 0.0; lastMarkerTime = 0;
       runMaxGap = 0.0; declineCount = 0; weakenFired = false;
+      pendingDir = 0; pendingBarsElapsed = 0;
      }
    else
      {
@@ -1546,6 +1584,7 @@ void ComputeEmaCrossSignals(const bool backfill)
       lastArr = g_emaxLastArr; lastSl = g_emaxLastSl; lastTp = g_emaxLastTp;
       lastMarkerPrice = g_emaxLastMarkerPrice; lastMarkerTime = g_emaxLastMarkerTime;
       runMaxGap = g_emaxRunMaxGap; declineCount = g_emaxDeclineCount; weakenFired = g_emaxWeakenFired;
+      pendingDir = g_emaxPendingDir; pendingBarsElapsed = g_emaxPendingBarsElapsed;
      }
 
    for(int i = from; i < n; i++)
@@ -1590,10 +1629,37 @@ void ComputeEmaCrossSignals(const bool backfill)
          posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
         }
 
-      //--- ENTRY: only while flat - matches the validated construction
-      //--- exactly (no new entry until the previous one has closed above)
-      if(dir != 0 && posDir == 0)
+      //--- v2.01: confirmation-bars entry filter. A cross starts a pending
+      //--- countdown rather than entering immediately; entryDir only gets
+      //--- set once the countdown reaches InpEmaConfirmBars AND price is
+      //--- still past EMA50 in the pending direction on that bar (a one-bar
+      //--- fakeout reversal cancels it). InpEmaConfirmBars=0 reproduces the
+      //--- old immediate-entry behavior exactly.
+      int entryDir = 0;
+      if(posDir == 0)
         {
+         if(pendingDir != 0)
+           {
+            pendingBarsElapsed++;
+            if(pendingBarsElapsed >= InpEmaConfirmBars)
+              {
+               bool stillOk = (pendingDir > 0) ? (c[i] > e50[i]) : (c[i] < e50[i]);
+               if(stillOk) entryDir = pendingDir;
+               pendingDir = 0; pendingBarsElapsed = 0;
+              }
+           }
+         if(dir != 0)
+           {
+            pendingDir = dir; pendingBarsElapsed = 0;
+           }
+        }
+
+      //--- ENTRY: only while flat - matches the validated construction
+      //--- exactly (no new entry until the previous one has closed above),
+      //--- gated by the confirmation countdown above (entryDir, not dir)
+      if(entryDir != 0 && posDir == 0)
+        {
+         int dir = entryDir;
          double swing = (dir > 0) ? l[i] : h[i];
          for(int j = i - InpEmaCrossSwingBars + 1; j < i; j++)
             swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
@@ -1691,6 +1757,7 @@ void ComputeEmaCrossSignals(const bool backfill)
    g_emaxLastProcessedBar = r[n - 1].time;
    g_emaxLastMarkerPrice = lastMarkerPrice; g_emaxLastMarkerTime = lastMarkerTime;
    g_emaxRunMaxGap = runMaxGap; g_emaxDeclineCount = declineCount; g_emaxWeakenFired = weakenFired;
+   g_emaxPendingDir = pendingDir; g_emaxPendingBarsElapsed = pendingBarsElapsed;
   }
 
 //+------------------------------------------------------------------+
@@ -1721,6 +1788,7 @@ void ResyncEmaCrossSignals()
    g_emaxLastProcessedBar = 0;
    g_emaxLastMarkerPrice = 0.0; g_emaxLastMarkerTime = 0;
    g_emaxRunMaxGap = 0.0; g_emaxDeclineCount = 0; g_emaxWeakenFired = false;
+   g_emaxPendingDir = 0; g_emaxPendingBarsElapsed = 0;
    if(InpShowEmaCrossSignals) ComputeEmaCrossSignals(true);
   }
 
