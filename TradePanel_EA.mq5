@@ -19,7 +19,14 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.40"
+#property version   "1.41"
+//--- 1.41: per direct request, entry arrows and exit dots made smaller
+//--- (arrow width 2->1, dot width 3->2) - OBJ_ARROW_UP/DOWN were already
+//--- solid filled triangles, not outlines, so "solid colour" needed no
+//--- further change there. User also reports the v1.40 overlap fix isn't
+//--- visibly working on a specific chart - asked to confirm the Experts
+//--- log actually shows "v1.40 OnInit" (i.e. the new code is really
+//--- loaded) before investigating the nudge logic itself further.
 //--- 1.40: two changes, per direct request.
 //--- (a) Default inputs changed: entry stoch 14/3/3 -> 21/5/5, exit stoch
 //--- 14/3/3 -> 21/5/5, InpSigStochMethod SMOOTHED -> SIG_STOCH_SMA ("Simple"
@@ -1212,7 +1219,10 @@ void DrawSigArrow(const string nm, const datetime t, const double price, const b
    ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpSigBuyCol : InpSigSellCol);
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 2);
+   //--- 1.41: smaller, per direct request (was 2) - OBJ_ARROW_UP/DOWN are
+   //--- already solid filled triangles, not outlines, so there's nothing
+   //--- further to do for "solid colour" beyond this
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
@@ -1230,7 +1240,7 @@ void DrawSigDot(const string nm, const datetime t, const double price, const boo
    ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpSigBuyCol : InpSigSellCol);
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 3);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 2);   // 1.41: smaller, per direct request (was 3)
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
@@ -2023,7 +2033,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.40 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.41 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
