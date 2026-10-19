@@ -19,7 +19,18 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.51"
+#property version   "1.52"
+//--- 1.52: %K/%D cross-PROXIMITY push alert, per direct request ("send
+//--- the notification before they cross") - new CheckStochCrossProximity(),
+//--- same reset-on-divergence/cooldown pattern as the existing 21/50 MA
+//--- proximity alert, called once per live bar from BOTH the baseline
+//--- stochastic overlay AND the Trend-Aligned Stochastic overlay, each
+//--- with its own latch/cooldown state so they never interfere. Fires
+//--- while %K/%D are converging and within InpStochProximityPts of each
+//--- other - BEFORE the cross confirms, distinct from the existing
+//--- zone-entry alert (CheckStochZoneAlert, which fires on %K reaching
+//--- 20/80, not on the cross itself) and the "signal printed" alerts
+//--- added in 1.51 (which fire AFTER the cross is confirmed).
 //--- 1.51: push notifications added for the four new overlays from this
 //--- session (EMA21/50 crossover, candlestick engulfing, the three
 //--- EXPERIMENTAL markers, and the new Trend-Aligned Stochastic) - same
@@ -463,6 +474,16 @@ input int    InpCrossATRPeriod     = 14;
 input int    InpCrossAlertCooldownMin = 30;  // minimum minutes between alerts for the SAME approach,
                                               // so a gap oscillating right at the threshold doesn't spam
 
+input group "=== Stochastic %K/%D cross-proximity push alert (v1.51, per direct request: warn BEFORE the cross, not after it's already printed) - applies to BOTH the baseline stochastic overlay AND the Trend-Aligned Stochastic overlay ==="
+input bool   InpStochProximityAlert       = true;
+input double InpStochProximityPts         = 3.0;   // "near" threshold, in raw %K/%D points (0-100 scale,
+                                                     // NOT ATR - an oscillator has no price-scale
+                                                     // equivalent) - smaller = later/tighter warning,
+                                                     // larger = earlier but noisier
+input int    InpStochProximityCooldownMin = 10;     // minimum minutes between alerts for the SAME approach,
+                                                     // per overlay, so a gap oscillating near the
+                                                     // threshold doesn't spam
+
 //--- v1.50: NO line-thickness input here for the 21/50/200 MAs - now
 //--- native chart indicators (see SetupMAs()), and MT5 gives an EA no
 //--- way to set a built-in indicator's line width any more than its
@@ -718,6 +739,14 @@ ENUM_TIMEFRAMES g_sigPeriod = PERIOD_CURRENT;
 //--- true. Cleared back to false once %K leaves the zone again.
 bool g_sigZoneAlertedLong  = false;
 bool g_sigZoneAlertedShort = false;
+//--- v1.51: %K/%D cross-PROXIMITY alert latches (separate from the zone-
+//--- entry latches above) - one pair per stochastic overlay (baseline +
+//--- Trend-Aligned), same reset-on-divergence/cooldown pattern as the
+//--- existing 21/50 MA proximity alert (CheckCrossProximity/g_crossAlerted).
+bool     g_sigCrossApproachAlerted = false;
+datetime g_sigLastCrossApproachAt  = 0;
+bool     g_tsxCrossApproachAlerted = false;
+datetime g_tsxLastCrossApproachAt  = 0;
 //--- persisted entry/exit overlay state, carried across LIVE calls to
 //--- ComputeStochSignals() so a live call only ever needs to look at a
 //--- small recent window instead of re-walking the WHOLE loaded chart
@@ -1798,6 +1827,51 @@ void CheckStochZoneAlert(const double kCur)
   }
 
 //+------------------------------------------------------------------+
+//| v1.51: EARLY heads-up fired when %K and %D are CONVERGING and close |
+//| to crossing, BEFORE the cross is confirmed - per direct request     |
+//| ("send the notification before they cross"), same reset-on-         |
+//| divergence/cooldown pattern as the existing 21/50 MA proximity      |
+//| alert (CheckCrossProximity). Generic/shared - called once per live  |
+//| bar from BOTH ComputeStochSignals() and ComputeTrendStochSignals(), |
+//| each passing its own K/D arrays and its own latch/cooldown globals  |
+//| so the two overlays' alerts never interfere with each other.        |
+//+------------------------------------------------------------------+
+void CheckStochCrossProximity(const string overlayLabel, const double kCur, const double dCur,
+                               const double kPrev, const double dPrev,
+                               bool &alertedFlag, datetime &lastAlertAt)
+  {
+   if(!InpStochProximityAlert) return;
+   if(kCur == SIG_NA || dCur == SIG_NA || kPrev == SIG_NA || dPrev == SIG_NA) return;
+
+   double gapNow  = kCur - dCur;
+   double gapPrev = kPrev - dPrev;
+   bool alreadyCrossed = (gapNow >= 0.0) != (gapPrev >= 0.0);
+   double threshold = InpStochProximityPts;
+
+   if(alreadyCrossed || MathAbs(gapNow) > threshold * 1.5)
+     {
+      alertedFlag = false;   // clear reset - diverged again, or the cross already happened
+      return;
+     }
+
+   bool narrowing = MathAbs(gapNow) < MathAbs(gapPrev);
+   bool near       = MathAbs(gapNow) <= threshold;
+   if(!narrowing || !near) return;
+   if(alertedFlag) return;   // already warned for this approach, waiting for a reset
+   if(TimeCurrent() - lastAlertAt < InpStochProximityCooldownMin * 60) return;
+
+   string dir = (gapNow > 0.0) ? "%K crossing DOWN through %D (bearish) likely soon"
+                                 : "%K crossing UP through %D (bullish) likely soon";
+   string tf  = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+   string msg = StringFormat("%s %s: %s stochastic %%K/%%D gap closing, %s (gap %.1f%% of threshold) - "
+                              "not printed yet, UNVALIDATED, visual only",
+                              _Symbol, tf, overlayLabel, dir, 100.0 * MathAbs(gapNow) / threshold);
+   FireSigAlert(msg);
+   alertedFlag = true;
+   lastAlertAt = TimeCurrent();
+  }
+
+//+------------------------------------------------------------------+
 //| Recomputes the ENTRY stochastic (and, if enabled, a fully           |
 //| independent EXIT stochastic with its own K/slowing/D settings)      |
 //| over the whole loaded CLOSED history (the forming bar is excluded,  |
@@ -1864,6 +1938,9 @@ void ComputeStochSignals(const bool backfill)
    //--- early zone-entry alert - live only (not during backfill, which
    //--- would otherwise fire hundreds of alerts for old history on attach)
    if(!backfill) CheckStochZoneAlert(k[n - 1]);
+   if(!backfill && n >= 2)
+      CheckStochCrossProximity("baseline", k[n - 1], d[n - 1], k[n - 2], d[n - 2],
+                                g_sigCrossApproachAlerted, g_sigLastCrossApproachAt);
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    //--- backfill draws/alerts for every qualifying bar across the whole
@@ -2861,6 +2938,10 @@ void ComputeTrendStochSignals(const bool backfill)
    double atr[];
    SigATR(h, l, c, n, 14, atr);
 
+   if(!backfill && n >= 2)
+      CheckStochCrossProximity("trend-aligned", k[n - 1], d[n - 1], k[n - 2], d[n - 2],
+                                g_tsxCrossApproachAlerted, g_tsxLastCrossApproachAt);
+
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    int from = minBars;
    if(!backfill)
@@ -3339,7 +3420,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.51 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.52 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
