@@ -19,7 +19,14 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.45"
+#property version   "1.46"
+//--- 1.46: two changes to the MIDLINE-CROSS overlay, per direct request.
+//--- (a) InpMidlineBandLow/High widened from 40/60 to 20/80 - the
+//--- zone-cross entry overlay already owns crosses AT the 20/80
+//--- extremes themselves, so this widened band now picks up essentially
+//--- every OTHER cross (not just ones tight around the 50 midline).
+//--- (b) New InpMidlineMarkerSize input (default 1, was hardcoded 3) -
+//--- diamond marker made smaller.
 //--- 1.45: REVERTED part of 1.43/1.44 - "anchor the exit dot to its own
 //--- entry arrow's price" broke badly on any position that ran a real
 //--- distance before exiting (normal for a trending move): the dot ended
@@ -462,14 +469,21 @@ input group "=== Midline-cross signal overlay - EXPERIMENTAL, UNVALIDATED (separ
 input bool   InpShowMidlineSignals = true;    // per direct request, now on by default (was off) - a genuinely different, less-tested idea than
                                                // the zone-cross entry above (backtested full-history %PF~0.65,
                                                // still a net loser - see project research notes)
-input double InpMidlineBandLow     = 40.0;    // %K must be inside this band on the cross bar (not a deep
-input double InpMidlineBandHigh    = 60.0;    // zone extreme - a cross back through the 50 midline instead)
+input double InpMidlineBandLow     = 20.0;    // v1.46 (was 40.0): %K must be inside this band on the cross
+input double InpMidlineBandHigh    = 80.0;    // bar (was 60.0) - per direct request, widened to cover ANY
+                                               // cross between the 20/80 zone levels, not just a tight band
+                                               // right around 50. The zone-cross entry overlay above already
+                                               // owns crosses AT the 20/80 extremes themselves (k[i]<20 or
+                                               // >80) - this widened band means the midline overlay now
+                                               // picks up essentially every cross that ISN'T one of those,
+                                               // not just ones near the midline.
 input int    InpMidlinePriorLookback = 10;    // %K must have dipped (buy) / risen (sell) to 50 within this
                                                // many preceding bars - confirms a genuine pullback, not noise
                                                // sitting near 50
 input color  InpMidlineBuyCol      = clrYellow;
 input color  InpMidlineSellCol     = clrOrange;
 input double InpMidlineOffsetATR   = 0.8;     // own offset so it never sits on top of the entry arrows/exit dots
+input int    InpMidlineMarkerSize  = 1;       // v1.46: diamond size (was hardcoded 3), per direct request
 
 CTrade trade;
 
@@ -1294,7 +1308,7 @@ void DrawMidlineMarker(const string nm, const datetime t, const double price, co
    ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpMidlineBuyCol : InpMidlineSellCol);
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 3);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpMidlineMarkerSize);   // v1.46: was hardcoded 3
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
@@ -2086,7 +2100,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.45 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.46 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
