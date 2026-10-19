@@ -19,7 +19,23 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.37"
+#property version   "1.38"
+//--- 1.38: CHART HANG - user reported charts freezing after running a
+//--- while. Live per-tick/per-bar path was checked and IS bounded
+//--- (minBars+500 window, new-bar guard). The real problem was the
+//--- stochastic overlay's object/log volume: backfill drew every signal
+//--- across ALL loaded history (Bars()-1, often 100k+ bars at the
+//--- terminal's default "Max bars in chart"), ~3-4 objects per entry plus
+//--- exit dots, and NOTHING ever deleted them except a full resync - so
+//--- the chart started with tens of thousands of objects and gained more
+//--- every bar. Every repaint and PurgeOldSegments' per-bar OBJ_TREND scan
+//--- (the SL/TP lines are OBJ_TREND too) walked all of them. The 1.36
+//--- RAWCROSS line made it worse: its "a handful per day" estimate is
+//--- wrong on M5 (K/D cross every few bars), so a reattach printed
+//--- thousands-to-tens-of-thousands of journal lines in one go. Fix: new
+//--- InpSigDrawBars (default 2000) - backfill still walks full history for
+//--- correct state but only draws/logs the last N bars, and a new
+//--- PurgeOldSigObjects() drops older signal objects each new bar.
 //--- 1.37: new InpSigUseInterpCross input (default TRUE), per direct
 //--- request - the zone qualification check now uses the INTERPOLATED
 //--- point where the %K/%D line segments actually cross between bar i-1
@@ -338,7 +354,9 @@ input bool   InpSigUseInterpCross  = true;    // TRUE (v1.37, NEW): qualify usin
 input int    InpSigSwingBars       = 10;      // "recent swing" = plain N-bar lowest low / highest high
                                                // for the stop, as retail articles typically describe
 input double InpSigRR              = 2.0;     // R:R convention - a representative example, not validated
-input int    InpSigLineBars        = 8;       // stop-line length in bars; the TP line runs 2 bars longer
+input int    InpSigDrawBars        = 2000;    // v1.38: only the last N bars of signals are drawn/logged/kept
+                                               // on the chart (older ones purged each new bar) - see header
+input int    InpSigLineBars        = 8;      // stop-line length in bars; the TP line runs 2 bars longer
                                                // so the two levels stay readable when they sit close together
 input color  InpSigBuyCol          = C'0,150,255';
 input color  InpSigSellCol         = C'255,0,200';
@@ -1335,7 +1353,12 @@ void ComputeStochSignals(const bool backfill)
          from = p;
         }
      }
-   int drawFrom = from;
+   //--- 1.38: backfill still WALKS the whole history (cheap, O(n) array
+   //--- math - keeps lastDir/posDir reconstructed correctly), but only
+   //--- DRAWS (and logs) the last InpSigDrawBars bars. Drawing everything
+   //--- put tens of thousands of permanent objects on the chart, plus one
+   //--- log line per historical cross - see the 1.38 header note.
+   int drawFrom = backfill ? MathMax(from, n - InpSigDrawBars) : from;
 
    int lastDir, posDir;
    string lastArr, lastSl, lastTp;
@@ -1602,6 +1625,27 @@ void ComputeStochSignals(const bool backfill)
    g_sigLastDir = lastDir; g_sigPosDir = posDir;
    g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
    g_sigLastProcessedBar = r[n - 1].time;
+  }
+
+//+------------------------------------------------------------------+
+//| 1.38: rolling cap on overlay objects, same idea as PurgeOldSegments |
+//| for the MA/VWAP lines. Without it every arrow/SL/TP/dot ever drawn  |
+//| stayed on the chart until the next full resync, so the object count |
+//| only ever grew over a long live session. Uses OBJPROP_TIME (the     |
+//| signal bar) - an object whose name is still held in g_sigLastArr    |
+//| may get purged here; the later ObjectDelete on it is a harmless     |
+//| no-op.                                                               |
+//+------------------------------------------------------------------+
+void PurgeOldSigObjects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1)
+                     - (datetime)((long)InpSigDrawBars * PeriodSeconds(PERIOD_CURRENT));
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_sig) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -1880,7 +1924,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.37 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.38 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
@@ -1951,7 +1995,11 @@ void CheckNewBar()
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
    UpdateOverlayLines();
-   if(InpShowStochSignals) ComputeStochSignals(false);
+   if(InpShowStochSignals)
+     {
+      ComputeStochSignals(false);
+      PurgeOldSigObjects();
+     }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
    //--- bar object out from under an in-progress drag is asking for
