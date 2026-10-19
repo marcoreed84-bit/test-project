@@ -19,7 +19,15 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.53"
+#property version   "1.54"
+//--- 1.54: cooldown added to the EMA21-reject overlay (InpRejCooldownBars,
+//--- default 5 bars) - the single biggest contributor to the ~5,300 live
+//--- chart objects the Opus audit found on M1 with every overlay on
+//--- (~1,900 of them, from firing on EVERY bar that touches EMA21,
+//--- including every bar of a choppy multi-bar consolidation right on
+//--- the line). Now only fires once per approach per direction, same
+//--- cooldown idiom used elsewhere in this file. Set InpRejCooldownBars=0
+//--- to go back to the original every-touch behavior.
 //--- 1.53: fixes from an Opus hang-risk audit (requested after all the
 //--- signal overlays were added, per direct request to "get opus to
 //--- check these, i dont want the chart hanging"). Verdict: no active
@@ -695,6 +703,12 @@ input bool   InpShowRejectSignals   = true;   // price touches EMA21 then closes
                                                // NOT yet separately null-tested as its own signal
 input color  InpRejBuyCol           = clrTurquoise;
 input color  InpRejSellCol          = clrHotPink;
+input int    InpRejCooldownBars     = 5;      // v1.53: minimum bars between two SAME-DIRECTION reject
+                                               // markers - without this, a choppy multi-bar consolidation
+                                               // right on EMA21 fires one marker per bar, which an Opus
+                                               // audit found accounts for ~1,900 of ~5,300 live chart
+                                               // objects on M1 with every overlay on. 0 disables the
+                                               // cooldown (back to the original every-touch behavior).
 input bool   InpShowSnapbackSignals = true;   // fresh extension from EMA21 (mean-reversion bet) -
                                                // NOT yet separately null-tested
 input double InpSnapExtATR          = 2.0;    // how many ATR from EMA21 counts as "extended"
@@ -841,6 +855,14 @@ string   g_rej = "TPREJ_";   // price touches EMA21 then closes back (rejection)
 datetime g_rejLastProcessedBar = 0;
 double   g_rejLastMarkerPrice = 0.0;
 datetime g_rejLastMarkerTime  = 0;
+//--- v1.53: per-direction cooldown state, added after an Opus audit found
+//--- this overlay alone accounts for ~1,900 of the ~5,300 live chart
+//--- objects on M1 with everything on (it was firing on EVERY bar that
+//--- touched EMA21, including every bar of a choppy multi-bar
+//--- consolidation right on the line) - see InpRejCooldownBars' own
+//--- comment and ComputeRejectSignals() for the fix.
+datetime g_rejLastFiredUp   = 0;
+datetime g_rejLastFiredDown = 0;
 
 string   g_snp = "TPSNP_";   // fresh extension from EMA21, betting on snap-back
 datetime g_snpLastProcessedBar = 0;
@@ -2811,6 +2833,9 @@ void ComputeRejectSignals(const bool backfill)
    int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
    double lastMarkerPrice = backfill ? 0.0 : g_rejLastMarkerPrice;
    datetime lastMarkerTime = backfill ? 0 : g_rejLastMarkerTime;
+   datetime lastFiredUp   = backfill ? 0 : g_rejLastFiredUp;
+   datetime lastFiredDown = backfill ? 0 : g_rejLastFiredDown;
+   int cooldownSec = InpRejCooldownBars * PeriodSeconds(PERIOD_CURRENT);
 
    for(int i = from; i < n; i++)
      {
@@ -2820,6 +2845,12 @@ void ComputeRejectSignals(const bool backfill)
       bool touchedFromBelow = l[i] <= e21[i] && c[i] > e21[i];   // dipped to/through EMA21, closed above -> reject up
       bool touchedFromAbove = h[i] >= e21[i] && c[i] < e21[i];   // poked up to/through EMA21, closed below -> reject down
       if(!touchedFromBelow && !touchedFromAbove) continue;
+
+      //--- v1.53: cooldown - skip a same-direction reject that's too soon
+      //--- after the last one (see InpRejCooldownBars' own comment)
+      if(touchedFromBelow && (r[i].time - lastFiredUp) < cooldownSec) continue;
+      if(touchedFromAbove && (r[i].time - lastFiredDown) < cooldownSec) continue;
+      if(touchedFromBelow) lastFiredUp = r[i].time; else lastFiredDown = r[i].time;
 
       if(draw)
         {
@@ -2843,6 +2874,7 @@ void ComputeRejectSignals(const bool backfill)
 
    g_rejLastProcessedBar = r[n - 1].time;
    g_rejLastMarkerPrice = lastMarkerPrice; g_rejLastMarkerTime = lastMarkerTime;
+   g_rejLastFiredUp = lastFiredUp; g_rejLastFiredDown = lastFiredDown;
   }
 
 void ResyncRejectSignals()
@@ -2850,6 +2882,7 @@ void ResyncRejectSignals()
    ObjectsDeleteAll(0, g_rej);
    g_rejLastProcessedBar = 0;
    g_rejLastMarkerPrice = 0.0; g_rejLastMarkerTime = 0;
+   g_rejLastFiredUp = 0; g_rejLastFiredDown = 0;
    if(InpShowRejectSignals) ComputeRejectSignals(true);
   }
 
@@ -3468,7 +3501,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.53 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.54 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
