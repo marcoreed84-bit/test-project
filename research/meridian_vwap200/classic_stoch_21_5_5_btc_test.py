@@ -28,6 +28,26 @@ Tested on BTCUSD M15 (2013-01-02 to 2026-09-27, full real history,
 real variable spread from the CSV's own spread column). Honest K: 1
 (the user's own stated construction/settings, not swept or tuned - a
 single eyeballed day on this exact chart prompted the request).
+
+CORRECTED 2026-10-19: build_trades() had two real bugs, found while
+investigating why a downstream filter test's numbers looked far worse
+than anything else tested in this project.
+  1. It computed a swing stop and 1:2 R:R target on every entry but
+     NEVER checked subsequent bars' highs/lows against them - trades
+     only ever exited on the opposite stochastic cross, with ZERO
+     stop-loss protection the whole time this file existed.
+  2. Its main loop only incremented `i` inside the NaN-skip branch -
+     every other path (a live cross, an open position) left `i`
+     unchanged, which is a literal infinite loop; the file could not
+     finish running as originally written (confirmed by a run attempt
+     timing out with no output).
+Rewritten using the same stop/target-enforced, scored-flip-closes
+pattern already validated in classic_stoch_21_5_5_btc_h1_stop_trail_
+test.py. The corrected full-history %PF now comes out to 0.201, which
+exactly matches this project's own previously-cited number for this
+exact construction (classic_stoch_21_5_5_btc_h1_test.py's own
+docstring: "full-history %PF 0.201->0.388 just from moving off M15") -
+confirming the fix is right, not a new/different number.
 """
 import sys
 import os
@@ -57,65 +77,78 @@ def load_btc_m15():
 
 
 def build_trades(df, point, time_cap_bars=TIME_CAP_BARS):
-    close, high, low = df["close"].values, df["high"].values, df["low"].values
-    spread = df["spread"].values
+    close_a, high_a, low_a = df["close"].values, df["high"].values, df["low"].values
+    spread_a = df["spread"].values
     n = len(df)
-    k, d = stochastic_lowhigh_sma(high, low, close, K_PERIOD, SLOWING, D_PERIOD)
+    k_a, d_a = stochastic_lowhigh_sma(high_a, low_a, close_a, K_PERIOD, SLOWING, D_PERIOD)
     # entry and exit use the SAME Stochastic(21,5,5) per the request
-    kE, dE = k, d
+
+    close, high, low, spread = close_a.tolist(), high_a.tolist(), low_a.tolist(), spread_a.tolist()
+    k, d = k_a.tolist(), d_a.tolist()
+    valid = (~(np.isnan(k_a) | np.isnan(d_a))).tolist()
+    crossUp = [False] * n
+    crossDown = [False] * n
+    for i in range(1, n):
+        if valid[i] and valid[i - 1]:
+            crossUp[i] = k[i - 1] <= d[i - 1] and k[i] > d[i]
+            crossDown[i] = k[i - 1] >= d[i - 1] and k[i] < d[i]
 
     results = []
-    posDir = 0
-    open_i = open_fill_i = None
-    open_entry_px = None
-    i = K_PERIOD + SLOWING + D_PERIOD + SWING_BARS + 5
+    start = K_PERIOD + SLOWING + D_PERIOD + SWING_BARS + 5
+    i = start
     while i < n - 1:
-        if k[i] == np.nan or np.isnan(k[i]) or np.isnan(d[i]) or np.isnan(k[i - 1]) or np.isnan(d[i - 1]):
+        if not valid[i]:
             i += 1
             continue
-        crossUp = k[i - 1] <= d[i - 1] and k[i] > d[i]
-        crossDown = k[i - 1] >= d[i - 1] and k[i] < d[i]
         dir_ = 0
-        if crossUp and k[i] < ZONE_LOW:
+        if crossUp[i] and k[i] < ZONE_LOW:
             dir_ = 1
-        elif crossDown and k[i] > ZONE_HIGH:
+        elif crossDown[i] and k[i] > ZONE_HIGH:
             dir_ = -1
+        if dir_ == 0:
+            i += 1
+            continue
 
-        if dir_ != 0:
-            swing_low = low[i - SWING_BARS:i].min()
-            swing_high = high[i - SWING_BARS:i].max()
-            swing = swing_low if dir_ > 0 else swing_high
-            risk = dir_ * (close[i] - swing)
-            if risk > 0.0:
-                # a new entry flips/opens the position (reversal = implicit
-                # close of the old one with no explicit exit event, same as
-                # the EA's own overlay logic)
-                posDir = dir_
-                fill_i = i + 1
-                if fill_i < n:
-                    sc = spread[fill_i] * point
-                    entry_px = close[fill_i] + (sc if dir_ > 0 else -sc)
-                    stop_px = swing
-                    target_px = entry_px + dir_ * RR * risk
-                    open_i, open_fill_i = i, fill_i
-                    open_entry_px, open_dir = entry_px, dir_
-                    open_stop_px, open_target_px = stop_px, target_px
-                    open_hard_limit = min(fill_i + time_cap_bars, n - 1)
+        swing = min(low[i - SWING_BARS:i]) if dir_ > 0 else max(high[i - SWING_BARS:i])
+        risk = dir_ * (close[i] - swing)
+        if risk <= 0.0:
+            i += 1
+            continue
+        fill_i = i + 1
+        if fill_i >= n:
+            i += 1
+            continue
+        sc = spread[fill_i] * point
+        entry_px = close[fill_i] + (sc if dir_ > 0 else -sc)
+        stop_px = swing
+        target_px = entry_px + dir_ * RR * risk
+        hard_limit = min(fill_i + time_cap_bars, n - 1)
 
-        if posDir != 0 and not np.isnan(kE[i]) and not np.isnan(dE[i]) and not np.isnan(kE[i - 1]) and not np.isnan(dE[i - 1]):
-            exCrossUp = kE[i - 1] <= dE[i - 1] and kE[i] > dE[i]
-            exCrossDown = kE[i - 1] >= dE[i - 1] and kE[i] < dE[i]
-            exitFires = (posDir > 0 and exCrossDown) or (posDir < 0 and exCrossUp)
-            if exitFires and open_fill_i is not None and i > open_fill_i:
-                fill_i = i + 1
-                if fill_i < n:
-                    sc = spread[fill_i] * point
-                    exit_px = close[fill_i] - (sc if open_dir > 0 else -sc)
-                    pnl_pct = ((exit_px - open_entry_px) / open_entry_px) * open_dir
-                    results.append(dict(entry_i=open_i, exit_i=i, pnl_pct=pnl_pct, dir=open_dir,
-                                         reason="EXIT-STOCH", hold_bars=i - open_fill_i))
-                posDir = 0
-                open_fill_i = None
+        exit_i, exit_px, reason = None, None, None
+        for j in range(fill_i + 1, hard_limit + 1):
+            stop_hit = (low[j] <= stop_px) if dir_ > 0 else (high[j] >= stop_px)
+            target_hit = (high[j] >= target_px) if dir_ > 0 else (low[j] <= target_px)
+            if stop_hit:
+                exit_i, exit_px, reason = j, stop_px, "STOP"
+                break
+            if target_hit:
+                exit_i, exit_px, reason = j, target_px, "TARGET"
+                break
+            if valid[j] and valid[j - 1]:
+                opposite = (dir_ > 0 and crossDown[j]) or (dir_ < 0 and crossUp[j])
+                if opposite:
+                    scj = spread[j] * point
+                    exit_i = j
+                    exit_px = close[j] - (scj if dir_ > 0 else -scj)
+                    reason = "EXIT-STOCH"
+                    break
+        if exit_i is None:
+            exit_i, exit_px, reason = hard_limit, close[hard_limit], "TIME"
+
+        pnl_pct = ((exit_px - entry_px) / entry_px) * dir_
+        results.append(dict(entry_i=i, exit_i=exit_i, pnl_pct=pnl_pct, dir=dir_,
+                             reason=reason, hold_bars=exit_i - fill_i))
+        i = exit_i + 1
 
     return results
 
@@ -124,8 +157,8 @@ def run():
     df, point = load_btc_m15()
     n = len(df)
     print(f"\n{'#'*100}\nBTCUSD M15 - classic Stochastic(21,5,5) Low/High+SMA, cross-in-zone entry, "
-          f"SAME 21,5,5 opposite-cross exit, {SWING_BARS}-bar swing stop (exits ignored unless taken), "
-          f"1:{RR:.0f} R:R target as reference only\n{'#'*100}")
+          f"SAME 21,5,5 opposite-cross exit, {SWING_BARS}-bar swing stop (enforced), "
+          f"1:{RR:.0f} R:R target (enforced)\n{'#'*100}")
     print(f"  {df['time'].iloc[0]} .. {df['time'].iloc[-1]} ({n} bars, point={point})")
     cutoff_i = int(n * 0.70)
     cutoff_date = df["time"].iloc[cutoff_i].date()
