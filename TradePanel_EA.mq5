@@ -19,7 +19,17 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.56"
+#property version   "1.57"
+//--- 1.57: per direct request, the chart should by default show EXACTLY
+//--- three signal overlays - EMA21/50 crossover, candlestick engulfing,
+//--- and Trend-Aligned Stochastic - and nothing else. Default-disabled:
+//--- InpShowStackSignals, InpShowRejectSignals, InpShowSnapbackSignals
+//--- (the three EXPERIMENTAL markers, v1.48) and InpShowMidlineSignals
+//--- (the separate midline-cross overlay, backtested net loser). The
+//--- original baseline stochastic overlay (InpShowStochSignals) was
+//--- already turned off by default in 1.55. None of these overlays were
+//--- removed from the file - every one can still be switched back on
+//--- individually from the Inputs dialog for comparison.
 //--- 1.56: MA colors actually work now, per direct request ("can we set
 //--- the colours of the moving averages and the vwap?" - the MAs were
 //--- all showing red since 1.50 because the built-in iMA indicator can
@@ -669,9 +679,11 @@ input double InpSigExitOffsetATR   = 1.0;     // how far EXIT dots sit from the 
                                                // bigger than the entry offset so the two never overlap
 
 input group "=== Midline-cross signal overlay - EXPERIMENTAL, UNVALIDATED (separate construction, not combined with the entry/exit above) ==="
-input bool   InpShowMidlineSignals = true;    // per direct request, now on by default (was off) - a genuinely different, less-tested idea than
-                                               // the zone-cross entry above (backtested full-history %PF~0.65,
-                                               // still a net loser - see project research notes)
+input bool   InpShowMidlineSignals = false;   // v1.57: default OFF again, per direct request - the only
+                                               // signals that should show by default are EMA21/50
+                                               // crossover, candlestick engulfing, and Trend-Aligned
+                                               // Stochastic. Backtested full-history %PF~0.65, a net loser
+                                               // - see project research notes.
 input double InpMidlineBandLow     = 20.0;    // v1.46 (was 40.0): %K must be inside this band on the cross
 input double InpMidlineBandHigh    = 80.0;    // bar (was 60.0) - per direct request, widened to cover ANY
                                                // cross between the 20/80 zone levels, not just a tight band
@@ -729,12 +741,16 @@ input bool   InpCdlAlert           = true;    // push notification on entry (no 
                                                // construction has no opposite-signal exit to wait for)
 
 input group "=== EXPERIMENTAL marker-only overlays, per direct request - NONE of these passed tonight's honest random-timing/net-PF testing as standalone filters (see v1.48 version-history comment + each marker's own tooltip) - for VISUAL INSPECTION ONLY, no SL/TP lines, no claim of an edge ==="
-input bool   InpShowStackSignals    = true;   // fresh EMA21/50/200 stack transition (trend-following) -
+input bool   InpShowStackSignals    = false;  // v1.57: default OFF per direct request - the only signals
+                                               // that should show by default are EMA21/50 crossover,
+                                               // candlestick engulfing, and Trend-Aligned Stochastic.
+                                               // Fresh EMA21/50/200 stack transition (trend-following) -
                                                // tested tonight: net losing on all 3 instruments
 input color  InpStackBuyCol         = clrDeepSkyBlue;
 input color  InpStackSellCol        = clrOrangeRed;
-input bool   InpShowRejectSignals   = true;   // price touches EMA21 then closes back on the same side -
-                                               // NOT yet separately null-tested as its own signal
+input bool   InpShowRejectSignals   = false;  // v1.57: default OFF, same reason as InpShowStackSignals
+                                               // above. Price touches EMA21 then closes back on the same
+                                               // side - NOT yet separately null-tested as its own signal
 input color  InpRejBuyCol           = clrTurquoise;
 input color  InpRejSellCol          = clrHotPink;
 input int    InpRejCooldownBars     = 5;      // v1.53: minimum bars between two SAME-DIRECTION reject
@@ -743,7 +759,8 @@ input int    InpRejCooldownBars     = 5;      // v1.53: minimum bars between two
                                                // audit found accounts for ~1,900 of ~5,300 live chart
                                                // objects on M1 with every overlay on. 0 disables the
                                                // cooldown (back to the original every-touch behavior).
-input bool   InpShowSnapbackSignals = true;   // fresh extension from EMA21 (mean-reversion bet) -
+input bool   InpShowSnapbackSignals = false;  // v1.57: default OFF, same reason as InpShowStackSignals
+                                               // above. Fresh extension from EMA21 (mean-reversion bet) -
                                                // NOT yet separately null-tested
 input double InpSnapExtATR          = 2.0;    // how many ATR from EMA21 counts as "extended"
 input color  InpSnapBuyCol          = clrSpringGreen;
@@ -3548,7 +3565,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.56 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.57 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
