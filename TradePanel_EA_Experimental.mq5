@@ -19,7 +19,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.48-exp"
+#property version   "1.49"
 //--- THIS IS A FORK of TradePanel_EA.mq5, named TradePanel_EA_Experimental.mq5
 //--- on purpose - per direct request, so it never gets accidentally copied
 //--- over the real/main EA. Everything in the main EA (stochastic overlay,
