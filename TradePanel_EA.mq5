@@ -19,7 +19,34 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.46"
+#property version   "1.47"
+//--- 1.47: TWO new, fully independent signal overlays added, per direct
+//--- request ("give them to me in the trade panel aswell, the entry
+//--- signals with the same lines as we have now showing RR levels, and
+//--- the stop loss line just below or above the cross?"), both reversible
+//--- by simply flipping their own input back to false - nothing else in
+//--- the file changed, the existing stochastic/midline overlays above are
+//--- completely untouched.
+//--- (a) EMA21/50 crossover overlay (InpShowEmaCrossSignals, default
+//--- true): entry = a fresh EMA21/50 cross (own self-contained SigEMA()
+//--- helper, matches InpMA21/InpMA50/InpMAMethod already in the file),
+//--- held FLAT until the next opposite cross closes it (exit dot drawn
+//--- then) - the exact construction validated tonight in
+//--- ema21_50_pure_crossover_test.py (GOLD LONGS ONLY %PF=1.031, net
+//--- +19.07%, the one profitable subset of the whole session). A faster
+//--- exit on price closing back past EMA21 alone was explicitly requested
+//--- and tested (ema21_50_crossover_fast_exit_test.py) - it came back
+//--- WORSE on all three instruments, so this overlay deliberately does
+//--- NOT offer that as an option; the SL/TP reference lines drawn on
+//--- entry are visual reference only, not the validated exit.
+//--- (b) Candlestick engulfing-at-extreme overlay (InpShowCandleSignals,
+//--- default true): bullish/bearish engulfing where the pattern bar IS
+//--- the N-bar swing extreme, no stochastic anywhere - validated on GOLD
+//--- ONLY (candlestick_engulfing_null_test.py, p=0.0010); Silver/BTC are
+//--- shown too for comparison but are NOT real (p=0.8511/0.5564 - see the
+//--- tooltip/log text on every signal). Entry only - this construction
+//--- has no opposite-signal exit, just the swing-stop/fixed-1:2RR lines,
+//--- which ARE the validated exit here (unlike the EMA overlay above).
 //--- 1.46: two changes to the MIDLINE-CROSS overlay, per direct request.
 //--- (a) InpMidlineBandLow/High widened from 40/60 to 20/80 - the
 //--- zone-cross entry overlay already owns crosses AT the 20/80
@@ -485,6 +512,43 @@ input color  InpMidlineSellCol     = clrOrange;
 input double InpMidlineOffsetATR   = 0.8;     // own offset so it never sits on top of the entry arrows/exit dots
 input int    InpMidlineMarkerSize  = 1;       // v1.46: diamond size (was hardcoded 3), per direct request
 
+input group "=== EMA21/50 Crossover signal overlay - the ONLY construction tonight that showed a real, validated edge (Gold longs, hold-to-next-cross, %PF=1.031) - VISUAL ONLY, never places/modifies/closes anything ==="
+input bool   InpShowEmaCrossSignals = true;   // per direct request - entry on EMA21/50 cross, held until
+                                               // the NEXT opposite EMA21/50 cross (the exact construction
+                                               // validated in research tonight - a FASTER exit on EMA21
+                                               // alone was tried and tested WORSE, so this overlay does NOT
+                                               // offer that as an option)
+input int    InpEmaCrossSwingBars  = 10;      // stop-loss reference = N-bar swing low/high at the cross bar
+input double InpEmaCrossRR         = 2.0;     // R:R convention for the TP reference line - a representative
+                                               // example only; the validated exit is the NEXT opposite
+                                               // EMA cross, not this target - the TP line is for visual
+                                               // reference/context, same as the stochastic overlay's own TP line
+input color  InpEmaCrossBuyCol     = clrLime;
+input color  InpEmaCrossSellCol    = C'255,80,0';
+input color  InpEmaCrossStopCol    = clrRed;
+input color  InpEmaCrossTPCol      = clrYellow;
+input double InpEmaCrossArrowOffsetATR = 1.0; // own offset so it never sits on top of the stochastic overlay's
+input double InpEmaCrossExitOffsetATR  = 1.2; // own markers (independent overlay, never touches posDir/lastArr above)
+input int    InpEmaCrossArrowSize  = 1;
+input int    InpEmaCrossDotSize    = 2;
+input int    InpEmaCrossLineBars   = 8;       // stop-line length in bars; the TP line runs 2 bars longer
+
+input group "=== Candlestick engulfing-at-extreme signal overlay - validated on GOLD ONLY tonight (p=0.0010) - Silver/BTC are NOT real (p=0.8511/0.5564), shown anyway for comparison - VISUAL ONLY ==="
+input bool   InpShowCandleSignals = true;    // bullish/bearish engulfing where the pattern bar IS the
+                                              // N-bar swing extreme - entry only, NO opposite-signal exit
+                                              // in this construction (candlestick_engulfing_reversal_test.py)
+input int    InpCdlSwingBars       = 10;     // swing/stop-loss lookback, same N used for the pattern's own
+                                              // "is this bar the swing extreme" qualification
+input double InpCdlRR              = 2.0;    // fixed 1:2 R:R target - this IS the validated exit (plus the
+                                              // swing stop), there is no opposite-pattern exit to wait for
+input color  InpCdlBuyCol          = clrAqua;
+input color  InpCdlSellCol         = clrMagenta;
+input color  InpCdlStopCol         = clrRed;
+input color  InpCdlTPCol           = clrYellow;
+input double InpCdlArrowOffsetATR  = 1.0;
+input int    InpCdlArrowSize       = 1;
+input int    InpCdlLineBars        = 8;
+
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
@@ -536,6 +600,29 @@ datetime g_sigLastProcessedBar = 0;
 //--- NudgeAwayFromLastMarker()'s own header for why this was needed.
 double   g_sigLastMarkerPrice = 0.0;
 datetime g_sigLastMarkerTime  = 0;
+
+//--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
+//--- g_sig above. Validated construction: entry on a fresh EMA21/50 cross,
+//--- held until the NEXT opposite EMA21/50 cross (ema21_50_pure_crossover_test.py,
+//--- GOLD longs %PF=1.031) - NOT the faster EMA21-touch exit, which was tested
+//--- and found WORSE (ema21_50_crossover_fast_exit_test.py).
+string   g_emax = "TPEMX_";
+ENUM_TIMEFRAMES g_emaxPeriod = PERIOD_CURRENT;
+int      g_emaxLastDir = 0, g_emaxPosDir = 0;
+string   g_emaxLastArr = "", g_emaxLastSl = "", g_emaxLastTp = "";
+datetime g_emaxLastProcessedBar = 0;
+double   g_emaxLastMarkerPrice = 0.0;
+datetime g_emaxLastMarkerTime  = 0;
+
+//--- v1.47: candlestick engulfing-at-extreme overlay - own namespace. Entry
+//--- only (no opposite-signal exit exists in the validated construction) -
+//--- swing stop + fixed 1:2 R:R target only (candlestick_engulfing_reversal_test.py).
+//--- Validated on GOLD only (p=0.0010) - Silver/BTC are NOT real (p=0.8511/0.5564).
+string   g_cdl = "TPCDL_";
+ENUM_TIMEFRAMES g_cdlPeriod = PERIOD_CURRENT;
+datetime g_cdlLastProcessedBar = 0;
+double   g_cdlLastMarkerPrice = 0.0;
+datetime g_cdlLastMarkerTime  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1317,6 +1404,60 @@ void DrawMidlineMarker(const string nm, const datetime t, const double price, co
   }
 
 //+------------------------------------------------------------------+
+//| v1.47: EMA21/50 crossover overlay's own entry arrow / exit dot -     |
+//| deliberately separate from DrawSigArrow/DrawSigDot (which hardcode   |
+//| the stochastic overlay's own color inputs) so this independent        |
+//| overlay has its own color inputs and tooltip text.                    |
+//+------------------------------------------------------------------+
+void DrawEmaCrossArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpEmaCrossBuyCol : InpEmaCrossSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaCrossArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "EMA21/50 cross BUY (validated, Gold longs %PF=1.031 - hold to next opposite cross)"
+                                                   : "EMA21/50 cross SELL (same construction - validated on Gold LONGS only, shorts not separately confirmed)");
+  }
+
+void DrawEmaCrossDot(const string nm, const datetime t, const double price, const bool wasLong)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpEmaCrossBuyCol : InpEmaCrossSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaCrossDotSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "EMA21/50 cross EXIT-LONG (next opposite cross - the validated exit)"
+                                                     : "EMA21/50 cross EXIT-SHORT (next opposite cross - the validated exit)");
+  }
+
+//+------------------------------------------------------------------+
+//| v1.47: candlestick engulfing-at-extreme overlay's own entry arrow -  |
+//| no exit dot exists for this overlay - the validated construction     |
+//| has no opposite-signal exit, only the swing-stop/1:2RR lines below.  |
+//+------------------------------------------------------------------+
+void DrawCandleArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpCdlBuyCol : InpCdlSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpCdlArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Engulfing-at-swing-low BUY (validated GOLD only, p=0.0010 - Silver/BTC NOT real)"
+                                                   : "Engulfing-at-swing-high SELL (validated GOLD only, p=0.0010 - Silver/BTC NOT real)");
+  }
+
+//+------------------------------------------------------------------+
 //| Plain Wilder ATR(period), used only to push the arrows/dots a      |
 //| sane, instrument-scaled distance away from the candles - has no    |
 //| effect on the signal, stop or target math above.                   |
@@ -1335,6 +1476,26 @@ void SigATR(const double &h[], const double &l[], const double &c[], const int n
       double tr = MathMax(h[i] - l[i], MathMax(MathAbs(h[i] - c[i - 1]), MathAbs(l[i] - c[i - 1])));
       atr[i] = (atr[i - 1] * (period - 1) + tr) / period;
      }
+  }
+
+//+------------------------------------------------------------------+
+//| v1.47: self-contained EMA, same style as SigATR() above (computed   |
+//| directly off the CopyRates-loaded close array, not an iMA handle -   |
+//| avoids any indexing-direction mismatch) - seeded with the SMA of the |
+//| first `period` closes, then the standard EMA recursion. Mirrors the  |
+//| Python research's own ema() helper exactly (same seed, same alpha).  |
+//+------------------------------------------------------------------+
+void SigEMA(const double &c[], const int n, const int period, double &ema[])
+  {
+   ArrayResize(ema, n);
+   ArrayInitialize(ema, SIG_NA);
+   if(n < period) return;
+   double sum = 0.0;
+   for(int i = 0; i < period; i++) sum += c[i];
+   ema[period - 1] = sum / period;
+   double alpha = 2.0 / (period + 1.0);
+   for(int i = period; i < n; i++)
+      ema[i] = ema[i - 1] + alpha * (c[i] - ema[i - 1]);
   }
 
 //+------------------------------------------------------------------+
@@ -1848,6 +2009,305 @@ void ResyncStochSignals()
   }
 
 //+------------------------------------------------------------------+
+//| v1.47: EMA21/50 crossover overlay. Entry = a fresh EMA21/50 cross,  |
+//| only while flat (no new entry until the previous one has closed -   |
+//| matches ema21_50_pure_crossover_test.py exactly). Exit = the NEXT    |
+//| opposite EMA21/50 cross - NOT a faster EMA21-touch exit, which was   |
+//| tested and found WORSE (ema21_50_crossover_fast_exit_test.py). A     |
+//| single bar can both close the old position and open the new one     |
+//| (the same cross that ends one trend starts the next), same as the   |
+//| Python reference. The stop/target lines drawn on entry are visual   |
+//| REFERENCE ONLY (per the input comments) - the validated exit is the |
+//| next opposite cross, not either of those levels.                    |
+//+------------------------------------------------------------------+
+void ComputeEmaCrossSignals(const bool backfill)
+  {
+   int minBars = InpMA50 + InpEmaCrossSwingBars + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double e21[], e50[];
+   SigEMA(c, n, InpMA21, e21);
+   SigEMA(c, n, InpMA50, e50);
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_emaxLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   int lastDir, posDir;
+   string lastArr, lastSl, lastTp;
+   double lastMarkerPrice;
+   datetime lastMarkerTime;
+   if(backfill)
+     {
+      lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+      lastMarkerPrice = 0.0; lastMarkerTime = 0;
+     }
+   else
+     {
+      lastDir = g_emaxLastDir; posDir = g_emaxPosDir;
+      lastArr = g_emaxLastArr; lastSl = g_emaxLastSl; lastTp = g_emaxLastTp;
+      lastMarkerPrice = g_emaxLastMarkerPrice; lastMarkerTime = g_emaxLastMarkerTime;
+     }
+
+   for(int i = from; i < n; i++)
+     {
+      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e21[i - 1] == SIG_NA || e50[i - 1] == SIG_NA) continue;
+      bool draw = (i >= drawFrom);
+      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpEmaCrossArrowOffsetATR * atr[i];
+      double offExit  = (atr[i] == SIG_NA) ? 0.0 : InpEmaCrossExitOffsetATR  * atr[i];
+
+      bool crossUp   = e21[i - 1] <= e50[i - 1] && e21[i] > e50[i];
+      bool crossDown = e21[i - 1] >= e50[i - 1] && e21[i] < e50[i];
+      int dir = crossUp ? 1 : (crossDown ? -1 : 0);
+      if(dir == 0) continue;
+
+      int prevPosDir = posDir;
+
+      //--- EXIT: an opposite cross closes whatever position the ENTRY block
+      //--- below opened - the validated exit, held all the way to here.
+      if(prevPosDir != 0 && dir != prevPosDir)
+        {
+         if(draw)
+           {
+            datetime t = r[i].time;
+            string exId = g_emax + "exit_" + IntegerToString((long)t);
+            bool wasLong = prevPosDir > 0;
+            double dotPrice = wasLong ? h[i] + offExit : l[i] - offExit;
+            double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+            dotPrice = NudgeAwayFromLastMarker(dotPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
+            lastMarkerPrice = dotPrice; lastMarkerTime = t;
+            DrawEmaCrossDot(exId, t, dotPrice, wasLong);
+            PrintFormat("EmaCrossSignal LOG: %s EXIT-%s @ %s  E21=%s E50=%s (closing posDir %d -> 0)",
+                        TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
+                        DoubleToString(e21[i], _Digits), DoubleToString(e50[i], _Digits), prevPosDir);
+           }
+         posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+        }
+
+      //--- ENTRY: only while flat - matches the validated construction
+      //--- exactly (no new entry until the previous one has closed above)
+      if(dir != 0 && posDir == 0)
+        {
+         double swing = (dir > 0) ? l[i] : h[i];
+         for(int j = i - InpEmaCrossSwingBars + 1; j < i; j++)
+            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+         double risk = dir * (c[i] - swing);
+         if(risk > 0.0)
+           {
+            posDir = dir;
+            lastDir = dir;
+            if(draw)
+              {
+               double stop = swing;
+               double tp   = c[i] + dir * InpEmaCrossRR * risk;
+               datetime t = r[i].time;
+               string id = IntegerToString((long)t);
+               bool isBuy = dir > 0;
+               lastArr = g_emax + "arr_" + id;
+               lastSl  = g_emax + "sl_" + id;
+               lastTp  = g_emax + "tp_" + id;
+               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+               entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+               lastMarkerPrice = entryPrice; lastMarkerTime = t;
+               DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
+               DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
+                            "EMA-cross SL: recent " + IntegerToString(InpEmaCrossSwingBars) + "-bar swing (reference only - validated exit is the next opposite EMA cross)");
+               DrawSigLevel(lastTp, t, t + (InpEmaCrossLineBars + 2) * perSec, tp, InpEmaCrossTPCol, STYLE_DASH,
+                            "EMA-cross TP: 1:" + DoubleToString(InpEmaCrossRR, 1) + " R:R example (reference only, not the validated exit)");
+               PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
+                           TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
+                           DoubleToString(e21[i], _Digits), DoubleToString(e50[i], _Digits), posDir);
+              }
+           }
+        }
+     }
+
+   g_emaxLastDir = lastDir; g_emaxPosDir = posDir;
+   g_emaxLastArr = lastArr; g_emaxLastSl = lastSl; g_emaxLastTp = lastTp;
+   g_emaxLastProcessedBar = r[n - 1].time;
+   g_emaxLastMarkerPrice = lastMarkerPrice; g_emaxLastMarkerTime = lastMarkerTime;
+  }
+
+//+------------------------------------------------------------------+
+//| v1.47: rolling cap on EMA-cross overlay objects, same idea as        |
+//| PurgeOldSigObjects() above.                                          |
+//+------------------------------------------------------------------+
+void PurgeOldEmaCrossObjects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_emax) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Full wipe + backfill for the EMA-cross overlay - same reasoning as   |
+//| ResyncStochSignals() above.                                          |
+//+------------------------------------------------------------------+
+void ResyncEmaCrossSignals()
+  {
+   ObjectsDeleteAll(0, g_emax);
+   g_emaxPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_emaxLastDir = 0; g_emaxPosDir = 0;
+   g_emaxLastArr = ""; g_emaxLastSl = ""; g_emaxLastTp = "";
+   g_emaxLastProcessedBar = 0;
+   g_emaxLastMarkerPrice = 0.0; g_emaxLastMarkerTime = 0;
+   if(InpShowEmaCrossSignals) ComputeEmaCrossSignals(true);
+  }
+
+//+------------------------------------------------------------------+
+//| v1.47: candlestick engulfing-at-extreme overlay. Entry only - the    |
+//| validated construction (candlestick_engulfing_reversal_test.py) has  |
+//| NO opposite-signal exit, just the swing-stop/1:2RR lines drawn here,  |
+//| so there is no exit dot and no posDir state machine to maintain -    |
+//| multiple overlapping signals can legitimately show at once, same as  |
+//| the Python reference (which only serialized trades for bookkeeping,  |
+//| not because a second signal is invalid). Validated on GOLD ONLY      |
+//| (p=0.0010) - Silver/BTC are shown too (per InpShowCandleSignals) but  |
+//| are NOT real (p=0.8511/0.5564) - see tooltip/log text.                |
+//+------------------------------------------------------------------+
+void ComputeCandleSignals(const bool backfill)
+  {
+   int minBars = InpCdlSwingBars + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[], o[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n); ArrayResize(o, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; o[i] = r[i].open; }
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_cdlLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   double lastMarkerPrice = backfill ? 0.0 : g_cdlLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_cdlLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(i < InpCdlSwingBars) continue;
+      bool draw = (i >= drawFrom);
+
+      bool bearPrev = c[i - 1] < o[i - 1];
+      bool bullCur  = c[i] > o[i];
+      bool bullEngulf = bearPrev && bullCur && o[i] <= c[i - 1] && c[i] >= o[i - 1];
+      bool bullPrev = c[i - 1] > o[i - 1];
+      bool bearCur  = c[i] < o[i];
+      bool bearEngulf = bullPrev && bearCur && o[i] >= c[i - 1] && c[i] <= o[i - 1];
+
+      double swingLow = l[i], swingHigh = h[i];
+      for(int j = i - InpCdlSwingBars; j < i; j++)
+        {
+         swingLow  = MathMin(swingLow, l[j]);
+         swingHigh = MathMax(swingHigh, h[j]);
+        }
+
+      int dir = 0;
+      if(bullEngulf && l[i] <= swingLow) dir = 1;
+      else if(bearEngulf && h[i] >= swingHigh) dir = -1;
+      if(dir == 0) continue;
+
+      double swing = (dir > 0) ? l[i] : h[i];
+      double risk = dir * (c[i] - swing);
+      if(risk <= 0.0) continue;
+
+      if(draw)
+        {
+         double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpCdlArrowOffsetATR * atr[i];
+         double stop = swing;
+         double tp   = c[i] + dir * InpCdlRR * risk;
+         datetime t = r[i].time;
+         string id = IntegerToString((long)t);
+         bool isBuy = dir > 0;
+         string arrNm = g_cdl + "arr_" + id;
+         string slNm  = g_cdl + "sl_"  + id;
+         string tpNm  = g_cdl + "tp_"  + id;
+         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         DrawCandleArrow(arrNm, t, entryPrice, isBuy);
+         DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
+                      "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
+         DrawSigLevel(tpNm, t, t + (InpCdlLineBars + 2) * perSec, tp, InpCdlTPCol, STYLE_DASH,
+                      "Engulfing TP: 1:" + DoubleToString(InpCdlRR, 1) + " R:R (fixed target IS the validated exit - no opposite-signal exit exists)");
+         PrintFormat("CandleSignal LOG: %s ENTRY %s @ %s  (validated GOLD only - Silver/BTC p=0.8511/0.5564, not real)",
+                     TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL");
+        }
+     }
+
+   g_cdlLastProcessedBar = r[n - 1].time;
+   g_cdlLastMarkerPrice = lastMarkerPrice; g_cdlLastMarkerTime = lastMarkerTime;
+  }
+
+//+------------------------------------------------------------------+
+//| v1.47: rolling cap on candlestick overlay objects, same idea as      |
+//| PurgeOldSigObjects() above.                                          |
+//+------------------------------------------------------------------+
+void PurgeOldCandleObjects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_cdl) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Full wipe + backfill for the candlestick overlay - same reasoning    |
+//| as ResyncStochSignals() above.                                       |
+//+------------------------------------------------------------------+
+void ResyncCandleSignals()
+  {
+   ObjectsDeleteAll(0, g_cdl);
+   g_cdlPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_cdlLastProcessedBar = 0;
+   g_cdlLastMarkerPrice = 0.0; g_cdlLastMarkerTime = 0;
+   if(InpShowCandleSignals) ComputeCandleSignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- handles are needed for the cross-proximity alert even when the lines
@@ -2100,11 +2560,12 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.46 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s",
+   PrintFormat("TradePanel v1.47 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
-               InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false");
+               InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false",
+               InpShowEmaCrossSignals ? "true" : "false", InpShowCandleSignals ? "true" : "false");
 
    ApplyTheme();
    SetupMAs();
@@ -2114,6 +2575,11 @@ int OnInit()
    //--- call (same creation-order reasoning as RebuildPanel's own header).
    BackfillOverlayLines();
    ResyncStochSignals();
+   //--- v1.47: the two new overlays below - fully independent namespaces/
+   //--- state, reversible by simply setting InpShowEmaCrossSignals/
+   //--- InpShowCandleSignals false (nothing else in the file changed)
+   ResyncEmaCrossSignals();
+   ResyncCandleSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -2130,6 +2596,8 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, g_pm);
    ObjectsDeleteAll(0, g_sig);
+   ObjectsDeleteAll(0, g_emax);
+   ObjectsDeleteAll(0, g_cdl);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -2175,6 +2643,16 @@ void CheckNewBar()
      {
       ComputeStochSignals(false);
       PurgeOldSigObjects();
+     }
+   if(InpShowEmaCrossSignals)
+     {
+      ComputeEmaCrossSignals(false);
+      PurgeOldEmaCrossObjects();
+     }
+   if(InpShowCandleSignals)
+     {
+      ComputeCandleSignals(false);
+      PurgeOldCandleObjects();
      }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
