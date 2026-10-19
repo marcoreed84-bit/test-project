@@ -19,7 +19,29 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.57"
+#property version   "1.58"
+//--- 1.58: REVERTED the v1.49-1.56 native-ChartIndicatorAdd approach for
+//--- MAs/VWAP back to hand-drawn OBJ_TREND segments - per direct request
+//--- ("check the aurelius ea, those moving averages and vwap are built
+//--- in and it goes way back"). Checked Aurelius_EA.mq5's actual code:
+//--- it explicitly REJECTED ChartIndicatorAdd for the exact reason this
+//--- project hit (an EA can't recolor a native indicator once added),
+//--- and instead uses this same hand-drawn DrawMASegment/PurgeOldMALines
+//--- idiom with InpMAHistoryBars=2500 - running LIVE in production with
+//--- 5 MAs (up to 12,500 objects) with no reported hang. TradePanel's
+//--- earlier "7500 objects caused a hang" conclusion (pre-1.38) was
+//--- wrong, or at least not the whole story - this reverts MAs/VWAP to
+//--- that exact proven pattern, with InpMAHistoryBars/InpVwapHistoryBars
+//--- matching Aurelius's own defaults (2500/400) and InpColVWAP restored
+//--- as a plain EA input again. ColoredMA.mq5/SessionVWAP.mq5 (the
+//--- custom-indicator files from 1.50/1.56) are no longer required by
+//--- this EA - SetupVWAP(), AddNativeIndicatorOnce()/
+//--- RemoveNativeIndicatorByName(), and the g_maDisplayHandle*/g_vwapHandle/
+//--- g_maName*/g_vwapName globals were all removed as dead code. The
+//--- Opus-audit fixes from 1.53/1.54 that were NOT specific to the
+//--- native-indicator approach (the iTime()==0 guard in CheckNewBar, the
+//--- EMA21-reject cooldown, the closeNLbl dedup) are untouched - those
+//--- were real fixes independent of this revert.
 //--- 1.57: per direct request, the chart should by default show EXACTLY
 //--- three signal overlays - EMA21/50 crossover, candlestick engulfing,
 //--- and Trend-Aligned Stochastic - and nothing else. Default-disabled:
@@ -512,36 +534,37 @@ input color  InpArmedColor         = clrOrangeRed;
 input color  InpBuyColor           = C'30,120,60';
 input color  InpSellColor          = C'150,40,40';
 
-input group "=== Moving averages (hand-drawn in the project's own colours, same idiom as the other EAs) ==="
+input group "=== Moving averages (hand-drawn in the project's own colours, same idiom as Aurelius_EA.mq5) ==="
 input bool          InpShowMAs     = true;
 input ENUM_MA_METHOD InpMAMethod   = MODE_EMA;    // MODE_EMA = exponential, MODE_SMA = simple
 input int            InpMA21      = 21;
 input int            InpMA50      = 50;
 input int            InpMA200     = 200;
 input color          InpCol21     = clrYellow;
-input color          InpCol50     = clrWhite;         // v1.56: changed from orange to white, per direct request
+input color          InpCol50     = clrWhite;         // per direct request
 input color          InpCol200    = C'191,0,255';     // neon purple
-//--- v1.56: these 3 colors now actually apply again - see ColoredMA.mq5
-//--- and SetupMAs() below. The native built-in iMA (v1.50) couldn't be
-//--- recolored by an EA at all once added - this now works the same way
-//--- VWAP already does, via our own custom indicator file instead.
 input int            InpMALineWidth = 1;
-input int            InpMAHistoryBars = 2000;         // rolling window of drawn MA history, PER LINE -
-                                                       // v1.49: raised from 150 to 2000 per direct request
-                                                       // ("need them to go back longer" / "make the default
-                                                       // longer"). 2500 (the ORIGINAL default, before 1.38)
-                                                       // meant 2500 x 3 lines = 7500 chart objects, which
-                                                       // was what actually caused the general chart hang
-                                                       // and the panel taking minutes to reclaim top paint
-                                                       // order after a drag - every new bar has to
-                                                       // scan/manage all of them, and there are now several
-                                                       // signal overlays on top of these MA/VWAP lines too.
-                                                       // 2000 is ~20.8 days of M15 history per line (6000
-                                                       // objects total for the 3 MAs) - deliberately kept
-                                                       // below the documented ~7500-object hang threshold,
-                                                       // not a return to 2500. If the chart starts slowing
-                                                       // down again (a drag taking longer to redraw is the
-                                                       // first symptom), this is the input to lower first.
+input int            InpMAHistoryBars = 2500;         // v1.58: REVERTED to hand-drawn OBJ_TREND segments
+                                                       // (same DrawMASegment/PurgeOldMALines idiom as
+                                                       // Aurelius_EA.mq5, not the v1.49-1.57 native-
+                                                       // ChartIndicatorAdd approach) - per direct request,
+                                                       // after checking Aurelius_EA.mq5's own actual code:
+                                                       // it explicitly rejected ChartIndicatorAdd for
+                                                       // exactly this reason ("an EA has no plot buffers,
+                                                       // only an indicator can set PLOT_LINE_COLOR... could
+                                                       // only show MT5's own auto-assigned colours") and
+                                                       // uses this same hand-drawn approach with
+                                                       // InpMAHistoryBars=2500 as its own default - running
+                                                       // LIVE in production with 5 MAs (up to 12,500
+                                                       // objects) with no reported hang. The "7500 objects
+                                                       // caused a hang" conclusion from TradePanel's own
+                                                       // earlier history was wrong, or at minimum not the
+                                                       // whole story - Aurelius proves meaningfully MORE
+                                                       // objects than that work fine when properly bounded
+                                                       // and purged (OBJPROP_HIDDEN + PurgeOldMALines every
+                                                       // new bar, exactly what this file already does).
+                                                       // 2500 = ~26 days of M15 history per line, matching
+                                                       // Aurelius's own proven default exactly.
 
 input group "=== 21/50 MA cross-proximity push alert (fires on PERIOD_CURRENT - attach this panel to the same chart/timeframe as whichever strategy EA you want warned about) ==="
 input bool   InpEnableCrossAlert   = true;
@@ -562,10 +585,14 @@ input int    InpStochProximityCooldownMin = 10;     // minimum minutes between a
                                                      // per overlay, so a gap oscillating near the
                                                      // threshold doesn't spam
 
-input group "=== Session VWAP (MT5 has no built-in VWAP - now a native custom indicator, SessionVWAP.mq5, ships alongside this EA and compiles separately - set its color/width from ITS OWN inputs, not here) ==="
+input group "=== Session VWAP (MT5 has no built-in VWAP - hand-drawn, same construction/idiom as Aurelius_EA.mq5) ==="
 input bool   InpShowVWAP           = true;
-input int    InpVwapHistoryBars    = 1000;   // v1.50: no longer load-bearing (SessionVWAP.mq5 draws its
-                                              // own full history automatically) - kept for symmetry
+input color  InpColVWAP            = C'0,255,255';    // neon aqua - same family as the other EAs' VWAP
+input int    InpVwapHistoryBars    = 400;    // v1.58: REVERTED to hand-drawn (see InpMAHistoryBars'
+                                              // own comment for why) - VWAP resets every session, so a
+                                              // long backfill window doesn't add anything, same reasoning
+                                              // and same default Aurelius_EA.mq5 itself uses
+input int    InpVwapLineWidth      = 1;
 
 input group "=== Chart theme (same family-standard blue/white candles as the other EAs) ==="
 input bool   InpApplyTheme         = true;
@@ -803,19 +830,6 @@ input bool   InpTSAlert            = true;    // push notification on entry AND 
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
-int g_vwapHandle = INVALID_HANDLE;   // v1.49: SessionVWAP.mq5 custom indicator handle
-//--- v1.52: remembered chart-indicator short names, one per native
-//--- indicator this EA ever added - see AddNativeIndicatorOnce()'s own
-//--- header for why matching by remembered NAME replaced the original
-//--- handle-matching approach (Opus audit: ChartIndicatorGet(name)
-//--- returns only the FIRST indicator with that name, so a handle-match
-//--- loop could silently match the wrong instance, or miss ours entirely
-//--- after a manual recolor elsewhere created a second same-named one).
-string g_maName21 = "", g_maName50 = "", g_maName200 = "", g_vwapName = "";
-//--- v1.56: ColoredMA.mq5 handles used ONLY for display (ChartIndicatorAdd) -
-//--- separate from g_maHandle21/50/200 above, which stay on the built-in
-//--- iMA and are used ONLY for the cross-proximity alert's CopyBuffer reads
-int g_maDisplayHandle21 = INVALID_HANDLE, g_maDisplayHandle50 = INVALID_HANDLE, g_maDisplayHandle200 = INVALID_HANDLE;
 int g_atrHandleCross = INVALID_HANDLE;
 bool     g_crossAlerted = false;     // true while the current approach has already fired its one
                                       // alert - cleared once the gap widens back out or the cross
@@ -1442,23 +1456,72 @@ bool MAValue(int handle, int shift, double &out)
   }
 
 //+------------------------------------------------------------------+
-//| v1.49: MAs and VWAP are now both NATIVE chart indicators (see       |
-//| SetupMAs() and SetupVWAP()) - nothing left to hand-draw per bar     |
-//| here. Kept as an empty stub (rather than removing every call site)  |
-//| since CheckNewBar() and others still call it; harmless no-op now.   |
+//| v1.58: REVERTED to hand-drawn (see InpMAHistoryBars' own comment     |
+//| for why) - draws exactly one new segment per line (MAs + VWAP) per   |
+//| new bar, same idiom as Aurelius_EA.mq5's own UpdateMALines.          |
 //+------------------------------------------------------------------+
 void UpdateOverlayLines()
   {
+   datetime tA = iTime(_Symbol, PERIOD_CURRENT, 2);
+   datetime tB = iTime(_Symbol, PERIOD_CURRENT, 1);
+   if(tA == 0 || tB == 0) return;
+   int maxHist = InpMAHistoryBars;
+   if(InpShowMAs)
+     {
+      double a21, b21, a50, b50, a200, b200;
+      if(MAValue(g_maHandle21, 2, a21) && MAValue(g_maHandle21, 1, b21))
+         DrawSegment("21", tA, a21, tB, b21, InpCol21, InpMALineWidth);
+      if(MAValue(g_maHandle50, 2, a50) && MAValue(g_maHandle50, 1, b50))
+         DrawSegment("50", tA, a50, tB, b50, InpCol50, InpMALineWidth);
+      if(MAValue(g_maHandle200, 2, a200) && MAValue(g_maHandle200, 1, b200))
+         DrawSegment("200", tA, a200, tB, b200, InpCol200, InpMALineWidth);
+     }
+   if(InpShowVWAP && !DifferentSession(2, 1))
+     {
+      double vA = SessionVWAP(2), vB = SessionVWAP(1);
+      if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP, InpVwapLineWidth);
+      if(InpMAHistoryBars < InpVwapHistoryBars) maxHist = InpVwapHistoryBars;
+     }
+   if(InpShowMAs || InpShowVWAP) PurgeOldSegments(tB, maxHist);
   }
 
 //+------------------------------------------------------------------+
-//| v1.49: no backfill needed - a native chart indicator computes and   |
-//| draws its own full history automatically the moment it's added,    |
-//| unlike the old hand-drawn OBJ_TREND segments this replaced. Kept    |
-//| as an empty stub for the same reason as UpdateOverlayLines() above. |
+//| v1.58: REVERTED to hand-drawn - walks backward and draws the whole   |
+//| rolling window immediately on attach, same reasoning as              |
+//| Aurelius_EA.mq5's own BackfillMALines (otherwise a fresh attach      |
+//| shows a 1-bar stub and takes the full history window to fill in).    |
 //+------------------------------------------------------------------+
 void BackfillOverlayLines()
   {
+   if(InpShowMAs)
+     {
+      int avail = Bars(_Symbol, PERIOD_CURRENT) - 2;
+      int n = MathMin(InpMAHistoryBars, avail);
+      double a, b;
+      for(int s = n; s >= 1; s--)
+        {
+         datetime tA = iTime(_Symbol, PERIOD_CURRENT, s + 1);
+         datetime tB = iTime(_Symbol, PERIOD_CURRENT, s);
+         if(tA == 0 || tB == 0) continue;
+         if(MAValue(g_maHandle21,  s + 1, a) && MAValue(g_maHandle21,  s, b)) DrawSegment("21",  tA, a, tB, b, InpCol21, InpMALineWidth);
+         if(MAValue(g_maHandle50,  s + 1, a) && MAValue(g_maHandle50,  s, b)) DrawSegment("50",  tA, a, tB, b, InpCol50, InpMALineWidth);
+         if(MAValue(g_maHandle200, s + 1, a) && MAValue(g_maHandle200, s, b)) DrawSegment("200", tA, a, tB, b, InpCol200, InpMALineWidth);
+        }
+     }
+   if(InpShowVWAP)
+     {
+      int availV = Bars(_Symbol, PERIOD_CURRENT) - 2;
+      int nV = MathMin(InpVwapHistoryBars, availV);
+      for(int s = nV; s >= 1; s--)
+        {
+         if(DifferentSession(s + 1, s)) continue;
+         datetime tA = iTime(_Symbol, PERIOD_CURRENT, s + 1);
+         datetime tB = iTime(_Symbol, PERIOD_CURRENT, s);
+         if(tA == 0 || tB == 0) continue;
+         double vA = SessionVWAP(s + 1), vB = SessionVWAP(s);
+         if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP, InpVwapLineWidth);
+        }
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -3211,116 +3274,16 @@ void ResyncTrendStochSignals()
 //+------------------------------------------------------------------+
 void SetupMAs()
   {
-   //--- handles are needed for the cross-proximity alert even when the lines
-   //--- themselves aren't drawn (InpShowMAs only gates the native-indicator
-   //--- add below, not these handles)
+   //--- v1.58: REVERTED to the plain built-in iMA handles only (see
+   //--- InpMAHistoryBars' own comment for why) - these handles now serve
+   //--- BOTH the hand-drawn lines (UpdateOverlayLines/BackfillOverlayLines)
+   //--- AND the cross-proximity alert, exactly as before v1.49.
    if(!InpShowMAs && !InpEnableCrossAlert) return;
    g_maHandle21  = iMA(_Symbol, PERIOD_CURRENT, InpMA21,  0, InpMAMethod, PRICE_CLOSE);
    g_maHandle50  = iMA(_Symbol, PERIOD_CURRENT, InpMA50,  0, InpMAMethod, PRICE_CLOSE);
    g_maHandle200 = iMA(_Symbol, PERIOD_CURRENT, InpMA200, 0, InpMAMethod, PRICE_CLOSE);
    if(InpEnableCrossAlert)
       g_atrHandleCross = iATR(_Symbol, PERIOD_CURRENT, InpCrossATRPeriod);
-
-   //--- v1.56: MAs now plotted via ColoredMA.mq5 (ships alongside this EA -
-   //--- compile it into your Indicators folder, same as SessionVWAP.mq5),
-   //--- NOT the bare built-in iMA indicator (v1.50-1.55). Native
-   //--- ChartIndicatorAdd still gives the unlimited-history/zero-extra-
-   //--- chart-object benefit, but because ColoredMA is OUR OWN indicator
-   //--- (not a built-in one), it DOES keep full color/width control via
-   //--- InpCol21/50/200 and InpMALineWidth - passed straight through as
-   //--- ColoredMA's own input parameters at the iCustom() call below. The
-   //--- plain g_maHandle21/50/200 iMA handles above are kept separately
-   //--- and ONLY used for the cross-proximity alert's own CopyBuffer reads
-   //--- (MAValue()) - that calculation doesn't care about color, so it
-   //--- stays on the cheaper built-in indicator rather than duplicating
-   //--- ColoredMA's own calc a second time just to read values back out.
-   //--- VWAP stays on its own separate file (SessionVWAP.mq5, no native
-   //--- MT5 VWAP indicator exists to build on). Guarded against duplicate
-   //--- adds via AddNativeIndicatorOnce() - see its own header (Opus audit
-   //--- finding, v1.52).
-   if(InpShowMAs)
-     {
-      g_maDisplayHandle21  = iCustom(_Symbol, PERIOD_CURRENT, "ColoredMA", InpMA21,  InpMAMethod, InpCol21,  InpMALineWidth);
-      g_maDisplayHandle50  = iCustom(_Symbol, PERIOD_CURRENT, "ColoredMA", InpMA50,  InpMAMethod, InpCol50,  InpMALineWidth);
-      g_maDisplayHandle200 = iCustom(_Symbol, PERIOD_CURRENT, "ColoredMA", InpMA200, InpMAMethod, InpCol200, InpMALineWidth);
-      if(g_maDisplayHandle21 == INVALID_HANDLE || g_maDisplayHandle50 == INVALID_HANDLE || g_maDisplayHandle200 == INVALID_HANDLE)
-         Print("TradePanel: ColoredMA custom indicator not found/failed to load - compile ColoredMA.mq5 "
-               "into your Indicators folder (same place as SessionVWAP.mq5) for the MA lines to show.");
-      AddNativeIndicatorOnce(g_maDisplayHandle21,  g_maName21);
-      AddNativeIndicatorOnce(g_maDisplayHandle50,  g_maName50);
-      AddNativeIndicatorOnce(g_maDisplayHandle200, g_maName200);
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| v1.52: adds a native chart indicator exactly once, remembering the  |
-//| chart's own short name for it (rememberedName, passed by reference) |
-//| rather than re-matching by handle on every call. REPLACES the       |
-//| original NativeIndicatorAlreadyAdded()/ChartIndicatorGet(name)==     |
-//| handle approach, which an Opus audit found could match the WRONG    |
-//| indicator (ChartIndicatorGet returns only the FIRST indicator with   |
-//| a given short name) if a second same-named instance ever appeared   |
-//| on the chart - e.g. from manually recoloring an MA or SessionVWAP   |
-//| from the chart's own indicator properties, which creates a genuinely|
-//| separate instance MT5 may still report under the same short name.   |
-//| Remembering OUR OWN exact name the moment we add it sidesteps that  |
-//| ambiguity entirely - we only ever look for the one we created.      |
-//+------------------------------------------------------------------+
-bool AddNativeIndicatorOnce(const int handle, string &rememberedName)
-  {
-   if(handle == INVALID_HANDLE) return false;
-   if(rememberedName != "")
-     {
-      for(int i = 0; i < ChartIndicatorsTotal(0, 0); i++)
-         if(ChartIndicatorName(0, 0, i) == rememberedName) return true;   // still present, nothing to do
-      rememberedName = "";   // it's gone (manually removed?) - fall through and re-add
-     }
-   if(!ChartIndicatorAdd(0, 0, handle)) return false;
-   rememberedName = ChartIndicatorName(0, 0, ChartIndicatorsTotal(0, 0) - 1);
-   return true;
-  }
-
-//+------------------------------------------------------------------+
-//| v1.52: counterpart to AddNativeIndicatorOnce() - remove the          |
-//| remembered indicator (if still present) and clear the name, so       |
-//| OnDeinit() doesn't leave MA/VWAP lines behind after detach, and a     |
-//| later re-add starts clean.                                           |
-//+------------------------------------------------------------------+
-void RemoveNativeIndicatorByName(string &rememberedName)
-  {
-   if(rememberedName == "") return;
-   for(int i = ChartIndicatorsTotal(0, 0) - 1; i >= 0; i--)
-     {
-      if(ChartIndicatorName(0, 0, i) == rememberedName)
-        {
-         ChartIndicatorDelete(0, 0, rememberedName);
-         break;
-        }
-     }
-   rememberedName = "";
-  }
-
-//+------------------------------------------------------------------+
-//| v1.49: VWAP as a NATIVE chart indicator (SessionVWAP.mq5, shipped   |
-//| alongside this EA - compile it into your Indicators folder first)  |
-//| instead of hand-drawn OBJ_TREND segments - same unlimited-history/  |
-//| zero-chart-object reasoning as SetupMAs() above, but since this is  |
-//| a CUSTOM indicator (not a built-in one), it keeps full color/width  |
-//| control via its own InpVWAPColor/InpVWAPWidth inputs - set those    |
-//| inside SessionVWAP.mq5's own Properties dialog, not here.           |
-//+------------------------------------------------------------------+
-void SetupVWAP()
-  {
-   if(!InpShowVWAP) return;
-   g_vwapHandle = iCustom(_Symbol, PERIOD_CURRENT, "SessionVWAP");
-   if(g_vwapHandle == INVALID_HANDLE)
-     {
-      Print("TradePanel: SessionVWAP custom indicator not found/failed to load - compile ",
-            "SessionVWAP.mq5 into your Indicators folder (or a subfolder, and adjust the ",
-            "iCustom() path in SetupVWAP() to match) for the VWAP line to show.");
-      return;
-     }
-   AddNativeIndicatorOnce(g_vwapHandle, g_vwapName);
   }
 
 //+------------------------------------------------------------------+
@@ -3565,7 +3528,7 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.57 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
+   PrintFormat("TradePanel v1.58 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s  showTrendStoch=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
@@ -3576,11 +3539,10 @@ int OnInit()
 
    ApplyTheme();
    SetupMAs();
-   SetupVWAP();
-   //--- v1.49: BackfillOverlayLines() is now a no-op - both MAs and VWAP
-   //--- are native chart indicators added just above, which draw their
-   //--- own full history automatically. Kept the call (now harmless) so
-   //--- the surrounding init order/comments below stay accurate.
+   //--- backfill BEFORE building the panel - otherwise the whole historical
+   //--- MA/VWAP backfill gets created AFTER the panel and buries it from the
+   //--- moment of attach, not just until the first new bar's RebuildPanel()
+   //--- call (same creation-order reasoning as RebuildPanel's own header).
    BackfillOverlayLines();
    ResyncStochSignals();
    //--- v1.47: the two new overlays below - fully independent namespaces/
@@ -3618,21 +3580,9 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_rej);
    ObjectsDeleteAll(0, g_snp);
    ObjectsDeleteAll(0, g_tsx);
-   //--- v1.49: remove the native MA/VWAP chart indicators this EA added in
-   //--- SetupMAs()/SetupVWAP() - IndicatorRelease() alone frees the handle
-   //--- but does NOT remove an indicator ChartIndicatorAdd() already placed
-   //--- on the chart, which would otherwise be left behind after removal.
-   RemoveNativeIndicatorByName(g_maName21);
-   RemoveNativeIndicatorByName(g_maName50);
-   RemoveNativeIndicatorByName(g_maName200);
-   RemoveNativeIndicatorByName(g_vwapName);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
-   if(g_maDisplayHandle21  != INVALID_HANDLE) IndicatorRelease(g_maDisplayHandle21);
-   if(g_maDisplayHandle50  != INVALID_HANDLE) IndicatorRelease(g_maDisplayHandle50);
-   if(g_maDisplayHandle200 != INVALID_HANDLE) IndicatorRelease(g_maDisplayHandle200);
-   if(g_vwapHandle  != INVALID_HANDLE) IndicatorRelease(g_vwapHandle);
    if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
   }
 
