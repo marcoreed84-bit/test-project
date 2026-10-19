@@ -19,7 +19,27 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.47"
+#property version   "1.48"
+//--- 1.48: THREE new EXPERIMENTAL/UNVALIDATED marker-only overlays, per
+//--- direct request - "built the signals as i have described all of them
+//--- i will check them on the chart". None of these passed tonight's
+//--- honest random-timing/net-PF testing as standalone constructions (see
+//--- each one's own research script) - they are shown anyway, clearly
+//--- labeled EXPERIMENTAL/UNVALIDATED in every tooltip, purely so the
+//--- live chart can be eyeballed for whether any of them line up with
+//--- the stochastic overlay's real crosses in a way the blunt
+//--- statistical test could have missed. Marker-only (no SL/TP lines) -
+//--- all three reversible via their own input flag, nothing else changed.
+//--- (a) InpShowStackSignals: fresh EMA21/50/200 stack transition
+//--- (trend-following) - tested net-losing (ema_stack_pure_entry_test.py:
+//--- Gold %PF=0.92, Silver 0.70, BTC 0.70).
+//--- (b) InpShowRejectSignals: price's high/low touches EMA21 but the
+//--- bar closes back on the same side (a rejection) - not yet separately
+//--- null-tested, added purely from the chart annotation showing this.
+//--- (c) InpShowSnapbackSignals: price gets InpSnapExtATR ATR away from
+//--- EMA21 (fresh extension), marked in the MEAN-REVERSION direction -
+//--- the only counter-trend idea on the chart, everything else here is
+//--- trend-following. Not yet separately null-tested.
 //--- 1.47: TWO new, fully independent signal overlays added, per direct
 //--- request ("give them to me in the trade panel aswell, the entry
 //--- signals with the same lines as we have now showing RR levels, and
@@ -549,6 +569,22 @@ input double InpCdlArrowOffsetATR  = 1.0;
 input int    InpCdlArrowSize       = 1;
 input int    InpCdlLineBars        = 8;
 
+input group "=== EXPERIMENTAL marker-only overlays, per direct request - NONE of these passed tonight's honest random-timing/net-PF testing as standalone filters (see v1.48 version-history comment + each marker's own tooltip) - for VISUAL INSPECTION ONLY, no SL/TP lines, no claim of an edge ==="
+input bool   InpShowStackSignals    = true;   // fresh EMA21/50/200 stack transition (trend-following) -
+                                               // tested tonight: net losing on all 3 instruments
+input color  InpStackBuyCol         = clrDeepSkyBlue;
+input color  InpStackSellCol        = clrOrangeRed;
+input bool   InpShowRejectSignals   = true;   // price touches EMA21 then closes back on the same side -
+                                               // NOT yet separately null-tested as its own signal
+input color  InpRejBuyCol           = clrTurquoise;
+input color  InpRejSellCol          = clrHotPink;
+input bool   InpShowSnapbackSignals = true;   // fresh extension from EMA21 (mean-reversion bet) -
+                                               // NOT yet separately null-tested
+input double InpSnapExtATR          = 2.0;    // how many ATR from EMA21 counts as "extended"
+input color  InpSnapBuyCol          = clrSpringGreen;
+input color  InpSnapSellCol         = clrOrchid;
+input int    InpExpMarkerSize       = 2;
+
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
@@ -623,6 +659,26 @@ ENUM_TIMEFRAMES g_cdlPeriod = PERIOD_CURRENT;
 datetime g_cdlLastProcessedBar = 0;
 double   g_cdlLastMarkerPrice = 0.0;
 datetime g_cdlLastMarkerTime  = 0;
+
+//--- v1.48: three EXPERIMENTAL/UNVALIDATED marker-only overlays, per direct
+//--- request to see each described condition on the real chart (none of
+//--- these passed tonight's honest testing as standalone filters - see the
+//--- version-history comment below and the tooltip on every marker - this
+//--- is for visual inspection only, NOT a claim any of them works).
+string   g_stk = "TPSTK_";   // fresh EMA21/50/200 stack transition
+datetime g_stkLastProcessedBar = 0;
+double   g_stkLastMarkerPrice = 0.0;
+datetime g_stkLastMarkerTime  = 0;
+
+string   g_rej = "TPREJ_";   // price touches EMA21 then closes back (rejection)
+datetime g_rejLastProcessedBar = 0;
+double   g_rejLastMarkerPrice = 0.0;
+datetime g_rejLastMarkerTime  = 0;
+
+string   g_snp = "TPSNP_";   // fresh extension from EMA21, betting on snap-back
+datetime g_snpLastProcessedBar = 0;
+double   g_snpLastMarkerPrice = 0.0;
+datetime g_snpLastMarkerTime  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1455,6 +1511,89 @@ void DrawCandleArrow(const string nm, const datetime t, const double price, cons
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Engulfing-at-swing-low BUY (validated GOLD only, p=0.0010 - Silver/BTC NOT real)"
                                                    : "Engulfing-at-swing-high SELL (validated GOLD only, p=0.0010 - Silver/BTC NOT real)");
+  }
+
+//+------------------------------------------------------------------+
+//| v1.48: fresh EMA21/50/200 STACK transition marker - EXPERIMENTAL/   |
+//| UNVALIDATED (tested net-losing on all 3 instruments, see             |
+//| ema_stack_pure_entry_test.py) - marker only, no SL/TP lines.         |
+//+------------------------------------------------------------------+
+void DrawStackMarker(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpStackBuyCol : InpStackSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpExpMarkerSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, "EXPERIMENTAL/UNVALIDATED - fresh EMA21/50/200 stack " +
+                   string(isBuy ? "BUY (bullish order)" : "SELL (bearish order)") +
+                   " - tested net-losing tonight (Gold %PF=0.92, Silver 0.70, BTC 0.70) - visual only");
+  }
+
+//+------------------------------------------------------------------+
+//| v1.48: EMA21 touch-and-reject marker - price's high/low touches     |
+//| EMA21 but the bar CLOSES back on the same side it came from         |
+//| (rejection, not a clean cross) - EXPERIMENTAL/UNVALIDATED, has NOT  |
+//| been separately null-tested as its own signal (distinct from the    |
+//| MA-order-flip-confirmation construction tested and dropped earlier  |
+//| tonight, which required BOTH EMA21 and EMA50 order to flip).        |
+//+------------------------------------------------------------------+
+void DrawRejectMarker(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);   // diamond - same shape family as the midline
+                                                        // overlay's own experimental marker, own colors
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejBuyCol : InpRejSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpExpMarkerSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, "EXPERIMENTAL/UNVALIDATED - EMA21 touch-and-reject " +
+                   string(isBuy ? "BUY (held above)" : "SELL (held below)") + " - not yet null-tested, visual only");
+  }
+
+//+------------------------------------------------------------------+
+//| v1.48: extension snap-back marker - price is freshly InpSnapExtATR  |
+//| ATR away from EMA21, marked in the MEAN-REVERSION direction (the    |
+//| OPPOSITE of the extension) - EXPERIMENTAL/UNVALIDATED, not yet       |
+//| null-tested. This is the only MEAN-REVERSION idea on the chart -    |
+//| every other overlay here is trend-following.                        |
+//+------------------------------------------------------------------+
+void DrawSnapbackMarker(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);   // filled circle
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpSnapBuyCol : InpSnapSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpExpMarkerSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, "EXPERIMENTAL/UNVALIDATED - mean-reversion snap-back " +
+                   string(isBuy ? "BUY (was extended below)" : "SELL (was extended above)") +
+                   " - not yet null-tested, visual only");
+  }
+
+//+------------------------------------------------------------------+
+//| v1.48: shared purge helper for the three experimental overlays -    |
+//| same rolling-cap idea as PurgeOldSigObjects()/etc above, factored   |
+//| out since none of these three need their own per-overlay tuning.    |
+//+------------------------------------------------------------------+
+void PurgeOldPrefixedObjects(const string prefix)
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, prefix) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -2308,6 +2447,244 @@ void ResyncCandleSignals()
   }
 
 //+------------------------------------------------------------------+
+//| v1.48: EXPERIMENTAL/UNVALIDATED stack-transition marker overlay.    |
+//| Marks the FIRST bar where EMA21/50/200 become freshly stacked in    |
+//| trend order - no SL/TP, no exit, no posDir - just marks where the   |
+//| condition fires so it can be eyeballed against the stochastic       |
+//| overlay's own crosses on the same chart. Tested net-losing as a     |
+//| standalone entry (ema_stack_pure_entry_test.py) - shown anyway per  |
+//| direct request, to check by eye whether it still helps as a FILTER  |
+//| (vs. a standalone system) in a way the blunt statistical test above |
+//| could have missed (wrong threshold/lookback/combination untried).   |
+//+------------------------------------------------------------------+
+void ComputeStackSignals(const bool backfill)
+  {
+   int minBars = InpMA200 + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[];
+   ArrayResize(c, n);
+   for(int i = 0; i < n; i++) c[i] = r[i].close;
+
+   double e21[], e50[], e200[];
+   SigEMA(c, n, InpMA21, e21);
+   SigEMA(c, n, InpMA50, e50);
+   SigEMA(c, n, InpMA200, e200);
+   double h[], l[], atr[];
+   ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { h[i] = r[i].high; l[i] = r[i].low; }
+   SigATR(h, l, c, n, 14, atr);
+
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_stkLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+   double lastMarkerPrice = backfill ? 0.0 : g_stkLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_stkLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e200[i] == SIG_NA ||
+         e21[i - 1] == SIG_NA || e50[i - 1] == SIG_NA || e200[i - 1] == SIG_NA) continue;
+      bool draw = (i >= drawFrom);
+
+      int sdPrev = (e21[i - 1] > e50[i - 1] && e50[i - 1] > e200[i - 1]) ? 1 :
+                   (e21[i - 1] < e50[i - 1] && e50[i - 1] < e200[i - 1]) ? -1 : 0;
+      int sdCur  = (e21[i] > e50[i] && e50[i] > e200[i]) ? 1 :
+                   (e21[i] < e50[i] && e50[i] < e200[i]) ? -1 : 0;
+      if(sdCur == 0 || sdCur == sdPrev) continue;
+
+      if(draw)
+        {
+         bool isBuy = sdCur > 0;
+         double off = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
+         datetime t = r[i].time;
+         string nm = g_stk + "m_" + IntegerToString((long)t);
+         double price = isBuy ? l[i] - off : h[i] + off;
+         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+         price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = price; lastMarkerTime = t;
+         DrawStackMarker(nm, t, price, isBuy);
+        }
+     }
+
+   g_stkLastProcessedBar = r[n - 1].time;
+   g_stkLastMarkerPrice = lastMarkerPrice; g_stkLastMarkerTime = lastMarkerTime;
+  }
+
+void ResyncStackSignals()
+  {
+   ObjectsDeleteAll(0, g_stk);
+   g_stkLastProcessedBar = 0;
+   g_stkLastMarkerPrice = 0.0; g_stkLastMarkerTime = 0;
+   if(InpShowStackSignals) ComputeStackSignals(true);
+  }
+
+//+------------------------------------------------------------------+
+//| v1.48: EXPERIMENTAL/UNVALIDATED EMA21 touch-and-reject marker       |
+//| overlay. Marks any bar whose high/low touches EMA21 but whose       |
+//| CLOSE ends back on the same side it approached from (a rejection,   |
+//| not a clean cross) - no trend/stochastic condition attached, pure   |
+//| price-vs-EMA21 geometry, so it can be compared by eye against both  |
+//| the stochastic crosses and the stack markers above.                 |
+//+------------------------------------------------------------------+
+void ComputeRejectSignals(const bool backfill)
+  {
+   int minBars = InpMA21 + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+   double e21[], atr[];
+   SigEMA(c, n, InpMA21, e21);
+   SigATR(h, l, c, n, 14, atr);
+
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_rejLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+   double lastMarkerPrice = backfill ? 0.0 : g_rejLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_rejLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(e21[i] == SIG_NA) continue;
+      bool draw = (i >= drawFrom);
+
+      bool touchedFromBelow = l[i] <= e21[i] && c[i] > e21[i];   // dipped to/through EMA21, closed above -> reject up
+      bool touchedFromAbove = h[i] >= e21[i] && c[i] < e21[i];   // poked up to/through EMA21, closed below -> reject down
+      if(!touchedFromBelow && !touchedFromAbove) continue;
+
+      if(draw)
+        {
+         bool isBuy = touchedFromBelow;
+         double off = (atr[i] == SIG_NA) ? 0.0 : InpSigArrowOffsetATR * atr[i];
+         datetime t = r[i].time;
+         string nm = g_rej + "m_" + IntegerToString((long)t);
+         double price = isBuy ? l[i] - off : h[i] + off;
+         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+         price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = price; lastMarkerTime = t;
+         DrawRejectMarker(nm, t, price, isBuy);
+        }
+     }
+
+   g_rejLastProcessedBar = r[n - 1].time;
+   g_rejLastMarkerPrice = lastMarkerPrice; g_rejLastMarkerTime = lastMarkerTime;
+  }
+
+void ResyncRejectSignals()
+  {
+   ObjectsDeleteAll(0, g_rej);
+   g_rejLastProcessedBar = 0;
+   g_rejLastMarkerPrice = 0.0; g_rejLastMarkerTime = 0;
+   if(InpShowRejectSignals) ComputeRejectSignals(true);
+  }
+
+//+------------------------------------------------------------------+
+//| v1.48: EXPERIMENTAL/UNVALIDATED mean-reversion snap-back marker     |
+//| overlay. Marks the FIRST bar where price gets InpSnapExtATR ATR     |
+//| away from EMA21 (a fresh extension event), in the REVERSION         |
+//| direction (opposite the extension) - "price pulled far away from    |
+//| the moving average, then the snap back" per direct request. The     |
+//| only mean-reversion idea on the chart - everything else here is     |
+//| trend-following.                                                      |
+//+------------------------------------------------------------------+
+void ComputeSnapbackSignals(const bool backfill)
+  {
+   int minBars = InpMA21 + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+   double e21[], atr[];
+   SigEMA(c, n, InpMA21, e21);
+   SigATR(h, l, c, n, 14, atr);
+
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_snpLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+   double lastMarkerPrice = backfill ? 0.0 : g_snpLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_snpLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(e21[i] == SIG_NA || atr[i] == SIG_NA || atr[i] <= 0.0 ||
+         e21[i - 1] == SIG_NA || atr[i - 1] == SIG_NA || atr[i - 1] <= 0.0) continue;
+      bool draw = (i >= drawFrom);
+
+      double gapPrev = (c[i - 1] - e21[i - 1]) / atr[i - 1];
+      double gapCur  = (c[i] - e21[i]) / atr[i];
+      int esPrev = (gapPrev >= InpSnapExtATR) ? 1 : (gapPrev <= -InpSnapExtATR) ? -1 : 0;
+      int esCur  = (gapCur  >= InpSnapExtATR) ? 1 : (gapCur  <= -InpSnapExtATR) ? -1 : 0;
+      if(esCur == 0 || esCur == esPrev) continue;
+
+      if(draw)
+        {
+         bool isBuy = esCur < 0;   // extended BELOW -> betting on a BUY snap-back
+         double off = InpSigArrowOffsetATR * atr[i];
+         datetime t = r[i].time;
+         string nm = g_snp + "m_" + IntegerToString((long)t);
+         double price = isBuy ? l[i] - off : h[i] + off;
+         double minGap = InpSigMinMarkerGapATR * atr[i];
+         price = NudgeAwayFromLastMarker(price, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = price; lastMarkerTime = t;
+         DrawSnapbackMarker(nm, t, price, isBuy);
+        }
+     }
+
+   g_snpLastProcessedBar = r[n - 1].time;
+   g_snpLastMarkerPrice = lastMarkerPrice; g_snpLastMarkerTime = lastMarkerTime;
+  }
+
+void ResyncSnapbackSignals()
+  {
+   ObjectsDeleteAll(0, g_snp);
+   g_snpLastProcessedBar = 0;
+   g_snpLastMarkerPrice = 0.0; g_snpLastMarkerTime = 0;
+   if(InpShowSnapbackSignals) ComputeSnapbackSignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- handles are needed for the cross-proximity alert even when the lines
@@ -2560,12 +2937,14 @@ int OnInit()
    //--- trusting the Properties dialog alone
    string methodStr = (InpSigStochMethod == SIG_STOCH_SUM) ? "SUM" :
                       (InpSigStochMethod == SIG_STOCH_SMA) ? "SMA-of-K" : "SMOOTHED(SMMA)";
-   PrintFormat("TradePanel v1.47 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s",
+   PrintFormat("TradePanel v1.48 OnInit: ENTRY stoch=(%d,%d,%d)  EXIT stoch=(%d,%d,%d)  method=%s  zone=(%.1f,%.1f)  interpCross=%s  showExit=%s  showMidline=%s  showEmaCross=%s  showCandle=%s  showStack=%s  showReject=%s  showSnapback=%s",
                InpSigKPeriod, InpSigSlowing, InpSigDPeriod,
                InpExitKPeriod, InpExitSlowing, InpExitDPeriod,
                methodStr, InpSigZoneLow, InpSigZoneHigh, InpSigUseInterpCross ? "true" : "false",
                InpShowExitSignals ? "true" : "false", InpShowMidlineSignals ? "true" : "false",
-               InpShowEmaCrossSignals ? "true" : "false", InpShowCandleSignals ? "true" : "false");
+               InpShowEmaCrossSignals ? "true" : "false", InpShowCandleSignals ? "true" : "false",
+               InpShowStackSignals ? "true" : "false", InpShowRejectSignals ? "true" : "false",
+               InpShowSnapbackSignals ? "true" : "false");
 
    ApplyTheme();
    SetupMAs();
@@ -2580,6 +2959,11 @@ int OnInit()
    //--- InpShowCandleSignals false (nothing else in the file changed)
    ResyncEmaCrossSignals();
    ResyncCandleSignals();
+   //--- v1.48: three EXPERIMENTAL/UNVALIDATED marker-only overlays - see
+   //--- their own compute-function headers and version-history comment
+   ResyncStackSignals();
+   ResyncRejectSignals();
+   ResyncSnapbackSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -2598,6 +2982,9 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_emax);
    ObjectsDeleteAll(0, g_cdl);
+   ObjectsDeleteAll(0, g_stk);
+   ObjectsDeleteAll(0, g_rej);
+   ObjectsDeleteAll(0, g_snp);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -2653,6 +3040,21 @@ void CheckNewBar()
      {
       ComputeCandleSignals(false);
       PurgeOldCandleObjects();
+     }
+   if(InpShowStackSignals)
+     {
+      ComputeStackSignals(false);
+      PurgeOldPrefixedObjects(g_stk);
+     }
+   if(InpShowRejectSignals)
+     {
+      ComputeRejectSignals(false);
+      PurgeOldPrefixedObjects(g_rej);
+     }
+   if(InpShowSnapbackSignals)
+     {
+      ComputeSnapbackSignals(false);
+      PurgeOldPrefixedObjects(g_snp);
      }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
