@@ -19,7 +19,43 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.05"
+#property version   "2.06"
+//--- 2.06: Three fixes, per direct request/screenshot.
+//--- (1) Every overlay's entry arrow is now the SAME shape
+//--- (OBJ_ARROW_UP/DOWN, triangle) - only the Rejection/Rejection M15
+//--- overlays were still using a different Wingdings "flag" icon from
+//--- v2.02; now all five entry overlays (EMA Cross, Stoch, Engulfing,
+//--- Rejection, Rejection M15, Continuation) share one shape, differing
+//--- only by colour and tooltip label, per: "the arrows for all signals
+//--- must be the same all just different labels and colours."
+//--- (2) FIXED a real direction bug in the Continuation overlay (v2.04) -
+//--- found by checking it against the user's own annotated chart
+//--- (downtrend, price rallying up to the 21/50EMA at each circled point,
+//--- then rolling back over - exactly the pattern that should have
+//--- fired and didn't). The construction had uptrend+stochCrossDOWN+
+//--- reachedOVERBOUGHT firing BUY (a top, not a pullback) and downtrend+
+//--- stochCrossUP+reachedOVERSOLD firing SELL (a bottom, not a rally-
+//--- rejection) - backwards. Corrected: uptrend (dip to the MA, stoch
+//--- toward oversold, crosses UP as the uptrend resumes) -> BUY;
+//--- downtrend (rally to the MA, stoch toward overbought, crosses DOWN
+//--- as the downtrend resumes) -> SELL - this now matches the chart.
+//--- Re-tested with the corrected logic (research/meridian_vwap200/
+//--- trend_continuation_stoch_reset_test.py): still does NOT beat
+//--- random - in fact worse than most random draws now (p=0.96 M5 /
+//--- p=0.84 M15, overall %PF 0.78 M5 / 0.84 M15). Remains UNVALIDATED,
+//--- shown as a visual aid only, same as before - now at least firing
+//--- at the pattern it was meant to describe.
+//--- (3) Fixed a real regression the v2.05 fix itself introduced: on a
+//--- terminal that delivers BOTH a full OnInit reinit AND a separate
+//--- CHARTEVENT_CHART_CHANGE event for the same timeframe switch, the
+//--- v2.05 backstop would redo the whole expensive MA/VWAP rebuild a
+//--- second time back-to-back with OnInit's own version - reported as
+//--- "even the panel window takes long to show" after flipping
+//--- timeframes. Added g_lastFullResyncMs, a 2-second debounce set at
+//--- the end of every full resync and checked at the top of the
+//--- CHARTEVENT_CHART_CHANGE handler - if OnInit already did the work
+//--- for this switch within the last 2s, the backstop now just rebuilds
+//--- the panel (cheap) instead of redoing the heavy MA/VWAP work.
 //--- 2.05: Robustness fix, per direct request ("when i flip between the
 //--- 15min and the 5min the moving averages must show correct for each
 //--- time frame, otherwise we need different tradepanels for each
@@ -909,6 +945,13 @@ datetime g_lastCrossAlertAt = 0;     // cooldown - see InpCrossAlertCooldownMin
 //--- the panel. Keep this prefix namespace-disjoint from PFX.
 string g_pm = "TPMA_";
 datetime g_lastBarTime = 0;
+//--- v2.06: debounce for the CHARTEVENT_CHART_CHANGE MA/VWAP rebuild
+//--- (see OnInit and the CHARTEVENT_CHART_CHANGE handler) - set at the
+//--- end of every full resync (OnInit's full reinit path), checked by
+//--- the chart-change backstop so it never redoes the same expensive
+//--- 2500-bar MA/VWAP rebuild a second time back-to-back with OnInit's
+//--- own version for the SAME period switch
+ulong    g_lastFullResyncMs = 0;
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
@@ -2410,11 +2453,12 @@ void ResyncCandleSignals()
 void DrawRejectArrow2(const string nm, const datetime t, const double price, const bool isBuy)
   {
    if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 217);   // Wingdings "flag" shape - distinct from every
-                                                        // other overlay's arrow/dot/diamond
+   //--- v2.06: same OBJ_ARROW_UP/DOWN shape as every other overlay (was a
+   //--- Wingdings flag icon) - per direct request, "the arrows for all
+   //--- signals must be the same all just different labels and colours"
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejBuyCol : InpRejSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpRejArrowSize);
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
@@ -2613,10 +2657,10 @@ void ResyncRejectSignals2()
 void DrawRejectArrowM15(const string nm, const datetime t, const double price, const bool isBuy)
   {
    if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 217);
+   //--- v2.06: same OBJ_ARROW_UP/DOWN shape as every other overlay
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejM15BuyCol : InpRejM15SellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpRejM15ArrowSize);
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
@@ -2870,20 +2914,30 @@ void ComputeContSignals(const bool backfill)
       bool near50 = MathAbs(c[i] - e50[i]) <= InpContNearATR * atr[i];
       if(!near21 && !near50) continue;
 
+      //--- v2.06 FIX: direction was backwards - a pullback-and-resume in an
+      //--- uptrend means price DIPS to the MA (stoch goes toward OVERSOLD
+      //--- during the dip) then CROSSES UP as the uptrend resumes; a
+      //--- pullback-and-resume in a downtrend means price RALLIES to the
+      //--- MA (stoch goes toward OVERBOUGHT during the rally) then CROSSES
+      //--- DOWN as the downtrend resumes - exactly the pattern circled on
+      //--- the user's chart (downtrend, price rallying up to touch the
+      //--- 21/50EMA, then rolling back over). The previous version had
+      //--- uptrend+crossDown+overbought (fires at a TOP, not a pullback)
+      //--- and downtrend+crossUp+oversold (fires at a BOTTOM) - backwards.
       int dir = 0;
-      if(e21[i] > e50[i] && stCrossDown[i])
-        {
-         bool reachedHigh = false;
-         for(int j = MathMax(0, i - InpContResetLookback); j < i; j++)
-            if(k[j] != SIG_NA && k[j] >= InpStochZoneHigh) { reachedHigh = true; break; }
-         if(reachedHigh) dir = 1;
-        }
-      else if(e21[i] < e50[i] && stCrossUp[i])
+      if(e21[i] > e50[i] && stCrossUp[i])
         {
          bool reachedLow = false;
          for(int j = MathMax(0, i - InpContResetLookback); j < i; j++)
             if(k[j] != SIG_NA && k[j] <= InpStochZoneLow) { reachedLow = true; break; }
-         if(reachedLow) dir = -1;
+         if(reachedLow) dir = 1;
+        }
+      else if(e21[i] < e50[i] && stCrossDown[i])
+        {
+         bool reachedHigh = false;
+         for(int j = MathMax(0, i - InpContResetLookback); j < i; j++)
+            if(k[j] != SIG_NA && k[j] >= InpStochZoneHigh) { reachedHigh = true; break; }
+         if(reachedHigh) dir = -1;
         }
       if(dir == 0) continue;
       if(dir == lastDir) continue;
@@ -3231,6 +3285,7 @@ int OnInit()
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+   g_lastFullResyncMs = GetTickCount64();
    EventSetTimer(2);   // was 1s - halving the poll frequency on top of no
                         // longer force-redrawing every tick (see OnTimer)
    ChartRedraw(0);
@@ -3510,6 +3565,20 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
      {
       if(g_emaxPeriod != (ENUM_TIMEFRAMES)_Period)
         {
+         //--- v2.06: debounce - if OnInit's own full reinit ran for THIS
+         //--- period switch within the last 2s, it already did everything
+         //--- below (SetupMAs/BackfillOverlayLines/every Resync), so skip
+         //--- it here rather than redoing the same expensive 2500-bar
+         //--- MA/VWAP rebuild a second time back-to-back. Without this, a
+         //--- terminal that delivers BOTH a full reinit AND this chart-
+         //--- change event for the same switch would do the heavy work
+         //--- twice in a row, which is exactly what made the panel itself
+         //--- visibly slower to reappear after the v2.05 fix (reported).
+         if(GetTickCount64() - g_lastFullResyncMs < 2000)
+           {
+            if(!g_dragging && !AnyEditFocused()) RebuildPanel();
+            return;
+           }
          if(g_maHandle21  != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
          if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
          if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -3529,6 +3598,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ResyncCandleSignals();
          ResyncRejectSignals2();
          ResyncContSignals();
+         g_lastFullResyncMs = GetTickCount64();
          if(!g_dragging && !AnyEditFocused()) RebuildPanel();
         }
       return;
