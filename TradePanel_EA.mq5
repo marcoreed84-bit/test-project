@@ -19,7 +19,22 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.03"
+#property version   "2.04"
+//--- 2.04: New "Continuation" overlay, per direct request - "signals for
+//--- trend continuation, example where price is overbought and the
+//--- stochastic crosses to go back to oversold near the moving
+//--- averages" - buy the pullback while an uptrend continues: trend
+//--- (21>50) + price near EITHER the 21 or the 50EMA (not just the 21 -
+//--- "should price actually test the 50ema and not just the 21ema") +
+//--- stochastic reset from the OPPOSITE extreme (reached overbought then
+//--- crossed back down) within a lookback window. Mirror for downtrend/
+//--- sell. Tested (research/meridian_vwap200/trend_continuation_stoch_
+//--- reset_test.py): net loser on both GOLD M5/M15, p=0.52-0.53 vs
+//--- random timing on both - does NOT beat random. Shown anyway,
+//--- UNVALIDATED, as a visual aid per direct request ("i still need
+//--- signals at those points... so i could also place a trade there if
+//--- i know the trend is going to continue") - same precedent as every
+//--- other UNVALIDATED overlay already in this panel.
 //--- 2.03: Two fixes to the Rejection overlay, per direct request. (1)
 //--- SL (N-bar swing high/low, InpRejSwingBars) and TP (R:R example,
 //--- InpRejRR) lines added - it only drew the arrow before, every other
@@ -829,6 +844,29 @@ input int    InpRejM15ArrowSize    = 2;
 input double InpRejM15ArrowOffsetATR = 1.3;
 input bool   InpRejM15Alert        = true;
 
+input group "=== Trend-continuation signal overlay (NEW, v2.04, per direct request) - UNVALIDATED (tested net loser, p=0.52 vs random on both M5/M15 - shown anyway as a visual aid, same as the overlays above) - VISUAL ONLY ==="
+input bool   InpShowContSignals    = true;    // trend (21 vs 50) + price pulled back near the 21EMA +
+                                               // stochastic resetting from the OPPOSITE extreme (overbought
+                                               // in an uptrend, oversold in a downtrend) - "price is
+                                               // overbought and the stochastic crosses to go back to
+                                               // oversold near the moving averages" = buy the pullback
+                                               // while the uptrend continues (mirrored for downtrend/sell)
+input double InpContNearATR        = 1.0;     // how close to EITHER the 21 or the 50EMA counts as "near
+                                               // the moving averages" - a pullback can test either one,
+                                               // not just the 21
+input int    InpContResetLookback  = 10;      // %K must have reached the zone within this many bars
+                                               // before the reset cross counts
+input int    InpContSwingBars      = 10;
+input double InpContRR             = 2.0;
+input color  InpContBuyCol         = clrYellow;
+input color  InpContSellCol        = clrDarkOrange;
+input color  InpContStopCol        = clrRed;
+input color  InpContTPCol          = C'0,255,0';
+input int    InpContArrowSize      = 2;
+input double InpContArrowOffsetATR = 1.3;
+input int    InpContLineBars       = 8;
+input bool   InpContAlert          = true;
+
 CTrade trade;
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
@@ -904,6 +942,14 @@ int      g_rjxmLastDir = 0;
 datetime g_rjxmLastProcessedBar = 0;
 double   g_rjxmLastMarkerPrice = 0.0;
 datetime g_rjxmLastMarkerTime  = 0;
+
+//--- v2.04: trend-continuation stoch-reset overlay (NEW) - own namespace
+string   g_cnt = "TPCNT_";
+ENUM_TIMEFRAMES g_cntPeriod = PERIOD_CURRENT;
+int      g_cntLastDir = 0;
+datetime g_cntLastProcessedBar = 0;
+double   g_cntLastMarkerPrice = 0.0;
+datetime g_cntLastMarkerTime  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -2712,6 +2758,180 @@ void ResyncRejectSignalsM15()
   }
 
 //+------------------------------------------------------------------+
+//| v2.04: trend-continuation overlay, per direct request - "signals for |
+//| trend continuation, example where price is overbought and the        |
+//| stochastic crosses to go back to oversold near the moving averages". |
+//| Buy case: uptrend (21>50), price pulled back near the 21EMA, AND the |
+//| stochastic reached overbought and crossed back down within a short   |
+//| lookback (the "reset" that times the pullback). Mirror for sell:     |
+//| downtrend, price near 21EMA, stoch reached oversold then crossed up. |
+//| TESTED (research/meridian_vwap200/trend_continuation_stoch_reset_    |
+//| test.py): net loser on both GOLD M5/M15, p=0.52 vs random timing on  |
+//| both - does NOT beat random. Shown anyway, UNVALIDATED, as a visual  |
+//| aid per direct request - same precedent as every other overlay here. |
+//+------------------------------------------------------------------+
+void DrawContArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpContBuyCol : InpContSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpContArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Continuation Buy (unvalidated)" : "Continuation Sell (unvalidated)");
+  }
+
+void ComputeContSignals(const bool backfill)
+  {
+   int minBars = InpStochKPeriod + InpStochSlowing + InpStochDPeriod + InpContResetLookback + InpContSwingBars + 10;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double e21[], e50[];
+   SigEMA(c, n, InpMA21, e21);
+   SigEMA(c, n, InpMA50, e50);
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+   double k[], d[];
+   SigClassicStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, k, d, InpStochMethod, InpStochPriceMode);
+
+   bool stCrossUp[], stCrossDown[];
+   ArrayResize(stCrossUp, n); ArrayResize(stCrossDown, n);
+   ArrayInitialize(stCrossUp, false); ArrayInitialize(stCrossDown, false);
+   for(int i = 1; i < n; i++)
+     {
+      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
+      stCrossUp[i]   = k[i - 1] <= d[i - 1] && k[i] > d[i];
+      stCrossDown[i] = k[i - 1] >= d[i - 1] && k[i] < d[i];
+     }
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_cntLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   int lastDir = backfill ? 0 : g_cntLastDir;
+   double lastMarkerPrice = backfill ? 0.0 : g_cntLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_cntLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(e21[i] == SIG_NA || e50[i] == SIG_NA || atr[i] == SIG_NA || atr[i] <= 0.0) continue;
+      bool draw = (i >= drawFrom);
+
+      //--- "near the moving averages" = tested EITHER the 21 or the 50,
+      //--- not just the 21 - per direct request ("should price actually
+      //--- test the 50ema and not just the 21ema")
+      bool near21 = MathAbs(c[i] - e21[i]) <= InpContNearATR * atr[i];
+      bool near50 = MathAbs(c[i] - e50[i]) <= InpContNearATR * atr[i];
+      if(!near21 && !near50) continue;
+
+      int dir = 0;
+      if(e21[i] > e50[i] && stCrossDown[i])
+        {
+         bool reachedHigh = false;
+         for(int j = MathMax(0, i - InpContResetLookback); j < i; j++)
+            if(k[j] != SIG_NA && k[j] >= InpStochZoneHigh) { reachedHigh = true; break; }
+         if(reachedHigh) dir = 1;
+        }
+      else if(e21[i] < e50[i] && stCrossUp[i])
+        {
+         bool reachedLow = false;
+         for(int j = MathMax(0, i - InpContResetLookback); j < i; j++)
+            if(k[j] != SIG_NA && k[j] <= InpStochZoneLow) { reachedLow = true; break; }
+         if(reachedLow) dir = -1;
+        }
+      if(dir == 0) continue;
+      if(dir == lastDir) continue;
+      lastDir = dir;
+
+      if(draw)
+        {
+         bool isBuy = dir > 0;
+         double offEntry = InpContArrowOffsetATR * atr[i];
+         datetime t = r[i].time;
+         string id = IntegerToString((long)t);
+         string nm = g_cnt + "arr_" + id;
+         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+         double minGap = InpSigMinMarkerGapATR * atr[i];
+         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         DrawContArrow(nm, t, entryPrice, isBuy);
+
+         double swing = (dir > 0) ? l[i] : h[i];
+         for(int j = i - InpContSwingBars + 1; j < i; j++)
+            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+         double risk = dir * (c[i] - swing);
+         if(risk > 0.0)
+           {
+            double stop = swing;
+            double tp   = c[i] + dir * InpContRR * risk;
+            string slNm = g_cnt + "sl_" + id;
+            string tpNm = g_cnt + "tp_" + id;
+            DrawSigLevel(slNm, t, t + InpContLineBars * perSec, stop, InpContStopCol, STYLE_SOLID,
+                         "Continuation SL: recent " + IntegerToString(InpContSwingBars) + "-bar swing (unvalidated)");
+            DrawSigLevel(tpNm, t, t + (InpContLineBars + 2) * perSec, tp, InpContTPCol, STYLE_DASH,
+                         "Continuation TP: 1:" + DoubleToString(InpContRR, 1) + " R:R example (unvalidated)");
+           }
+
+         PrintFormat("ContSignal LOG: %s %s @ %s  E21=%s E50=%s K=%s (unvalidated, tested p=0.52 vs random)",
+                     TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
+                     DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
+                     DoubleToString(e50[i], _Digits), DoubleToString(k[i], 1));
+         if(!backfill && InpContAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: Continuation %s PRINTED (trend + near-MA pullback + stoch reset) - "
+                                       "UNVALIDATED, chart overlay only", _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
+        }
+     }
+
+   g_cntLastDir = lastDir;
+   g_cntLastProcessedBar = r[n - 1].time;
+   g_cntLastMarkerPrice = lastMarkerPrice; g_cntLastMarkerTime = lastMarkerTime;
+  }
+
+void PurgeOldContObjects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_cnt) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+void ResyncContSignals()
+  {
+   ObjectsDeleteAll(0, g_cnt);
+   g_cntPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_cntLastDir = 0;
+   g_cntLastProcessedBar = 0;
+   g_cntLastMarkerPrice = 0.0; g_cntLastMarkerTime = 0;
+   if(InpShowContSignals) ComputeContSignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- v1.58: REVERTED to the plain built-in iMA handles only (see
@@ -2981,6 +3201,7 @@ int OnInit()
    ResyncCandleSignals();
    ResyncRejectSignals2();
    ResyncRejectSignalsM15();
+   ResyncContSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -3001,6 +3222,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_cdl);
    ObjectsDeleteAll(0, g_rjx);
    ObjectsDeleteAll(0, g_rjxm);
+   ObjectsDeleteAll(0, g_cnt);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -3078,6 +3300,11 @@ void CheckNewBar()
      {
       ComputeRejectSignalsM15(false);
       PurgeOldRejectM15Objects();
+     }
+   if(InpShowContSignals)
+     {
+      ComputeContSignals(false);
+      PurgeOldContObjects();
      }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
@@ -3257,6 +3484,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ResyncStochSignals();
          ResyncCandleSignals();
          ResyncRejectSignals2();
+         ResyncContSignals();
          if(!g_dragging && !AnyEditFocused()) RebuildPanel();
         }
       return;
