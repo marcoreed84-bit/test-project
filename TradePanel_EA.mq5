@@ -19,7 +19,24 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.10"
+#property version   "2.11"
+//--- 2.11: Opus did one final review of v2.10 before shipping and found
+//--- two real gaps, both fixed here. (1) The 15s hard cap gave up
+//--- PERMANENTLY - if history only became ready after 15s, the MA lines
+//--- stayed incomplete forever until the next actual timeframe switch,
+//--- so "guaranteed to converge" only meant guaranteed to stop trying,
+//--- not guaranteed to end up correct. (2) The every-~2s retry while
+//--- waiting redrew the FULL MA/VWAP history and rebuilt the panel on
+//--- every attempt - in the slow-history case that's 7-8 wipe+redraw+
+//--- rebuild cycles over 15s, a visible blink roughly every 2 seconds.
+//--- Redesigned to draw AT MOST TWICE per switch, never on a repeating
+//--- interval: once immediately (so something shows right away instead
+//--- of staying blank) and once more the moment MAHistoryReady()
+//--- actually turns true, however long that takes - no cap on that
+//--- second draw, so it can't give up and stay wrong forever. A 15s
+//--- hard cap still exists only as a one-time last-resort SECOND
+//--- attempt if the first draw already happened before 15s and nothing
+//--- had turned ready yet. Nothing redraws in between - no blinking.
 //--- 2.10: Two fixes, per a real Experts-log excerpt the user pasted
 //--- after v2.09 still didn't fix the MA staleness.
 //--- (1) Found a genuine, longstanding format-string bug while reading
@@ -1086,7 +1103,7 @@ ENUM_TIMEFRAMES g_maPeriod = PERIOD_CURRENT;
 //--- step, set false only by its backfill step.
 bool     g_maBackfillPending = false;
 ulong    g_maPendingSinceMs  = 0;
-ulong    g_maLastBackfillAttemptMs = 0;   // v2.10: throttles retries to at most once per ~2s
+bool     g_maInitialDrawDone = false;     // v2.11: true once the one-shot immediate attempt below has run
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
@@ -3256,7 +3273,8 @@ bool SyncMAOverlays()
       ObjectsDeleteAll(0, g_pm);          // old timeframe's lines go NOW, never left behind
       g_maBackfillPending = true;
       g_maPendingSinceMs  = GetTickCount64();
-      g_maLastBackfillAttemptMs = 0;   // force the very next SyncMAOverlays() call to draw immediately
+      g_maInitialDrawDone = false;   // v2.11: step 2 below draws once immediately, then once more
+                                      // when ready/hard-capped - nothing in between, so no blinking
       g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
       //--- the 5 overlays that read the chart's own timeframe (Rejection
       //--- M15 always reads M15, so it doesn't need this)
@@ -3274,28 +3292,55 @@ bool SyncMAOverlays()
    //--- ONLY once MAHistoryReady() is true") could then never fire at
    //--- all, leaving the chart with the old lines already wiped (step 1
    //--- above) and nothing ever drawn to replace them - permanently
-   //--- blank/stuck, reported as "still doing the same thing". Now:
-   //--- draw SOMETHING as soon as a retry is due (every ~2s, so this
-   //--- can't flash/spam), whether or not the handles are fully ready -
-   //--- a too-early attempt just means some recent bars are briefly
-   //--- missing (MAValue() skips what it can't read yet, harmlessly),
-   //--- corrected by the NEXT retry a couple seconds later. Keeps
-   //--- retrying until MAHistoryReady() genuinely is true, or 15s have
-   //--- passed (then it accepts whatever it has and stops) - either way,
-   //--- this is now guaranteed to converge, never stuck indefinitely.
+   //--- blank/stuck, reported as "still doing the same thing".
+   //--- v2.11 (Opus-reviewed, two gaps found in the first v2.10 cut and
+   //--- fixed here): draws AT MOST TWICE per timeframe switch, never on
+   //--- a repeating interval - (a) one immediate best-effort attempt the
+   //--- very first time this runs after the switch, so something shows
+   //--- right away instead of staying blank, and (b) exactly one more
+   //--- attempt the moment MAHistoryReady() actually turns true - no
+   //--- cap on how long that can take, so it can never give up and stay
+   //--- wrong forever the way the pre-fix bug did; a 15s hard cap is
+   //--- still there only as a last-resort SECOND chance if the first
+   //--- immediate draw already happened before 15s and nothing has
+   //--- turned ready since. In between those two draws, this is a cheap
+   //--- no-redraw check (no wipe, no BackfillOverlayLines, no panel
+   //--- rebuild) - so no 2-second blinking during a slow history load.
    if(g_maBackfillPending)
      {
       bool ready = MAHistoryReady();
-      bool hardCap = (GetTickCount64() - g_maPendingSinceMs) >= 15000;
-      bool dueForRetry = (GetTickCount64() - g_maLastBackfillAttemptMs) >= 2000;
-      if(ready || hardCap || dueForRetry)
+      if(!g_maInitialDrawDone)
         {
-         ObjectsDeleteAll(0, g_pm);          // also clears any segment drawn while waiting
+         ObjectsDeleteAll(0, g_pm);
          BackfillOverlayLines();
-         g_maLastBackfillAttemptMs = GetTickCount64();
+         g_maInitialDrawDone = true;
          changed = true;
-         if(ready || hardCap) g_maBackfillPending = false;   // otherwise keep retrying
+         if(ready) g_maBackfillPending = false;   // already good on the first try - done
         }
+      else if(ready)
+        {
+         ObjectsDeleteAll(0, g_pm);          // replace whatever the first attempt managed
+         BackfillOverlayLines();
+         g_maBackfillPending = false;
+         changed = true;
+        }
+      else if((GetTickCount64() - g_maPendingSinceMs) >= 15000)
+        {
+         //--- last-resort second attempt with whatever's available now,
+         //--- then stop - MAHistoryReady() keeps getting checked for
+         //--- free on every future call (the line above), so if it DOES
+         //--- turn true later this branch won't fire again, but nothing
+         //--- is drawn again either; the next genuine timeframe switch
+         //--- (or CheckNewBar's own per-bar UpdateOverlayLines()) is
+         //--- what catches up from there - an edge case, not the common
+         //--- path, per Opus's review.
+         ObjectsDeleteAll(0, g_pm);
+         BackfillOverlayLines();
+         g_maBackfillPending = false;
+         changed = true;
+        }
+      //--- else: still waiting on the SECOND draw, handles not ready yet,
+      //--- under 15s - deliberately do nothing (no redraw, no flicker)
      }
    return(changed);
   }
@@ -3580,6 +3625,7 @@ void OnDeinit(const int reason)
    ReleaseMAHandles();
    g_maPeriod = PERIOD_CURRENT;      // globals survive a reinit - "nothing built" now
    g_maBackfillPending = false;
+   g_maInitialDrawDone = false;
   }
 
 //+------------------------------------------------------------------+
