@@ -19,7 +19,64 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.08"
+#property version   "2.09"
+//--- 2.09: Fixed BOTH timeframe-switch bugs reported after v2.06 - "on
+//--- the 15min i see the 5min data moving averages, sometimes it flips
+//--- correct after a while other times it stays like this", then "now
+//--- everything keeps flashing". Both came from the same piece of code:
+//--- the CHARTEVENT_CHART_CHANGE handler that v2.05 turned into a full
+//--- MA rebuild and v2.06 then put a 2-second debounce on.
+//--- WHY THE MAs COULD STAY WRONG FOREVER: (a) the v2.06 debounce didn't
+//--- postpone the rebuild, it THREW IT AWAY - inside the 2s window it
+//--- just rebuilt the panel and returned, without recreating the MA
+//--- handles, without wiping the old timeframe's lines, and without
+//--- recording that the switch had been handled. The only thing that
+//--- could ever fix it afterwards was some LATER, unrelated chart event
+//--- (a scroll, a zoom, an autoscroll shift) arriving after the 2s were
+//--- up - "sometimes it flips correct after a while". If none came, it
+//--- stayed wrong for good, because nothing else (not OnTimer, not
+//--- OnTick) ever checked. Meanwhile every new bar was drawn with the
+//--- OLD timeframe's MA handle at the NEW timeframe's bar times, next to
+//--- the old lines that were never wiped - the jagged/doubled lines in
+//--- the screenshot. (b) It was gated on g_emaxPeriod, a variable that
+//--- belongs to the EMA-cross signal overlay and only changes as a side
+//--- effect of that overlay's own resync - the MAs had no state of their
+//--- own saying which timeframe they were built for. (c) Even the
+//--- normal path (OnInit) drew the whole MA history IMMEDIATELY after
+//--- creating brand-new iMA handles. A fresh handle usually hasn't
+//--- calculated yet (this file's own Stochastic notes say exactly this),
+//--- so the history could come up partly or entirely missing, and
+//--- nothing ever went back to fill it in - the per-bar update only ever
+//--- draws the newest bar.
+//--- WHY EVERYTHING KEPT FLASHING: CHARTEVENT_CHART_CHANGE is NOT a
+//--- "timeframe changed" event - MT5 fires it for every scroll, zoom,
+//--- resize, autoscroll shift on a new bar, price-scale refit as ticks
+//--- move the range, and chart property changes made in code (OnTick
+//--- re-sets CHART_SHOW_TRADE_LEVELS on EVERY tick). v2.06 wiped and
+//--- rebuilt the whole panel on every one of those events while a switch
+//--- was still unresolved, and the first one after the 2s window wiped
+//--- every MA/VWAP line and all 5 signal overlays and redrew 2500 bars -
+//--- all visible on screen, driven by a stream of events that has
+//--- nothing to do with timeframes.
+//--- THE FIX - one routine, SyncMAOverlays(), is now the ONLY place MA
+//--- handles/lines are ever rebuilt, and it's a no-op unless something
+//--- really changed: (1) if the chart's timeframe differs from
+//--- g_maPeriod (a new variable that belongs to the MAs alone), it
+//--- recreates the handles, wipes the old lines at once, resyncs the
+//--- signal overlays, records the new timeframe, and marks the history
+//--- "backfill pending"; (2) while backfill is pending, it waits until
+//--- the new handles have ACTUALLY finished calculating, then wipes and
+//--- redraws the history ONCE and clears the flag. Both steps switch
+//--- themselves off as they run, so each happens at most once per real
+//--- timeframe change - scroll/zoom/ticks can never set them off. It's
+//--- called from OnInit, every tick, every 2s OnTimer, and every
+//--- CHART_CHANGE event - the 2s timer is the guarantee (the MAs are
+//--- correct within ~2s of the new handles being ready, whatever the
+//--- terminal does or doesn't send), the rest are just faster paths. The
+//--- panel is only rebuilt when that routine actually drew something.
+//--- Removed: the g_lastFullResyncMs debounce and the whole old rebuild
+//--- block in the CHART_CHANGE handler. Not touched: anything else,
+//--- including the Continuation cooldown (v2.07) and arrow sizes (v2.08).
 //--- 2.08: Standardized every entry overlay's arrow SIZE, not just its
 //--- shape (shape was already unified in v2.06) - per direct request,
 //--- "all buy and sell signals all arrows, same size, different
@@ -985,13 +1042,20 @@ datetime g_lastCrossAlertAt = 0;     // cooldown - see InpCrossAlertCooldownMin
 //--- the panel. Keep this prefix namespace-disjoint from PFX.
 string g_pm = "TPMA_";
 datetime g_lastBarTime = 0;
-//--- v2.06: debounce for the CHARTEVENT_CHART_CHANGE MA/VWAP rebuild
-//--- (see OnInit and the CHARTEVENT_CHART_CHANGE handler) - set at the
-//--- end of every full resync (OnInit's full reinit path), checked by
-//--- the chart-change backstop so it never redoes the same expensive
-//--- 2500-bar MA/VWAP rebuild a second time back-to-back with OnInit's
-//--- own version for the SAME period switch
-ulong    g_lastFullResyncMs = 0;
+//--- v2.08: the ONE source of truth for "which timeframe are the MA
+//--- handles and MA/VWAP lines currently built for" - owned only by
+//--- SyncMAOverlays(), nothing else writes it (v2.05/v2.06 borrowed the
+//--- EMA-cross overlay's g_emaxPeriod for this, which only changed as a
+//--- side effect of ResyncEmaCrossSignals()). PERIOD_CURRENT (0) = "not
+//--- built yet" - _Period is never 0, so that always forces a rebuild.
+ENUM_TIMEFRAMES g_maPeriod = PERIOD_CURRENT;
+//--- v2.08: true from a timeframe change until the MA/VWAP history has
+//--- been backfilled ONCE on handles that have actually finished
+//--- calculating (a fresh iMA handle usually hasn't yet - see
+//--- MAHistoryReady()). Set true only by SyncMAOverlays()' period-change
+//--- step, set false only by its backfill step.
+bool     g_maBackfillPending = false;
+ulong    g_maPendingSinceMs  = 0;
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
@@ -3086,6 +3150,100 @@ void SetupMAs()
   }
 
 //+------------------------------------------------------------------+
+//| v2.09: release all 4 handles AND mark them INVALID, so a second    |
+//| release (e.g. OnDeinit, then the next rebuild) can never hit a     |
+//| stale handle number.                                                |
+//+------------------------------------------------------------------+
+void ReleaseMAHandles()
+  {
+   if(g_maHandle21     != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
+   if(g_maHandle50     != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
+   if(g_maHandle200    != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
+   if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
+   g_maHandle21 = INVALID_HANDLE; g_maHandle50 = INVALID_HANDLE;
+   g_maHandle200 = INVALID_HANDLE; g_atrHandleCross = INVALID_HANDLE;
+  }
+
+//+------------------------------------------------------------------+
+//| v2.09: true once the MA handles have actually finished calculating |
+//| on the current timeframe, so a backfill now draws REAL values for  |
+//| every bar. A brand-new iMA handle (OnInit, or right after a        |
+//| timeframe switch) usually reports BarsCalculated() = -1 and        |
+//| CopyBuffer fails - BackfillOverlayLines() used to run at exactly   |
+//| that moment and silently draw little or nothing, with no retry.    |
+//| Waits for the timeseries to be synchronized too, but only for up   |
+//| to 10s - after that it settles for "every handle has calculated at |
+//| least once", so this can never wait forever on a terminal quirk.   |
+//+------------------------------------------------------------------+
+bool MAHandleReady(const int handle, const int need)
+  {
+   if(handle == INVALID_HANDLE) return(true);   // disabled/failed - MAValue() skips it anyway
+   int bc = BarsCalculated(handle);
+   return(bc > 0 && bc >= need);
+  }
+
+bool MAHistoryReady()
+  {
+   int bars = Bars(_Symbol, PERIOD_CURRENT);
+   if(bars <= 2) return(false);
+   bool waitedLong = (GetTickCount64() - g_maPendingSinceMs >= 10000);
+   bool synced = (bool)SeriesInfoInteger(_Symbol, PERIOD_CURRENT, SERIES_SYNCHRONIZED);
+   if(!synced && !waitedLong) return(false);
+   if(!InpShowMAs) return(true);                // VWAP-only: no handle to wait for
+   int need = waitedLong ? 1 : bars - 1;        // -1: tolerate a new bar arriving between the two reads
+   return(MAHandleReady(g_maHandle21, need) && MAHandleReady(g_maHandle50, need)
+          && MAHandleReady(g_maHandle200, need));
+  }
+
+//+------------------------------------------------------------------+
+//| v2.09: the ONLY place the MA handles and MA/VWAP lines are ever    |
+//| rebuilt. Idempotent - provably a no-op unless something actually   |
+//| changed:                                                            |
+//|  Step 1 runs only if the chart's timeframe differs from g_maPeriod,|
+//|         and sets g_maPeriod to it - so it runs ONCE per real       |
+//|         timeframe change, never on scroll/zoom/resize/autoscroll.  |
+//|  Step 2 runs only while g_maBackfillPending is true, and clears it |
+//|         - so the expensive wipe + 2500-bar redraw happens ONCE per |
+//|         timeframe change, as soon as the new handles are ready.    |
+//| Safe to call from anywhere, as often as you like (OnInit, every    |
+//| OnTick, every 2s OnTimer, every CHARTEVENT_CHART_CHANGE) - when    |
+//| nothing changed it costs one comparison and one bool check.        |
+//| Returns true if it drew anything (caller should reclaim the        |
+//| panel's paint order).                                               |
+//+------------------------------------------------------------------+
+bool SyncMAOverlays()
+  {
+   bool changed = false;
+   ENUM_TIMEFRAMES cur = (ENUM_TIMEFRAMES)_Period;
+   if(g_maPeriod != cur)
+     {
+      g_maPeriod = cur;
+      ReleaseMAHandles();
+      SetupMAs();
+      ObjectsDeleteAll(0, g_pm);          // old timeframe's lines go NOW, never left behind
+      g_maBackfillPending = true;
+      g_maPendingSinceMs  = GetTickCount64();
+      g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+      //--- the 5 overlays that read the chart's own timeframe (Rejection
+      //--- M15 always reads M15, so it doesn't need this)
+      ResyncEmaCrossSignals();
+      ResyncStochSignals();
+      ResyncCandleSignals();
+      ResyncRejectSignals2();
+      ResyncContSignals();
+      changed = true;
+     }
+   if(g_maBackfillPending && MAHistoryReady())
+     {
+      g_maBackfillPending = false;
+      ObjectsDeleteAll(0, g_pm);          // also clears any segment drawn while waiting
+      BackfillOverlayLines();
+      changed = true;
+     }
+   return(changed);
+  }
+
+//+------------------------------------------------------------------+
 //| Push-notification warning that the 21/50 MA gap is closing and a  |
 //| cross looks imminent, BEFORE it actually happens - not an alert   |
 //| on the cross itself. Checked once per new closed bar (same        |
@@ -3329,22 +3487,21 @@ int OnInit()
                InpShowEmaCrossSignals ? "true" : "false");
 
    ApplyTheme();
-   SetupMAs();
-   //--- backfill BEFORE building the panel - otherwise the whole historical
-   //--- MA/VWAP backfill gets created AFTER the panel and buries it from the
-   //--- moment of attach, not just until the first new bar's RebuildPanel()
-   //--- call (same creation-order reasoning as RebuildPanel's own header).
-   BackfillOverlayLines();
-   ResyncEmaCrossSignals();
-   ResyncStochSignals();
-   ResyncCandleSignals();
-   ResyncRejectSignals2();
+   //--- v2.09: MT5 keeps global variables across a timeframe-switch
+   //--- reinit, so force a full rebuild here explicitly rather than
+   //--- trusting whatever g_maPeriod the previous instance left behind.
+   //--- SyncMAOverlays() creates the handles, resyncs the 5 chart-timeframe
+   //--- signal overlays, and backfills the MA/VWAP history right now if
+   //--- the new handles are already calculated (then it lands BEFORE the
+   //--- panel, so it can't bury it) - otherwise the backfill is left
+   //--- pending and OnTick/OnTimer finish it within ~2s, then rebuild the
+   //--- panel on top.
+   g_maPeriod = PERIOD_CURRENT;
+   SyncMAOverlays();
    ResyncRejectSignalsM15();
-   ResyncContSignals();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   g_lastFullResyncMs = GetTickCount64();
    EventSetTimer(2);   // was 1s - halving the poll frequency on top of no
                         // longer force-redrawing every tick (see OnTimer)
    ChartRedraw(0);
@@ -3363,10 +3520,9 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_rjx);
    ObjectsDeleteAll(0, g_rjxm);
    ObjectsDeleteAll(0, g_cnt);
-   if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
-   if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
-   if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
-   if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
+   ReleaseMAHandles();
+   g_maPeriod = PERIOD_CURRENT;      // globals survive a reinit - "nothing built" now
+   g_maBackfillPending = false;
   }
 
 //+------------------------------------------------------------------+
@@ -3384,6 +3540,18 @@ bool g_editFocused = false;
 bool AnyEditFocused()
   {
    return g_editFocused;
+  }
+
+//+------------------------------------------------------------------+
+//| v2.09: SyncMAOverlays() + put the panel back on top, but ONLY when |
+//| SyncMAOverlays() actually drew something. A no-op otherwise, so it |
+//| is safe on every tick, every timer tick and every chart event.     |
+//+------------------------------------------------------------------+
+void MaintainOverlaySync()
+  {
+   if(!SyncMAOverlays()) return;
+   if(!g_dragging && !AnyEditFocused()) RebuildPanel();   // RebuildPanel redraws the chart itself
+   else ChartRedraw(0);
   }
 
 //+------------------------------------------------------------------+
@@ -3484,6 +3652,7 @@ void OnTick()
    //--- of EA load order, without having to touch the other EAs (which
    //--- still default it off correctly for their own solo-chart case).
    ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
+   MaintainOverlaySync();   // v2.09: before CheckNewBar, so a new bar is never drawn with old-timeframe handles
    CheckNewBar();
   }
 
@@ -3502,6 +3671,11 @@ void OnTimer()
       g_dragging = false;
       ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
      }
+   //--- v2.09: the guaranteed backstop for a timeframe switch - whatever
+   //--- the terminal does or doesn't send (reinit, CHART_CHANGE, ticks),
+   //--- this checks every 2s and fixes the MAs if they don't match the
+   //--- chart. A no-op (one comparison) whenever they already match.
+   MaintainOverlaySync();
    //--- catches a bar close during a quiet spell between ticks - see
    //--- CheckNewBar()'s own header. g_lastBarTime guards it so this is a
    //--- cheap no-op on every 2s tick except the one right after a new bar.
@@ -3613,53 +3787,20 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          g_editFocused = false;
       return;
      }
-   //--- MT5 normally re-runs OnDeinit/OnInit on a period switch, which already
-   //--- resyncs everything via OnInit's own SetupMAs()/BackfillOverlayLines()/
-   //--- Resync*() calls - this is the backstop for terminals/builds that only
-   //--- raise CHART_CHANGE instead. The period comparison filters out plain
-   //--- scroll/zoom. See the v2.05 entry in the version-history comment block
-   //--- at the top of this file for why the MA-handle release/rebuild below
-   //--- was added - this backstop used to resync the signal overlays only.
+   //--- v2.09: CHARTEVENT_CHART_CHANGE fires for FAR more than a timeframe
+   //--- switch - every scroll, zoom, resize, autoscroll shift on a new bar,
+   //--- price-scale refit as ticks move the range, and programmatic chart
+   //--- property changes. v2.05/v2.06 did a full panel wipe + rebuild (and,
+   //--- outside the 2s debounce window, a full MA/VWAP/signal wipe + 2500-bar
+   //--- redraw) from inside this handler - the "everything keeps flashing"
+   //--- bug. Now it only asks SyncMAOverlays() whether anything ACTUALLY
+   //--- changed, which is a single comparison and draws nothing unless the
+   //--- timeframe really changed (or a pending post-switch backfill is now
+   //--- ready). OnTimer makes the same check every 2s regardless, so this
+   //--- is just the fast path - correctness doesn't depend on this event.
    if(id == CHARTEVENT_CHART_CHANGE)
      {
-      if(g_emaxPeriod != (ENUM_TIMEFRAMES)_Period)
-        {
-         //--- v2.06: debounce - if OnInit's own full reinit ran for THIS
-         //--- period switch within the last 2s, it already did everything
-         //--- below (SetupMAs/BackfillOverlayLines/every Resync), so skip
-         //--- it here rather than redoing the same expensive 2500-bar
-         //--- MA/VWAP rebuild a second time back-to-back. Without this, a
-         //--- terminal that delivers BOTH a full reinit AND this chart-
-         //--- change event for the same switch would do the heavy work
-         //--- twice in a row, which is exactly what made the panel itself
-         //--- visibly slower to reappear after the v2.05 fix (reported).
-         if(GetTickCount64() - g_lastFullResyncMs < 2000)
-           {
-            if(!g_dragging && !AnyEditFocused()) RebuildPanel();
-            return;
-           }
-         if(g_maHandle21  != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
-         if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
-         if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
-         if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
-         g_maHandle21 = INVALID_HANDLE; g_maHandle50 = INVALID_HANDLE;
-         g_maHandle200 = INVALID_HANDLE; g_atrHandleCross = INVALID_HANDLE;
-         SetupMAs();
-         ObjectsDeleteAll(0, g_pm);
-         BackfillOverlayLines();
-         g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);   // Opus-review fix: OnInit sets this too -
-                                                               // without it, CheckNewBar's very next call
-                                                               // sees a "new" bar that isn't one (harmless,
-                                                               // just one redundant pass) and can fire
-                                                               // CheckCrossProximity a tick early
-         ResyncEmaCrossSignals();
-         ResyncStochSignals();
-         ResyncCandleSignals();
-         ResyncRejectSignals2();
-         ResyncContSignals();
-         g_lastFullResyncMs = GetTickCount64();
-         if(!g_dragging && !AnyEditFocused()) RebuildPanel();
-        }
+      MaintainOverlaySync();
       return;
      }
    if(id != CHARTEVENT_OBJECT_CLICK) return;
