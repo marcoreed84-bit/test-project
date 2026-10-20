@@ -8,7 +8,8 @@
 //|  chart) - open a second chart of the same symbol/timeframe next |
 //|  to whatever strategy EA is already running, and attach this   |
 //|  one there. It manages ONLY positions it opened itself (matched |
-//|  by InpMagic) - the stats row, CLOSE ALL, 25/50/75% partial     |
+//|  by its effective magic number, see InpMagic) - the stats row,  |
+//|  CLOSE ALL, 25/50/75% partial                                   |
 //|  close, and Set SL/Set TP all act exclusively on this panel's   |
 //|  own trades, never on a strategy EA's live position.            |
 //|                                                                   |
@@ -19,7 +20,34 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.11"
+#property version   "2.13"
+//--- 2.13: Opus-reviewed fix to v2.12's auto-magic-number feature - a
+//--- real bug found before it ever shipped on a live chart. The v2.12
+//--- formula used (int)PERIOD_CURRENT, which is the MQL5 SYMBOLIC
+//--- constant meaning "the chart's own timeframe" when passed as a
+//--- function argument - its actual integer value is always 0, not the
+//--- real timeframe. Every panel instance would have silently derived
+//--- the SAME magic number regardless of which timeframe it was on,
+//--- completely defeating the point and risking two "separate" panels
+//--- quietly managing each other's real trades with no warning at all.
+//--- Fixed: uses _Period (the correct live value) instead. Also dropped
+//--- the old symbol-length term from the formula - PositionMatches()
+//--- already filters on POSITION_SYMBOL==_Symbol on its own, so that
+//--- term only added collision risk between same-length symbol names
+//--- without preventing anything real; timeframe is the only axis this
+//--- needs to separate. Also fixed a stale comment near the top of this
+//--- file still referencing "InpMagic" directly for position matching.
+//--- 2.12: Per direct request, for running two separate panel instances
+//--- (one attached to an M5 chart, one to an M15 chart, instead of
+//--- switching one chart's own timeframe - the agreed path forward
+//--- after repeated trouble with runtime timeframe-switch handling in
+//--- this file): InpMagic==0 now means "auto" - OnInit derives a magic
+//--- number so the two panels never manage each other's trades. Any
+//--- non-zero InpMagic is used exactly as typed, unchanged from every
+//--- prior version - an existing single-panel setup on the default
+//--- (20261014) is unaffected unless the magic is deliberately set to 0.
+//--- (The formula itself had a real bug - see the 2.13 entry above,
+//--- which fixes it before this ever reached a live chart.)
 //--- 2.11: Opus did one final review of v2.10 before shipping and found
 //--- two real gaps, both fixed here. (1) The 15s hard cap gave up
 //--- PERMANENTLY - if history only became ready after 15s, the MA lines
@@ -1666,15 +1694,46 @@ void DrawSegment(const string tag, const datetime tOld, const double vOld,
   }
 
 //+------------------------------------------------------------------+
-void PurgeOldSegments(const datetime latestBarTime, const int historyBars)
+//| v2.13: ONE pass over the chart's objects that drops BOTH expired   |
+//| MA/VWAP segments AND expired signal-overlay objects. Replaces       |
+//| PurgeOldSegments() plus six separate PurgeOld*Objects() functions   |
+//| (one per signal overlay) that EACH walked every object on the chart |
+//| (~7,000 at default settings) on EVERY new bar - about 55,000        |
+//| synchronous ObjectName/ObjectGetInteger calls per bar, each of which|
+//| has to wait for the chart's own command queue, all of it sitting    |
+//| between a signal's push alert and the ChartRedraw that actually     |
+//| shows its arrow. Same cutoffs as before, exactly: MA/VWAP segments  |
+//| older than InpMAHistoryBars (or InpVwapHistoryBars if larger) bars  |
+//| of chart time, signal objects older than InpSigDrawDays calendar    |
+//| days (Rejection M15 measured against the last closed M15 bar, as    |
+//| before). Never touches the panel (PFX) or anything this EA didn't   |
+//| create. Called from CheckNewBar() AFTER the chart is redrawn, and   |
+//| at most once per hour of bar time - see there.                      |
+//+------------------------------------------------------------------+
+datetime g_lastHousekeepBar = 0;
+
+void HousekeepOldObjects()
   {
-   datetime cutoff = latestBarTime - (datetime)((long)historyBars * PeriodSeconds(PERIOD_CURRENT));
-   for(int i = ObjectsTotal(0, 0, OBJ_TREND) - 1; i >= 0; i--)
+   datetime tB = iTime(_Symbol, PERIOD_CURRENT, 1);
+   if(tB == 0) return;
+   int maxHist = InpMAHistoryBars;
+   if(InpShowVWAP && InpMAHistoryBars < InpVwapHistoryBars) maxHist = InpVwapHistoryBars;
+   datetime segCutoff = tB - (datetime)((long)maxHist * PeriodSeconds(PERIOD_CURRENT));
+   datetime sigCutoff = tB - (datetime)((long)InpSigDrawDays * 86400);
+   datetime tM15 = iTime(_Symbol, PERIOD_M15, 1);
+   datetime m15Cutoff = (tM15 == 0) ? 0 : tM15 - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
      {
-      string nm = ObjectName(0, i, 0, OBJ_TREND);
-      if(StringFind(nm, g_pm) != 0) continue;
-      datetime ot = (datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0);
-      if(ot < cutoff) ObjectDelete(0, nm);
+      string nm = ObjectName(0, i, 0, -1);
+      datetime cutoff = 0;
+      if(StringFind(nm, g_pm) == 0)        cutoff = segCutoff;
+      else if(StringFind(nm, g_rjxm) == 0) cutoff = m15Cutoff;
+      else if(StringFind(nm, g_emax) == 0 || StringFind(nm, g_sig) == 0 || StringFind(nm, g_cdl) == 0
+              || StringFind(nm, g_rjx) == 0 || StringFind(nm, g_cnt) == 0)
+         cutoff = sigCutoff;
+      else continue;   // panel widgets, other programs' / the user's own objects - never touched
+      if(cutoff <= 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
      }
   }
 
@@ -1699,7 +1758,6 @@ void UpdateOverlayLines()
    datetime tA = iTime(_Symbol, PERIOD_CURRENT, 2);
    datetime tB = iTime(_Symbol, PERIOD_CURRENT, 1);
    if(tA == 0 || tB == 0) return;
-   int maxHist = InpMAHistoryBars;
    if(InpShowMAs)
      {
       double a21, b21, a50, b50, a200, b200;
@@ -1714,9 +1772,11 @@ void UpdateOverlayLines()
      {
       double vA = SessionVWAP(2), vB = SessionVWAP(1);
       if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP, InpVwapLineWidth);
-      if(InpMAHistoryBars < InpVwapHistoryBars) maxHist = InpVwapHistoryBars;
      }
-   if(InpShowMAs || InpShowVWAP) PurgeOldSegments(tB, maxHist);
+   //--- v2.13: the old-segment purge that used to run here (a full scan of
+   //--- every trend object on the chart, every bar, BEFORE any signal was
+   //--- computed) now lives in HousekeepOldObjects(), run from
+   //--- CheckNewBar() after the chart has already been redrawn.
   }
 
 //+------------------------------------------------------------------+
@@ -3590,15 +3650,39 @@ int OnInit()
   {
    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
 
-   //--- v2.12: InpMagic==0 means "auto" - derive a magic number that's
-   //--- different per symbol+timeframe, so two separate panel instances
+   //--- v2.13 (Opus-reviewed, a real bug found in the first v2.12 cut and
+   //--- fixed here): InpMagic==0 means "auto" - derive a magic number
+   //--- that's different per TIMEFRAME, so two separate panel instances
    //--- (e.g. one attached to an M5 chart, one to an M15 chart, per
    //--- direct request) never see or manage each other's trades. Any
    //--- non-zero InpMagic is used exactly as typed, unchanged from every
    //--- version before this one - a single-panel setup that already has
    //--- the default (20261014) is completely unaffected.
-   g_effectiveMagic = (InpMagic != 0) ? InpMagic
-                                       : (int)(20260000 + (int)PERIOD_CURRENT + (int)(StringLen(_Symbol) * 37));
+   //--- The v2.12 formula used (int)PERIOD_CURRENT, which is the MQL5
+   //--- SYMBOLIC constant for "the chart's own timeframe" when passed as
+   //--- a function argument (like iMA's own timeframe parameter) - its
+   //--- actual integer value is always 0, not the real timeframe. Every
+   //--- instance would have silently derived the SAME magic number
+   //--- regardless of chart timeframe, defeating the entire point and
+   //--- risking two "separate" panels on different timeframes managing
+   //--- each other's real trades without any warning. Fixed: _Period is
+   //--- the correct live value (confirmed elsewhere in this same file,
+   //--- e.g. the MA-sync code a few hundred lines below this one, which
+   //--- already relies on exactly this distinction). Also dropped the
+   //--- old symbol-length term - PositionMatches() already filters on
+   //--- POSITION_SYMBOL==_Symbol separately (see its own code), so it
+   //--- added collision risk between same-length symbol names without
+   //--- actually preventing anything; timeframe is the only axis this
+   //--- auto-derivation needs to separate.
+   //--- Known, acceptable limitation: if InpMagic is left at 0 AND you
+   //--- still switch a single chart's own timeframe at runtime (rather
+   //--- than running two separate fixed-timeframe panels, which is the
+   //--- intended usage here), the derived magic changes with it, and
+   //--- this panel's stats/CLOSE ALL/SL-TP controls will stop seeing
+   //--- whatever it already had open under the OLD derived magic (the
+   //--- actual broker-side positions and their real SL/TP are
+   //--- unaffected - only this panel's own ability to see/manage them).
+   g_effectiveMagic = (InpMagic != 0) ? InpMagic : (int)(20260000 + (int)_Period);
 
    //--- hard proof of what settings this EA instance actually initialized
    //--- with - check this line in the Experts log any time there's doubt
