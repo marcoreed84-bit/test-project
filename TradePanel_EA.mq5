@@ -20,7 +20,47 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.13"
+#property version   "2.14"
+//--- 2.14: Opus's object-count/rendering-lag audit, dispatched after
+//--- repeated reports of signals printing much later than they should
+//--- and "rejection signals and nothing on the chart". Found three real
+//--- causes, all fixed here (none of this was the MA-sync bug from
+//--- v2.05-2.11 - this was always a separate problem):
+//--- (1) CheckNewBar() used to run EVERY overlay's own full-chart purge
+//--- scan (~7,000 objects at default settings) right after computing
+//--- that overlay, before moving to the next one - so a Rejection or
+//--- Continuation signal (computed near the end of that list) sat
+//--- behind up to 5 of those scans before its own arrow object even got
+//--- created, and behind all 7 before the chart redraw that actually
+//--- shows it. Combined into one HousekeepOldObjects() pass, moved to
+//--- run AFTER the redraw (so a fresh signal is already visible first),
+//--- and throttled to at most once per hour of bar time - the exact
+//--- same cutoffs as before, just one scan instead of seven, and never
+//--- blocking a signal from appearing.
+//--- (2) OnTick() wrote CHART_SHOW_TRADE_LEVELS unconditionally on
+//--- EVERY tick, which is itself a chart-property change - MT5 answers
+//--- a chart-property change with a CHARTEVENT_CHART_CHANGE event, the
+//--- same event this file's MA-sync logic (SyncMAOverlays/
+//--- MaintainOverlaySync, v2.09-2.11) reacts to. On an active Gold
+//--- chart that's many ticks a second, i.e. a self-inflicted stream of
+//--- chart-change events the EA was generating for itself. Now only
+//--- writes it when the value actually differs from what's already set.
+//--- (3) Each overlay's own anti-collision (NudgeAwayFromLastMarker)
+//--- only ever checked against that SAME overlay's own previous marker
+//--- - two DIFFERENT overlays (e.g. Rejection and Continuation) could
+//--- still draw their arrows on top of each other at the same bar/price,
+//--- which looks exactly like "I got the alert but nothing's on the
+//--- chart" (the arrow IS there, just hidden under another one). New
+//--- NudgeClearOfOtherOverlays() checks all 8 entry-marker object names
+//--- for that same bar across every overlay and nudges clear of
+//--- whichever ones are already there, on top of the existing same-
+//--- overlay nudge.
+//--- Also: the panel's own title now shows which timeframe this
+//--- instance is running on (e.g. "TRADE PANEL [M15]"), per direct
+//--- request, so two separate panels (one per timeframe - the agreed
+//--- setup after this file's timeframe-switch troubles) are obviously
+//--- distinguishable at a glance instead of both saying the same
+//--- generic "TRADE PANEL".
 //--- 2.13: Opus-reviewed fix to v2.12's auto-magic-number feature - a
 //--- real bug found before it ever shipped on a live chart. The v2.12
 //--- formula used (int)PERIOD_CURRENT, which is the MQL5 SYMBOLIC
@@ -1885,6 +1925,65 @@ double NudgeAwayFromLastMarker(double candidatePrice, datetime candidateTime, bo
    return pushUp ? lastMarkerPrice + minGap : lastMarkerPrice - minGap;
   }
 
+//+------------------------------------------------------------------+
+//| v2.13: cross-OVERLAY de-overlap. NudgeAwayFromLastMarker() above   |
+//| only ever compares a new marker with the SAME overlay's previous   |
+//| marker - two DIFFERENT overlays firing on the same candle, same    |
+//| side, at the same ATR offset land on exactly the same pixel, and   |
+//| since every entry arrow is now the same shape and size (v2.06/     |
+//| v2.08) the later one completely hides the earlier one. Worst case: |
+//| on an M15 chart the Rejection and Rejection M15 overlays run the   |
+//| identical calculation on identical bars, so EVERY chart-timeframe  |
+//| Rejection arrow was painted over by its Rejection M15 twin - the   |
+//| alert said "Rejection BUY" and no Rejection-coloured arrow could   |
+//| be seen. Rejection/Continuation (both 1.3 ATR) and EMA cross/      |
+//| Engulfing (both 1.0 ATR) can collide the same way, less often.     |
+//| This checks every other overlay's marker on the SAME candle (by    |
+//| name - all overlays use "<prefix><kind>_<bar time>") and pushes    |
+//| the new one further out, away from the candle, until it clears    |
+//| them all. Marker PRICE only - no effect on any signal, alert, SL   |
+//| or TP. selfName is skipped so a marker never collides with itself. |
+//+------------------------------------------------------------------+
+double NudgeClearOfOtherOverlays(double price, const datetime t, const bool pushUp,
+                                 const double minGap, const string selfName)
+  {
+   if(minGap <= 0.0) return price;
+   string id = IntegerToString((long)t);
+   string names[8];
+   names[0] = g_emax + "arr_"  + id;
+   names[1] = g_emax + "exit_" + id;
+   names[2] = g_emax + "weak_" + id;
+   names[3] = g_sig  + "arr_"  + id;
+   names[4] = g_cdl  + "arr_"  + id;
+   names[5] = g_rjx  + "arr_"  + id;
+   names[6] = g_rjxm + "arr_"  + id;
+   names[7] = g_cnt  + "arr_"  + id;
+   double others[8];
+   int m = 0;
+   for(int j = 0; j < 8; j++)
+     {
+      if(names[j] == selfName || ObjectFind(0, names[j]) < 0) continue;
+      others[m] = ObjectGetDouble(0, names[j], OBJPROP_PRICE, 0);
+      m++;
+     }
+   //--- every move goes the same way (always up, or always down), so this
+   //--- settles in at most m passes - the cap is just a belt-and-braces bound
+   for(int pass = 0; pass < 8; pass++)
+     {
+      bool moved = false;
+      for(int j = 0; j < m; j++)
+        {
+         if(MathAbs(price - others[j]) < minGap)
+           {
+            price = pushUp ? others[j] + minGap : others[j] - minGap;
+            moved = true;
+           }
+        }
+      if(!moved) break;
+     }
+   return price;
+  }
+
 
 //+------------------------------------------------------------------+
 //| v1.47: EMA21/50 crossover overlay's own entry arrow / exit dot -     |
@@ -2102,6 +2201,7 @@ void ComputeEmaCrossSignals(const bool backfill)
             double dotPrice = wasLong ? h[i] + offExit : l[i] - offExit;
             double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
             dotPrice = NudgeAwayFromLastMarker(dotPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
+            dotPrice = NudgeClearOfOtherOverlays(dotPrice, t, !wasLong, minGapExit, exId);
             lastMarkerPrice = dotPrice; lastMarkerTime = t;
             DrawEmaCrossDot(exId, t, dotPrice, wasLong);
             PrintFormat("EmaCrossSignal LOG: %s EXIT-%s @ %s  E21=%s E50=%s (closing posDir %d -> 0)",
@@ -2172,6 +2272,7 @@ void ComputeEmaCrossSignals(const bool backfill)
                double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
                double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
                entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+               entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, lastArr);
                lastMarkerPrice = entryPrice; lastMarkerTime = t;
                DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
                DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
@@ -2220,6 +2321,7 @@ void ComputeEmaCrossSignals(const bool backfill)
                   double wkPrice = wasLong ? h[i] + offWeaken : l[i] - offWeaken;
                   double minGapWk = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
                   wkPrice = NudgeAwayFromLastMarker(wkPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
+                  wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, !wasLong, minGapWk, wkId);
                   lastMarkerPrice = wkPrice; lastMarkerTime = t;
                   DrawEmaWeakenMarker(wkId, t, wkPrice, wasLong);
                   PrintFormat("EmaWeakenSignal LOG: %s WEAKENING in %s run @ %s  gap=%s (peak was %s, %d declining bars)",
@@ -2251,20 +2353,8 @@ void ComputeEmaCrossSignals(const bool backfill)
    g_emaxPendingDir = pendingDir; g_emaxPendingBarsElapsed = pendingBarsElapsed;
   }
 
-//+------------------------------------------------------------------+
-//| v1.47: rolling cap on EMA-cross overlay objects, same idea as        |
-//| PurgeOldSigObjects() above.                                          |
-//+------------------------------------------------------------------+
-void PurgeOldEmaCrossObjects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_emax) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
-  }
+//--- v2.13: the EMA-cross overlay's own rolling-cap purge
+//--- (PurgeOldEmaCrossObjects) is now part of HousekeepOldObjects().
 
 //+------------------------------------------------------------------+
 //| Full wipe + backfill for the EMA-cross overlay - same reasoning as   |
@@ -2494,6 +2584,7 @@ void ComputeStochSignals(const bool backfill)
          double entryPrice = isBuy ? r[i].low - offEntry : r[i].high + offEntry;
          double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, lastArr);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          DrawStochArrow(lastArr, t, entryPrice, isBuy);
          DrawSigLevel(lastSl, t, t + InpStochLineBars * perSec, stop, InpStochStopCol, STYLE_SOLID,
@@ -2507,17 +2598,6 @@ void ComputeStochSignals(const bool backfill)
    g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
    g_sigLastProcessedBar = r[n - 1].time;
    g_sigLastMarkerPrice = lastMarkerPrice; g_sigLastMarkerTime = lastMarkerTime;
-  }
-
-void PurgeOldSigObjects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_sig) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
   }
 
 void ResyncStochSignals()
@@ -2624,6 +2704,7 @@ void ComputeCandleSignals(const bool backfill)
          double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
          double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, arrNm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          DrawCandleArrow(arrNm, t, entryPrice, isBuy);
          DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
@@ -2642,17 +2723,6 @@ void ComputeCandleSignals(const bool backfill)
 
    g_cdlLastProcessedBar = r[n - 1].time;
    g_cdlLastMarkerPrice = lastMarkerPrice; g_cdlLastMarkerTime = lastMarkerTime;
-  }
-
-void PurgeOldCandleObjects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_cdl) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
   }
 
 void ResyncCandleSignals()
@@ -2804,6 +2874,7 @@ void ComputeRejectSignals2(const bool backfill)
          double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
          double minGap = InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          DrawRejectArrow2(nm, t, entryPrice, isBuy);
 
@@ -2842,17 +2913,6 @@ void ComputeRejectSignals2(const bool backfill)
    g_rjxLastDir = lastDir;
    g_rjxLastProcessedBar = r[n - 1].time;
    g_rjxLastMarkerPrice = lastMarkerPrice; g_rjxLastMarkerTime = lastMarkerTime;
-  }
-
-void PurgeOldReject2Objects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_rjx) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
   }
 
 void ResyncRejectSignals2()
@@ -2995,6 +3055,7 @@ void ComputeRejectSignalsM15(const bool backfill)
          double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
          double minGap = InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          DrawRejectArrowM15(nm, t, entryPrice, isBuy);
 
@@ -3030,17 +3091,6 @@ void ComputeRejectSignalsM15(const bool backfill)
    g_rjxmLastDir = lastDir;
    g_rjxmLastProcessedBar = r[n - 1].time;
    g_rjxmLastMarkerPrice = lastMarkerPrice; g_rjxmLastMarkerTime = lastMarkerTime;
-  }
-
-void PurgeOldRejectM15Objects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_M15, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_rjxm) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
   }
 
 void ResyncRejectSignalsM15()
@@ -3194,6 +3244,7 @@ void ComputeContSignals(const bool backfill)
          double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
          double minGap = InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          DrawContArrow(nm, t, entryPrice, isBuy);
 
@@ -3229,17 +3280,6 @@ void ComputeContSignals(const bool backfill)
    g_cntLastDir = lastDir;
    g_cntLastProcessedBar = r[n - 1].time;
    g_cntLastMarkerPrice = lastMarkerPrice; g_cntLastMarkerTime = lastMarkerTime;
-  }
-
-void PurgeOldContObjects()
-  {
-   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
-   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_cnt) != 0) continue;
-      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
-     }
   }
 
 void ResyncContSignals()
@@ -3531,7 +3571,13 @@ void BuildPanel()
    ObjectSetInteger(0, PFX + "titlebar", OBJPROP_ZORDER, PANEL_ZORDER);
    AddCtrl(PFX + "titlebar", 0, 0);
 
-   MkLabel("title", 10, 4, "TRADE PANEL  (drag here to move)", clrWhite, 9);
+   //--- v2.14: show which timeframe this instance is running on, right in
+   //--- the title - per direct request, so two separate panels (one per
+   //--- timeframe, the agreed setup after this file's timeframe-switch
+   //--- troubles) are obviously distinguishable at a glance rather than
+   //--- both saying the same generic "TRADE PANEL"
+   string panelTf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+   MkLabel("title", 10, 4, "TRADE PANEL [" + panelTf + "]  (drag here to move)", clrWhite, 9);
 
    int y = TITLE_BAR_H + 10;
    MkLabel("lotLbl", 12, y + 3, "Lot size:", InpTextColor, 9);
@@ -3790,36 +3836,19 @@ void CheckNewBar()
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
    UpdateOverlayLines();
-   if(InpShowEmaCrossSignals)
-     {
-      ComputeEmaCrossSignals(false);
-      PurgeOldEmaCrossObjects();
-     }
-   if(InpShowStochSignals)
-     {
-      ComputeStochSignals(false);
-      PurgeOldSigObjects();
-     }
-   if(InpShowCandleSignals)
-     {
-      ComputeCandleSignals(false);
-      PurgeOldCandleObjects();
-     }
-   if(InpShowRejectSignals2)
-     {
-      ComputeRejectSignals2(false);
-      PurgeOldReject2Objects();
-     }
-   if(InpShowRejectSignalsM15)
-     {
-      ComputeRejectSignalsM15(false);
-      PurgeOldRejectM15Objects();
-     }
-   if(InpShowContSignals)
-     {
-      ComputeContSignals(false);
-      PurgeOldContObjects();
-     }
+   //--- v2.13: compute + draw every overlay FIRST, with no purge scans in
+   //--- between - each overlay used to be followed by its own full-chart
+   //--- purge scan, so a Rejection/Continuation arrow (computed late in
+   //--- this list) waited behind ~5 of those scans before it was even
+   //--- created, and behind all 7 before the ChartRedraw below showed it.
+   //--- Old-object housekeeping now runs at the END of this function,
+   //--- after the redraw - see HousekeepOldObjects().
+   if(InpShowEmaCrossSignals)  ComputeEmaCrossSignals(false);
+   if(InpShowStochSignals)     ComputeStochSignals(false);
+   if(InpShowCandleSignals)    ComputeCandleSignals(false);
+   if(InpShowRejectSignals2)   ComputeRejectSignals2(false);
+   if(InpShowRejectSignalsM15) ComputeRejectSignalsM15(false);
+   if(InpShowContSignals)      ComputeContSignals(false);
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
    //--- bar object out from under an in-progress drag is asking for
@@ -3842,6 +3871,19 @@ void CheckNewBar()
    //--- tick, not every 2s) - cheap, not the blanket per-timer redraw
    //--- that was deliberately removed below for performance.
    ChartRedraw(0);
+   //--- v2.13: housekeeping LAST, after this bar's arrows are already on
+   //--- screen, and at most once per hour of bar time (every 12th bar on
+   //--- M5, every 4th on M15, every bar on H1 and above). Effect of the
+   //--- throttle on what you see: none - between runs, at most ~11 extra
+   //--- MA/VWAP segments per line linger ~8.7 days back on M5 (off the
+   //--- left edge) and signal markers can outlive the InpSigDrawDays cutoff
+   //--- by under an hour. "t0 < g_lastHousekeepBar" catches a timeframe
+   //--- switch to a bigger timeframe, whose bar time can be earlier.
+   if(g_lastHousekeepBar == 0 || t0 < g_lastHousekeepBar || t0 - g_lastHousekeepBar >= 3600)
+     {
+      g_lastHousekeepBar = t0;
+      HousekeepOldObjects();
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -3857,7 +3899,14 @@ void OnTick()
    //--- tick here keeps TradePanel's chart winning that fight regardless
    //--- of EA load order, without having to touch the other EAs (which
    //--- still default it off correctly for their own solo-chart case).
-   ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
+   //--- v2.13: only WRITE it when it actually differs. Writing it
+   //--- unconditionally on every tick was itself a chart-property change
+   //--- per tick - which (see the v2.09 notes) MT5 answers with a
+   //--- CHARTEVENT_CHART_CHANGE event each time, i.e. a stream of
+   //--- pointless events/refreshes on a chart holding ~7,000 objects. Still
+   //--- re-asserted within one tick if anything else flips it.
+   if((bool)ChartGetInteger(0, CHART_SHOW_TRADE_LEVELS) != InpShowTradeLevels)
+      ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
    MaintainOverlaySync();   // v2.09: before CheckNewBar, so a new bar is never drawn with old-timeframe handles
    CheckNewBar();
   }
