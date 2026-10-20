@@ -807,7 +807,15 @@
 
 input group "=== Trade buttons ==="
 input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens -
-                                                  // stats/close/SL-TP are always scoped to this magic only
+                                                  // stats/close/SL-TP are always scoped to this magic only.
+                                                  // Leave at 0 to auto-derive a DIFFERENT magic per symbol+
+                                                  // timeframe (per direct request, for running two separate
+                                                  // panel instances - one on an M5 chart, one on an M15
+                                                  // chart - without them managing each other's trades) -
+                                                  // see g_effectiveMagic/OnInit. The non-zero default above
+                                                  // is kept EXACTLY as before for backward compatibility -
+                                                  // nothing changes for an existing single-panel setup
+                                                  // unless you deliberately set this to 0.
 input int    InpArmSeconds         = 60;         // ARM auto-expires after this many seconds unused -
                                                   // starting value only, adjustable live from the panel
                                                   // itself now (Arm delay row) via g_armSeconds
@@ -1074,6 +1082,7 @@ input int    InpContCooldownBars   = 8;       // v2.07 FIX: minimum bars between
                                                // should fire, just not on every single consecutive bar
 
 CTrade trade;
+int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
 int g_atrHandleCross = INVALID_HANDLE;
@@ -1379,7 +1388,7 @@ void PlaceBatch(bool isBuy)
      }
    double lot = GetLot();
    int n = GetCount();
-   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetExpertMagicNumber(g_effectiveMagic);
    int placed = 0, failed = 0;
    for(int k = 0; k < n; k++)
      {
@@ -1397,7 +1406,7 @@ bool PositionMatches(ulong ticket)
   {
    if(!PositionSelectByTicket(ticket)) return false;
    if(PositionGetString(POSITION_SYMBOL) != _Symbol) return false;
-   if(PositionGetInteger(POSITION_MAGIC) != InpMagic) return false;
+   if(PositionGetInteger(POSITION_MAGIC) != g_effectiveMagic) return false;
    return true;
   }
 
@@ -3581,12 +3590,22 @@ int OnInit()
   {
    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
 
+   //--- v2.12: InpMagic==0 means "auto" - derive a magic number that's
+   //--- different per symbol+timeframe, so two separate panel instances
+   //--- (e.g. one attached to an M5 chart, one to an M15 chart, per
+   //--- direct request) never see or manage each other's trades. Any
+   //--- non-zero InpMagic is used exactly as typed, unchanged from every
+   //--- version before this one - a single-panel setup that already has
+   //--- the default (20261014) is completely unaffected.
+   g_effectiveMagic = (InpMagic != 0) ? InpMagic
+                                       : (int)(20260000 + (int)PERIOD_CURRENT + (int)(StringLen(_Symbol) * 37));
+
    //--- hard proof of what settings this EA instance actually initialized
    //--- with - check this line in the Experts log any time there's doubt
    //--- about whether a changed input actually took effect, rather than
    //--- trusting the Properties dialog alone
-   PrintFormat("TradePanel v2.0 OnInit: showEmaCross=%s",
-               InpShowEmaCrossSignals ? "true" : "false");
+   PrintFormat("TradePanel v2.0 OnInit: showEmaCross=%s  magic=%d (InpMagic=%d)",
+               InpShowEmaCrossSignals ? "true" : "false", g_effectiveMagic, InpMagic);
 
    ApplyTheme();
    //--- v2.09: MT5 keeps global variables across a timeframe-switch
