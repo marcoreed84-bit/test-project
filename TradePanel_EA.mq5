@@ -19,7 +19,24 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.06"
+#property version   "2.07"
+//--- 2.07: Fixed the REAL reason signals were still missing at the
+//--- marked points after the v2.06 direction fix. ComputeContSignals()
+//--- had "if(dir == lastDir) continue" - a PERMANENT block on any repeat
+//--- same-direction signal. That rule makes sense for the EMA-cross
+//--- overlay (which tracks one open "position" until the opposite cross
+//--- closes it), but Continuation has no such position - every pullback
+//--- in a sustained trend is its OWN legitimate signal, not a duplicate
+//--- of the first one. So in a long one-directional trend (exactly the
+//--- chart shown - one sustained downtrend, 4 separate rally-and-reject
+//--- pullbacks), only the FIRST pullback could ever fire; every
+//--- subsequent one in that same trend was silently suppressed forever,
+//--- which is why 3 of the 4 marked points never printed even after the
+//--- direction logic itself was already correct. Replaced with a
+//--- per-direction bar-count cooldown (InpContCooldownBars, default 8) -
+//--- repeat same-direction signals can fire again once that many bars
+//--- have passed, instead of never again until the opposite direction
+//--- interrupts it.
 //--- 2.06: Three fixes, per direct request/screenshot.
 //--- (1) Every overlay's entry arrow is now the SAME shape
 //--- (OBJ_ARROW_UP/DOWN, triangle) - only the Rejection/Rejection M15
@@ -928,6 +945,15 @@ input int    InpContArrowSize      = 2;
 input double InpContArrowOffsetATR = 1.3;
 input int    InpContLineBars       = 8;
 input bool   InpContAlert          = true;
+input int    InpContCooldownBars   = 8;       // v2.07 FIX: minimum bars between two SAME-DIRECTION
+                                               // Continuation markers - replaces a bug where the overlay
+                                               // only ever fired ONCE per trend, then silently suppressed
+                                               // every further legitimate pullback signal in that same
+                                               // trend (reported: signals missing at 3 of 4 marked points
+                                               // on a single sustained downtrend chart) - unlike the EMA
+                                               // cross overlay, Continuation has no "open position" to
+                                               // track, so repeat same-direction signals are expected and
+                                               // should fire, just not on every single consecutive bar
 
 CTrade trade;
 
@@ -1019,6 +1045,8 @@ int      g_cntLastDir = 0;
 datetime g_cntLastProcessedBar = 0;
 double   g_cntLastMarkerPrice = 0.0;
 datetime g_cntLastMarkerTime  = 0;
+datetime g_cntLastBuyAt  = 0;   // v2.07: per-direction cooldown tracking, not a dedupe block
+datetime g_cntLastSellAt = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -2940,7 +2968,23 @@ void ComputeContSignals(const bool backfill)
          if(reachedHigh) dir = -1;
         }
       if(dir == 0) continue;
-      if(dir == lastDir) continue;
+      //--- v2.07 FIX: was "if(dir == lastDir) continue" - a PERMANENT
+      //--- block on repeat same-direction signals, which silently killed
+      //--- every pullback after the first one in any sustained trend
+      //--- (Continuation has no "open position" like the EMA-cross
+      //--- overlay does - each pullback is its own legitimate signal).
+      //--- Replaced with a per-direction bar-count cooldown instead.
+      datetime t_i = r[i].time;
+      if(dir > 0)
+        {
+         if(g_cntLastBuyAt != 0 && (t_i - g_cntLastBuyAt) < (datetime)InpContCooldownBars * perSec) continue;
+         g_cntLastBuyAt = t_i;
+        }
+      else
+        {
+         if(g_cntLastSellAt != 0 && (t_i - g_cntLastSellAt) < (datetime)InpContCooldownBars * perSec) continue;
+         g_cntLastSellAt = t_i;
+        }
       lastDir = dir;
 
       if(draw)
@@ -3008,6 +3052,7 @@ void ResyncContSignals()
    g_cntLastDir = 0;
    g_cntLastProcessedBar = 0;
    g_cntLastMarkerPrice = 0.0; g_cntLastMarkerTime = 0;
+   g_cntLastBuyAt = 0; g_cntLastSellAt = 0;
    if(InpShowContSignals) ComputeContSignals(true);
   }
 
