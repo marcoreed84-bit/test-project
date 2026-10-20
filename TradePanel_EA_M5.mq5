@@ -20,20 +20,41 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| v2.15: LOCKED to M5 - this is the M5-only copy of TradePanel_EA.   |
+//| v2.16: LOCKED to M5 - this is the M5-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
-//| attached to any chart whose timeframe isn't M5, per direct        |
+//| attached to any chart whose timeframe isn't M5, per direct       |
 //| request: "i though we agreed to split them one specific for 15   |
 //| and one for 5" - a plain duplicate filename wasn't actually       |
 //| enforcing anything, so this one now hard-refuses the wrong chart  |
-//| instead of silently running wherever it's dropped. The M15        |
-//| sibling (TradePanel_EA_M15.mq5) is identical except for this one  |
-//| constant - EXPECTED_PERIOD - and its own symmetric version of     |
-//| this same refusal.                                                 |
+//| instead of silently running wherever it's dropped. The TradePanel_EA_M15.mq5 |
+//| sibling is identical except for this one constant -               |
+//| EXPECTED_PERIOD - and its own symmetric version of this same      |
+//| refusal. Rebuilt from the v2.15 base (the repeat-alert fix), so   |
+//| this copy now carries that fix too.                                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M5
 #property copyright "Marco"
-#property version   "2.15"
+#property version   "2.16"
+//--- 2.16: Locked copy (M5 only) - see the header block above. Rebuilt from
+//--- v2.15 so this copy carries the repeat-alert fix described below too.
+//--- 2.15: Fixed a real repeat-alert bug across 7 of the 8 signal
+//--- overlays, per report: "the old trade panel still giving me the
+//--- same rejection signal over and over." Every overlay except
+//--- Stochastic (which deliberately deletes-and-replaces on a repeat
+//--- same-direction signal, by design) used an ObjectFind-guarded draw
+//--- function - if the chart object for a given bar already existed,
+//--- the draw silently no-op'd - but the FireSigAlert() push
+//--- notification right next to it fired UNCONDITIONALLY regardless of
+//--- whether anything was actually new. If that bar's signal was ever
+//--- reprocessed (a resync, a reinit, any path that re-walks already-
+//--- handled history), the exact same alert would fire again, every
+//--- time, even though nothing new ever appeared on the chart - which
+//--- is exactly what "nothing on the chart" + "same signal over and
+//--- over" together describe. Fixed on EMA Cross (entry, exit, AND the
+//--- weakening marker - 3 separate spots), Engulfing, Rejection,
+//--- Rejection M15, and Continuation: each now captures whether the
+//--- object was genuinely new (ObjectFind BEFORE the draw call) and
+//--- only alerts when it was.
 //--- 2.14: Opus's object-count/rendering-lag audit, dispatched after
 //--- repeated reports of signals printing much later than they should
 //--- and "rejection signals and nothing on the chart". MEASURED FIRST
@@ -915,17 +936,12 @@
 #include <Trade/Trade.mqh>
 
 input group "=== Trade buttons ==="
-input int    InpMagic              = 0;          // v2.15 (Opus-reviewed fix): THIS LOCKED COPY defaults to
-                                                  // 0 ("auto"), not the old fixed 20261014 - that old default
-                                                  // was the same non-zero number in BOTH the M5 and M15
-                                                  // locked files, which would have meant the two panels
-                                                  // silently managed each other's trades even though the
-                                                  // timeframe lock above stops either from attaching to the
-                                                  // wrong chart. 0 auto-derives a magic from _Period (see
-                                                  // g_effectiveMagic/OnInit) so the two locked copies get
-                                                  // DIFFERENT magics by default, with no setup needed. Set a
-                                                  // non-zero value here only if you want this panel to share
-                                                  // a magic with something else on purpose.
+input int    InpMagic              = 0;          // THIS LOCKED COPY defaults to 0 ("auto") -
+                                                  // not the old fixed 20261014 - so the two locked
+                                                  // copies get DIFFERENT magics automatically (derived
+                                                  // from _Period, see g_effectiveMagic/OnInit), with no
+                                                  // setup needed. Set non-zero only to share a magic
+                                                  // with something else on purpose.
 input int    InpArmSeconds         = 60;         // ARM auto-expires after this many seconds unused -
                                                   // starting value only, adjustable live from the panel
                                                   // itself now (Arm delay row) via g_armSeconds
@@ -2245,12 +2261,13 @@ void ComputeEmaCrossSignals(const bool backfill)
             dotPrice = NudgeAwayFromLastMarker(dotPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
             dotPrice = NudgeClearOfOtherOverlays(dotPrice, t, !wasLong, minGapExit, exId);
             lastMarkerPrice = dotPrice; lastMarkerTime = t;
+            bool exitWasNew = (ObjectFind(0, exId) < 0);   // v2.15 FIX - see Rejection overlay's own comment
             DrawEmaCrossDot(exId, t, dotPrice, wasLong);
             PrintFormat("EmaCrossSignal LOG: %s EXIT-%s @ %s  E21=%s E50=%s (closing posDir %d -> 0)",
                         TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
                         DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
                         DoubleToString(e50[i], _Digits), prevPosDir);
-            if(!backfill && InpEmaCrossAlert)
+            if(!backfill && exitWasNew && InpEmaCrossAlert)
               {
                string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
                FireSigAlert(StringFormat("%s %s: EMA21/50 cross EXIT-%s PRINTED (held to this opposite cross) - "
@@ -2316,6 +2333,7 @@ void ComputeEmaCrossSignals(const bool backfill)
                entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
                entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, lastArr);
                lastMarkerPrice = entryPrice; lastMarkerTime = t;
+               bool entryWasNew = (ObjectFind(0, lastArr) < 0);   // v2.15 FIX
                DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
                DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
                             "EMA-cross SL: recent " + IntegerToString(InpEmaCrossSwingBars) + "-bar swing (reference only - validated exit is the next opposite EMA cross)");
@@ -2325,7 +2343,7 @@ void ComputeEmaCrossSignals(const bool backfill)
                            TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                            DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
                            DoubleToString(e50[i], _Digits), posDir);
-               if(!backfill && InpEmaCrossAlert)
+               if(!backfill && entryWasNew && InpEmaCrossAlert)
                  {
                   string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
                   FireSigAlert(StringFormat("%s %s: EMA21/50 cross %s PRINTED (validated construction, hold to "
@@ -2365,12 +2383,13 @@ void ComputeEmaCrossSignals(const bool backfill)
                   wkPrice = NudgeAwayFromLastMarker(wkPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
                   wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, !wasLong, minGapWk, wkId);
                   lastMarkerPrice = wkPrice; lastMarkerTime = t;
+                  bool weakWasNew = (ObjectFind(0, wkId) < 0);   // v2.15 FIX
                   DrawEmaWeakenMarker(wkId, t, wkPrice, wasLong);
                   PrintFormat("EmaWeakenSignal LOG: %s WEAKENING in %s run @ %s  gap=%s (peak was %s, %d declining bars)",
                               TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
                               DoubleToString(c[i], _Digits), DoubleToString(gap, _Digits),
                               DoubleToString(runMaxGap, _Digits), declineCount);
-                  if(!backfill && InpEmaWeakenAlert)
+                  if(!backfill && weakWasNew && InpEmaWeakenAlert)
                     {
                      string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
                      FireSigAlert(StringFormat("%s %s: EMA21/50 gap WEAKENING in the %s run (21EMA losing its "
@@ -2748,12 +2767,13 @@ void ComputeCandleSignals(const bool backfill)
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, arrNm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         bool cdlWasNew = (ObjectFind(0, arrNm) < 0);   // v2.15 FIX
          DrawCandleArrow(arrNm, t, entryPrice, isBuy);
          DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
                       "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
          DrawSigLevel(tpNm, t, t + (InpCdlLineBars + 2) * perSec, tp, InpCdlTPCol, STYLE_DASH,
                       "Engulfing TP: 1:" + DoubleToString(InpCdlRR, 1) + " R:R (fixed target - no opposite-signal exit exists)");
-         if(!backfill && InpCdlAlert)
+         if(!backfill && cdlWasNew && InpCdlAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
             FireSigAlert(StringFormat("%s %s: Engulfing %s PRINTED (validated GOLD only, p=0.0010 - "
@@ -2918,6 +2938,14 @@ void ComputeRejectSignals2(const bool backfill)
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         //--- v2.15 FIX: only alert if this marker is genuinely NEW this
+         //--- call - DrawRejectArrow2() silently no-ops if the object
+         //--- already exists (ObjectFind guard), but the alert below used
+         //--- to fire regardless, so if this bar ever gets reprocessed
+         //--- (a resync, a reinit) the SAME signal re-alerts every time
+         //--- even though nothing new ever appears on the chart -
+         //--- reported as "the same rejection signal over and over".
+         bool wasNew = (ObjectFind(0, nm) < 0);
          DrawRejectArrow2(nm, t, entryPrice, isBuy);
 
          //--- SL (swing high/low) + TP (R:R) lines, same idiom as every
@@ -2942,7 +2970,7 @@ void ComputeRejectSignals2(const bool backfill)
                      TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                      DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
                      DoubleToString(e50[i], _Digits), DoubleToString(bbMid[i], _Digits));
-         if(!backfill && InpRejAlert)
+         if(!backfill && wasNew && InpRejAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
             FireSigAlert(StringFormat("%s %s: Rejection %s PRINTED (21/50 trend + 50EMA reject + 21EMA break + "
@@ -3099,6 +3127,7 @@ void ComputeRejectSignalsM15(const bool backfill)
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         bool m15WasNew = (ObjectFind(0, nm) < 0);   // v2.15 FIX
          DrawRejectArrowM15(nm, t, entryPrice, isBuy);
 
          double swing = (dir > 0) ? l[i] : h[i];
@@ -3121,7 +3150,7 @@ void ComputeRejectSignalsM15(const bool backfill)
                      TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                      DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
                      DoubleToString(e50[i], _Digits), DoubleToString(bbMid[i], _Digits));
-         if(!backfill && InpRejM15Alert)
+         if(!backfill && m15WasNew && InpRejM15Alert)
            {
             FireSigAlert(StringFormat("%s M15: Rejection M15 %s PRINTED (21/50 trend + 50EMA reject + 21EMA break + "
                                        "BB-mid close + stoch confirm, always M15 regardless of chart timeframe) - "
@@ -3288,6 +3317,7 @@ void ComputeContSignals(const bool backfill)
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         bool cntWasNew = (ObjectFind(0, nm) < 0);   // v2.15 FIX
          DrawContArrow(nm, t, entryPrice, isBuy);
 
          double swing = (dir > 0) ? l[i] : h[i];
@@ -3310,7 +3340,7 @@ void ComputeContSignals(const bool backfill)
                      TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                      DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
                      DoubleToString(e50[i], _Digits), DoubleToString(k[i], 1));
-         if(!backfill && InpContAlert)
+         if(!backfill && cntWasNew && InpContAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
             FireSigAlert(StringFormat("%s %s: Continuation %s PRINTED (trend + near-MA pullback + stoch reset) - "
@@ -3736,11 +3766,9 @@ void RebuildPanel()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   //--- v2.15: hard refusal - this copy is locked to EXPECTED_PERIOD.
-   //--- Checked first, before anything else sets up, so a wrong-chart
-   //--- attach never creates handles/objects/a panel at all - just one
-   //--- Alert() and a clean failure, not a half-initialized EA sitting
-   //--- on the wrong timeframe doing nothing useful.
+   //--- hard refusal - this copy is locked to EXPECTED_PERIOD. Checked
+   //--- first, before anything else sets up, so a wrong-chart attach
+   //--- never creates handles/objects/a panel at all.
    if((ENUM_TIMEFRAMES)_Period != EXPECTED_PERIOD)
      {
       string wantTf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)EXPECTED_PERIOD), 7);
