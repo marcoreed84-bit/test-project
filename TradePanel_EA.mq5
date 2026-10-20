@@ -19,7 +19,18 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.07"
+#property version   "2.08"
+//--- 2.08: Standardized every entry overlay's arrow SIZE, not just its
+//--- shape (shape was already unified in v2.06) - per direct request,
+//--- "all buy and sell signals all arrows, same size, different
+//--- colours." EMA Cross/Stoch/Engulfing defaulted to width 1 (thin
+//--- enough to look like a dot rather than a clear arrow, especially
+//--- next to the Rejection/Continuation overlays' width-2 arrows) -
+//--- all six entry overlays (EMA Cross, Stoch, Engulfing, Rejection,
+//--- Rejection M15, Continuation) now default to width 2. Buy/sell
+//--- placement was already correct before this (buy arrow below price
+//--- pointing up, sell arrow above price pointing down) - confirmed,
+//--- not changed.
 //--- 2.07: Fixed the REAL reason signals were still missing at the
 //--- marked points after the v2.06 direction fix. ComputeContSignals()
 //--- had "if(dir == lastDir) continue" - a PERMANENT block on any repeat
@@ -815,7 +826,10 @@ input color  InpEmaCrossStopCol    = clrRed;
 input color  InpEmaCrossTPCol      = clrYellow;
 input double InpEmaCrossArrowOffsetATR = 1.0; // own offset so it never sits on top of the stochastic overlay's
 input double InpEmaCrossExitOffsetATR  = 1.2; // own markers (independent overlay, never touches posDir/lastArr above)
-input int    InpEmaCrossArrowSize  = 1;
+input int    InpEmaCrossArrowSize  = 2;   // v2.08: standardized to match every other overlay's arrow size -
+                                           // per direct request, all entry arrows same shape AND same size,
+                                           // colour/label is what tells them apart (at width 1 some arrows
+                                           // render small enough to look like a dot rather than a clear arrow)
 input int    InpEmaCrossDotSize    = 2;
 input int    InpEmaCrossLineBars   = 8;       // stop-line length in bars; the TP line runs 2 bars longer
 input bool   InpEmaCrossAlert      = true;    // push notification on entry AND exit (next opposite cross)
@@ -863,7 +877,7 @@ input color  InpStochBuyCol        = C'0,150,255';
 input color  InpStochSellCol       = C'255,0,200';
 input color  InpStochStopCol       = clrRed;
 input color  InpStochTPCol         = C'0,255,0';
-input int    InpStochArrowSize     = 1;
+input int    InpStochArrowSize     = 2;   // v2.08: standardized - was 1 (thin enough to look like a dot)
 input int    InpStochLineBars      = 8;
 input double InpStochArrowOffsetATR = 0.5;
 input bool   InpStochCrossAlert    = true;    // push notification when the cross-in-zone signal prints
@@ -879,7 +893,7 @@ input color  InpCdlSellCol         = clrMagenta;
 input color  InpCdlStopCol         = clrRed;
 input color  InpCdlTPCol           = clrYellow;
 input double InpCdlArrowOffsetATR  = 1.0;
-input int    InpCdlArrowSize       = 1;
+input int    InpCdlArrowSize       = 2;   // v2.08: standardized - was 1 (thin enough to look like a dot)
 input int    InpCdlLineBars        = 8;
 input bool   InpCdlAlert           = true;
 
