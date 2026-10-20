@@ -23,8 +23,20 @@
 #property version   "2.14"
 //--- 2.14: Opus's object-count/rendering-lag audit, dispatched after
 //--- repeated reports of signals printing much later than they should
-//--- and "rejection signals and nothing on the chart". Found three real
-//--- causes, all fixed here (none of this was the MA-sync bug from
+//--- and "rejection signals and nothing on the chart". MEASURED FIRST
+//--- (default inputs, real GOLD data, last 52 weeks, 7-day window): each
+//--- MA line holds ~1,680 segments (the purge is time-based - 2500 bars
+//--- of clock time, minus weekends), so ~5,000 for the 3 MAs; VWAP grows
+//--- from 400 at attach to ~1,670 after a week (purged on the MA horizon,
+//--- not its own 400 - same as Aurelius); all six signal overlays
+//--- together are only ~265 objects on M5 (max ~450) and ~90 on M15.
+//--- ~7,000 total on either timeframe - BELOW Aurelius_EA's own ~8,500+,
+//--- which runs live fine. So object COUNT is NOT the problem, and
+//--- shrinking InpSigDrawDays would remove ~4% of objects for nothing -
+//--- left at 7. Nothing does a repeated full wipe+redraw in normal
+//--- running either (SyncMAOverlays is one comparison unless the
+//--- timeframe really changed). Found two real problems and one cheap
+//--- cleanup, fixed here (none of this was the MA-sync bug from
 //--- v2.05-2.11 - this was always a separate problem):
 //--- (1) CheckNewBar() used to run EVERY overlay's own full-chart purge
 //--- scan (~7,000 objects at default settings) right after computing
@@ -45,6 +57,8 @@
 //--- chart that's many ticks a second, i.e. a self-inflicted stream of
 //--- chart-change events the EA was generating for itself. Now only
 //--- writes it when the value actually differs from what's already set.
+//--- (The cheap cleanup - its real cost can't be measured without MT5,
+//--- so it is NOT claimed as a proven cause of the delay.)
 //--- (3) Each overlay's own anti-collision (NudgeAwayFromLastMarker)
 //--- only ever checked against that SAME overlay's own previous marker
 //--- - two DIFFERENT overlays (e.g. Rejection and Continuation) could
@@ -54,7 +68,21 @@
 //--- NudgeClearOfOtherOverlays() checks all 8 entry-marker object names
 //--- for that same bar across every overlay and nudges clear of
 //--- whichever ones are already there, on top of the existing same-
-//--- overlay nudge.
+//--- overlay nudge. Worst case it fixes: on an M15 CHART, Rejection and
+//--- Rejection M15 run the identical calculation on identical bars, so
+//--- EVERY Rejection arrow was drawn exactly underneath its Rejection
+//--- M15 twin - two alerts, one visible arrow, in the M15 colour. (The
+//--- two overlays still both fire on an M15 chart - turn
+//--- InpShowRejectSignalsM15 off there if one alert is enough.)
+//--- NOT changed, on purpose - it is signal logic, not rendering, and it
+//--- is most of what "printed much later" feels like: every overlay only
+//--- fires once its bar has CLOSED, and its arrow sits on that bar's
+//--- OPEN time - on M15 a push can arrive up to 15 min after the setup
+//--- started forming, pointing at a candle that is already one back. The
+//--- EMA cross also waits InpEmaConfirmBars=2 more closed bars after the
+//--- cross itself (10 min on M5, 30 min on M15) - validated, by design.
+//--- Rejection M15 on an M5 chart prints at the M15 close but sits on
+//--- the M15 bar's open time, i.e. 3 M5 candles back.
 //--- Also: the panel's own title now shows which timeframe this
 //--- instance is running on (e.g. "TRADE PANEL [M15]"), per direct
 //--- request, so two separate panels (one per timeframe - the agreed
