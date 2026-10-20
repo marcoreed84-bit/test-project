@@ -19,7 +19,26 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.01"
+#property version   "2.02"
+//--- 2.02: Per direct request, put back the Stochastic cross overlay and
+//--- the Candlestick engulfing overlay (both removed in v2.0), with
+//--- shorter chart-object tooltips across the board ("EMA Cross Buy/Sell",
+//--- "Stoch Buy/Sell", "Engulfing Buy/Sell", "Rejection Buy/Sell" - not
+//--- the old long validation-status strings). Stochastic overlay is now
+//--- fully configurable (InpStochKPeriod/Slowing/DPeriod, a Simple/
+//--- Smoothed method switch, a High-Low/Close-Close price-mode switch),
+//--- default 14/5/5 Simple High-Low, default zone levels 15/85 (was
+//--- 20/80). Added a brand-new "Rejection" overlay, per direct request
+//--- and the attached chart screenshot: in a downtrend (21EMA below
+//--- 50EMA), price rallying up to reach/reject/break the 50EMA, THEN
+//--- breaking back below the 21EMA, closing below the Bollinger mid-band,
+//--- WITH a same-direction stochastic %K/%D cross nearby - all required
+//--- together, mirrored for the buy case. This construction has NOT been
+//--- back-tested yet (flagged UNVALIDATED in its own input-group comment
+//--- and every tooltip) - it is coded exactly as described, not assumed
+//--- to be a real edge. Works on whatever timeframe the chart is attached
+//--- to (M5, M15, or any other) since every overlay here reads
+//--- PERIOD_CURRENT, not a hardcoded timeframe.
 //--- 2.01: Added InpEmaConfirmBars (default 2) - after the user asked "is
 //--- there a way to tell a good cross from a small criss-cross start of a
 //--- sideways market", an Opus audit confirmed the EMA21/50 overlay had
@@ -708,6 +727,78 @@ input double InpEmaWeakenOffsetATR  = 1.6;    // own offset, bigger than entry/e
 input int    InpEmaWeakenSize       = 2;
 input bool   InpEmaWeakenAlert      = true;   // push notification when this fires
 
+input group "=== Stochastic cross signal overlay (re-added by request, v2.02) - UNVALIDATED - VISUAL ONLY, never places/modifies/closes anything ==="
+input bool   InpShowStochSignals   = true;
+input int    InpStochKPeriod       = 14;      // %K period
+input int    InpStochSlowing       = 5;       // slowing
+input int    InpStochDPeriod       = 5;       // %D period
+enum ENUM_SIG_STOCH_METHOD
+  {
+   SIG_STOCH_SUM      = 0,   // Simple - sum num/den separately over the slowing window then divide
+   SIG_STOCH_SMA      = 1,   // Simple - plain SMA of the raw per-bar %K ("textbook" convention)
+   SIG_STOCH_SMOOTHED = 2    // Smoothed (SMMA) - matches MT5's native Stochastic "Method: Smoothed"
+  };
+input ENUM_SIG_STOCH_METHOD InpStochMethod = SIG_STOCH_SMA;   // default "Simple", per direct request
+enum ENUM_SIG_STOCH_PRICE
+  {
+   SIG_STOCH_LOWHIGH   = 0,  // High/Low (the %K range is the bar range) - default, per direct request
+   SIG_STOCH_CLOSECLOSE = 1  // Close/Close (the %K range is the range of CLOSES)
+  };
+input ENUM_SIG_STOCH_PRICE InpStochPriceMode = SIG_STOCH_LOWHIGH;
+input double InpStochZoneLow       = 15.0;    // oversold zone (buy cross must be below this) - default 15, per direct request
+input double InpStochZoneHigh      = 85.0;    // overbought zone (sell cross must be above this) - default 85, per direct request
+input bool   InpStochUseInterpCross = true;   // qualify using the INTERPOLATED point where the %K/%D
+                                               // lines actually cross between bar i-1 and bar i, not
+                                               // either bar's raw endpoint value
+input int    InpStochSwingBars     = 10;      // stop-loss reference = N-bar swing low/high at the cross bar
+input double InpStochRR            = 2.0;     // R:R convention for the TP reference line - example only
+input color  InpStochBuyCol        = C'0,150,255';
+input color  InpStochSellCol       = C'255,0,200';
+input color  InpStochStopCol       = clrRed;
+input color  InpStochTPCol         = C'0,255,0';
+input int    InpStochArrowSize     = 1;
+input int    InpStochLineBars      = 8;
+input double InpStochArrowOffsetATR = 0.5;
+input bool   InpStochCrossAlert    = true;    // push notification when the cross-in-zone signal prints
+
+input group "=== Candlestick engulfing signal overlay (re-added by request, v2.02) - validated on GOLD ONLY (p=0.0010) - Silver/BTC NOT real (p=0.8511/0.5564) - VISUAL ONLY ==="
+input bool   InpShowCandleSignals  = true;
+input int    InpCdlSwingBars       = 10;      // swing/stop-loss lookback, same N used for the pattern's own
+                                               // "is this bar the swing extreme" qualification
+input double InpCdlRR              = 2.0;     // fixed 1:2 R:R target - this IS the validated exit (plus the
+                                               // swing stop), there is no opposite-pattern exit to wait for
+input color  InpCdlBuyCol          = clrAqua;
+input color  InpCdlSellCol         = clrMagenta;
+input color  InpCdlStopCol         = clrRed;
+input color  InpCdlTPCol           = clrYellow;
+input double InpCdlArrowOffsetATR  = 1.0;
+input int    InpCdlArrowSize       = 1;
+input int    InpCdlLineBars        = 8;
+input bool   InpCdlAlert           = true;
+
+input group "=== Rejection signal overlay (NEW, v2.02, per direct request) - UNVALIDATED (not yet back-tested) - VISUAL ONLY - works on whatever timeframe the chart/panel is attached to (M5, M15, or any other) ==="
+input bool   InpShowRejectSignals2 = true;    // trend (21 vs 50) + price reaches/rejects/breaks the 50 +
+                                               // breaks back through the 21 + closes beyond the Bollinger
+                                               // mid-band + a same-direction stochastic cross nearby - all
+                                               // five conditions must agree. Named InpShowRejectSignals2 to
+                                               // stay distinct from the old InpShowRejectSignals (the
+                                               // removed EMA21-touch marker from v1.x - different construction)
+input int    InpRejLookbackBars    = 20;      // how many bars back price must have reached/rejected/broken
+                                               // the 50 before the 21-break trigger counts
+input double InpRejTouchATR        = 0.3;     // how close to (or beyond) the 50 counts as "reached it" (x ATR)
+input int    InpRejBBPeriod        = 20;      // Bollinger mid-band period (own settings, SMA, standard)
+input double InpRejBBDev           = 2.0;     // Bollinger deviations (only the mid-band/SMA is used here,
+                                               // the deviation doesn't affect the mid-band itself but is
+                                               // kept as a visible/standard BB input for familiarity)
+input int    InpRejStochWindow     = 5;       // a stochastic %K/%D cross in the SAME direction must have
+                                               // happened within this many bars of the trigger bar (uses
+                                               // the Stochastic overlay's own K/slowing/D/method/price
+                                               // settings above, recomputed independently)
+input color  InpRejBuyCol          = clrSpringGreen;
+input color  InpRejSellCol         = clrOrchid;
+input int    InpRejArrowSize       = 2;
+input double InpRejArrowOffsetATR  = 1.3;     // own offset, distinct from every other overlay's markers
+input bool   InpRejAlert           = true;
 
 CTrade trade;
 
@@ -751,6 +842,30 @@ bool     g_emaxWeakenFired  = false;
 //--- since each call typically processes only one freshly-closed bar.
 int      g_emaxPendingDir         = 0;
 int      g_emaxPendingBarsElapsed = 0;
+
+//--- v2.02: Stochastic cross overlay (re-added) - own namespace
+string   g_sig = "TPSIG_";
+ENUM_TIMEFRAMES g_sigPeriod = PERIOD_CURRENT;
+int      g_sigLastDir = 0, g_sigPosDir = 0;
+string   g_sigLastArr = "", g_sigLastSl = "", g_sigLastTp = "";
+datetime g_sigLastProcessedBar = 0;
+double   g_sigLastMarkerPrice = 0.0;
+datetime g_sigLastMarkerTime  = 0;
+
+//--- v2.02: Candlestick engulfing overlay (re-added) - own namespace
+string   g_cdl = "TPCDL_";
+ENUM_TIMEFRAMES g_cdlPeriod = PERIOD_CURRENT;
+datetime g_cdlLastProcessedBar = 0;
+double   g_cdlLastMarkerPrice = 0.0;
+datetime g_cdlLastMarkerTime  = 0;
+
+//--- v2.02: Rejection overlay (NEW) - own namespace
+string   g_rjx = "TPRJX_";
+ENUM_TIMEFRAMES g_rjxPeriod = PERIOD_CURRENT;
+int      g_rjxLastDir = 0;
+datetime g_rjxLastProcessedBar = 0;
+double   g_rjxLastMarkerPrice = 0.0;
+datetime g_rjxLastMarkerTime  = 0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1411,8 +1526,7 @@ void DrawEmaCrossArrow(const string nm, const datetime t, const double price, co
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "EMA21/50 cross BUY (validated, Gold longs %PF=1.031 - hold to next opposite cross)"
-                                                   : "EMA21/50 cross SELL (same construction - validated on Gold LONGS only, shorts not separately confirmed)");
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "EMA Cross Buy" : "EMA Cross Sell");
   }
 
 void DrawEmaCrossDot(const string nm, const datetime t, const double price, const bool wasLong)
@@ -1426,8 +1540,7 @@ void DrawEmaCrossDot(const string nm, const datetime t, const double price, cons
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "EMA21/50 cross EXIT-LONG (next opposite cross - the validated exit)"
-                                                     : "EMA21/50 cross EXIT-SHORT (next opposite cross - the validated exit)");
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "EMA Cross Exit (long)" : "EMA Cross Exit (short)");
   }
 
 //+------------------------------------------------------------------+
@@ -1792,6 +1905,566 @@ void ResyncEmaCrossSignals()
    if(InpShowEmaCrossSignals) ComputeEmaCrossSignals(true);
   }
 
+//+------------------------------------------------------------------+
+//| v2.02: textbook %K/%D stochastic, extended with a price-mode switch |
+//| (High/Low range vs Close/Close range) on top of the original three- |
+//| way slowing-method switch. Shared by the Stochastic overlay and the |
+//| Rejection overlay (each calls this with its own settings).          |
+//+------------------------------------------------------------------+
+void SigClassicStoch(const double &h[], const double &l[], const double &c[], const int n,
+                     const int kp, const int slow, const int dp, double &k[], double &d[],
+                     const ENUM_SIG_STOCH_METHOD method, const ENUM_SIG_STOCH_PRICE priceMode)
+  {
+   ArrayResize(k, n); ArrayInitialize(k, SIG_NA);
+   ArrayResize(d, n); ArrayInitialize(d, SIG_NA);
+   double num[], den[], rawK[];
+   ArrayResize(num, n); ArrayResize(den, n); ArrayResize(rawK, n);
+   ArrayInitialize(num, 0.0); ArrayInitialize(den, 0.0); ArrayInitialize(rawK, 0.0);
+   for(int i = kp - 1; i < n; i++)
+     {
+      double lo, hi;
+      if(priceMode == SIG_STOCH_CLOSECLOSE)
+        {
+         lo = c[i]; hi = c[i];
+         for(int j = i - kp + 1; j < i; j++) { if(c[j] < lo) lo = c[j]; if(c[j] > hi) hi = c[j]; }
+        }
+      else
+        {
+         lo = l[i]; hi = h[i];
+         for(int j = i - kp + 1; j < i; j++) { if(l[j] < lo) lo = l[j]; if(h[j] > hi) hi = h[j]; }
+        }
+      num[i] = c[i] - lo;
+      den[i] = hi - lo;
+      rawK[i] = (den[i] > 0.0) ? 100.0 * num[i] / den[i] : 100.0;
+     }
+   int kStart = kp + slow - 2;
+   if(method == SIG_STOCH_SUM)
+     {
+      for(int i = kStart; i < n; i++)
+        {
+         double sn = 0.0, sd = 0.0;
+         for(int j = i - slow + 1; j <= i; j++) { sn += num[j]; sd += den[j]; }
+         k[i] = (sd > 0.0) ? 100.0 * sn / sd : 100.0;
+        }
+     }
+   else if(method == SIG_STOCH_SMA)
+     {
+      for(int i = kStart; i < n; i++)
+        {
+         double s = 0.0;
+         for(int j = i - slow + 1; j <= i; j++) s += rawK[j];
+         k[i] = s / slow;
+        }
+     }
+   else // SIG_STOCH_SMOOTHED
+     {
+      double seed = 0.0;
+      for(int j = kStart - slow + 1; j <= kStart; j++) seed += rawK[j];
+      k[kStart] = seed / slow;
+      for(int i = kStart + 1; i < n; i++)
+         k[i] = (k[i - 1] * (slow - 1) + rawK[i]) / slow;
+     }
+   int dStart = kp + slow + dp - 3;
+   if(method == SIG_STOCH_SMOOTHED)
+     {
+      double seed = 0.0;
+      for(int j = dStart - dp + 1; j <= dStart; j++) seed += k[j];
+      d[dStart] = seed / dp;
+      for(int i = dStart + 1; i < n; i++)
+         d[i] = (d[i - 1] * (dp - 1) + k[i]) / dp;
+     }
+   else
+     {
+      for(int i = dStart; i < n; i++)
+        {
+         double s = 0.0;
+         for(int j = i - dp + 1; j <= i; j++) s += k[j];
+         d[i] = s / dp;
+        }
+     }
+  }
+
+void DrawStochArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpStochBuyCol : InpStochSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpStochArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Stoch Buy" : "Stoch Sell");
+  }
+
+//+------------------------------------------------------------------+
+//| v2.02: Stochastic cross overlay (re-added by request) - %K/%D cross |
+//| WITHIN the extreme zone (InpStochZoneLow/High, default 15/85). No   |
+//| trend filter by design (same as the original baseline construction |
+//| this replaces) - UNVALIDATED, visual only.                          |
+//+------------------------------------------------------------------+
+void ComputeStochSignals(const bool backfill)
+  {
+   int minBars = InpStochKPeriod + InpStochSlowing + InpStochDPeriod + InpStochSwingBars;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double k[], d[];
+   SigClassicStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, k, d, InpStochMethod, InpStochPriceMode);
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_sigLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   int lastDir;
+   string lastArr, lastSl, lastTp;
+   double lastMarkerPrice;
+   datetime lastMarkerTime;
+   if(backfill)
+     {
+      lastDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
+      lastMarkerPrice = 0.0; lastMarkerTime = 0;
+     }
+   else
+     {
+      lastDir = g_sigLastDir;
+      lastArr = g_sigLastArr; lastSl = g_sigLastSl; lastTp = g_sigLastTp;
+      lastMarkerPrice = g_sigLastMarkerPrice; lastMarkerTime = g_sigLastMarkerTime;
+     }
+
+   for(int i = from; i < n; i++)
+     {
+      bool draw = (i >= drawFrom);
+      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpStochArrowOffsetATR * atr[i];
+      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
+
+      bool crossUp   = k[i - 1] <= d[i - 1] && k[i] > d[i];
+      bool crossDown = k[i - 1] >= d[i - 1] && k[i] < d[i];
+
+      double zoneTestVal = k[i];
+      if(InpStochUseInterpCross && (crossUp || crossDown))
+        {
+         double diffPrev = k[i - 1] - d[i - 1];
+         double diffCur  = k[i] - d[i];
+         double denom = diffPrev - diffCur;
+         if(MathAbs(denom) > 0.0000001)
+           {
+            double t = diffPrev / denom;
+            if(t < 0.0) t = 0.0;
+            if(t > 1.0) t = 1.0;
+            zoneTestVal = k[i - 1] + t * (k[i] - k[i - 1]);
+           }
+        }
+      int dir = 0;
+      if(crossUp && zoneTestVal < InpStochZoneLow) dir = 1;
+      else if(crossDown && zoneTestVal > InpStochZoneHigh) dir = -1;
+      if(dir == 0) continue;
+
+      double swing = (dir > 0) ? l[i] : h[i];
+      for(int j = i - InpStochSwingBars + 1; j < i; j++)
+         swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+      double risk = dir * (c[i] - swing);
+      if(risk <= 0.0) continue;
+
+      if(draw)
+        {
+         if(!backfill && InpStochCrossAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: Stoch cross-in-zone %s PRINTED (K=%.1f) - chart overlay only, "
+                                       "UNVALIDATED, does not place/modify/close anything",
+                                       _Symbol, tf, (dir > 0 ? "BUY" : "SELL"), k[i]));
+           }
+         if(dir == lastDir && lastArr != "")
+           {
+            ObjectDelete(0, lastArr);
+            ObjectDelete(0, lastSl);
+            ObjectDelete(0, lastTp);
+           }
+        }
+      lastDir = dir;
+
+      if(draw)
+        {
+         double stop = swing;
+         double tp   = c[i] + dir * InpStochRR * risk;
+         datetime t = r[i].time;
+         string id = IntegerToString((long)t);
+         bool isBuy = dir > 0;
+         lastArr = g_sig + "arr_" + id;
+         lastSl  = g_sig + "sl_" + id;
+         lastTp  = g_sig + "tp_" + id;
+         double entryPrice = isBuy ? r[i].low - offEntry : r[i].high + offEntry;
+         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         DrawStochArrow(lastArr, t, entryPrice, isBuy);
+         DrawSigLevel(lastSl, t, t + InpStochLineBars * perSec, stop, InpStochStopCol, STYLE_SOLID,
+                      "Stoch SL: recent " + IntegerToString(InpStochSwingBars) + "-bar swing (unvalidated)");
+         DrawSigLevel(lastTp, t, t + (InpStochLineBars + 2) * perSec, tp, InpStochTPCol, STYLE_DASH,
+                      "Stoch TP: 1:" + DoubleToString(InpStochRR, 1) + " R:R example (unvalidated)");
+        }
+     }
+
+   g_sigLastDir = lastDir;
+   g_sigLastArr = lastArr; g_sigLastSl = lastSl; g_sigLastTp = lastTp;
+   g_sigLastProcessedBar = r[n - 1].time;
+   g_sigLastMarkerPrice = lastMarkerPrice; g_sigLastMarkerTime = lastMarkerTime;
+  }
+
+void PurgeOldSigObjects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_sig) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+void ResyncStochSignals()
+  {
+   ObjectsDeleteAll(0, g_sig);
+   g_sigPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_sigLastDir = 0; g_sigPosDir = 0;
+   g_sigLastArr = ""; g_sigLastSl = ""; g_sigLastTp = "";
+   g_sigLastProcessedBar = 0;
+   g_sigLastMarkerPrice = 0.0; g_sigLastMarkerTime = 0;
+   if(InpShowStochSignals) ComputeStochSignals(true);
+  }
+
+//+------------------------------------------------------------------+
+//| v2.02: candlestick engulfing overlay (re-added by request) -        |
+//| bullish/bearish engulfing where the pattern bar IS the N-bar swing  |
+//| extreme. Validated on GOLD ONLY (p=0.0010) - Silver/BTC are NOT     |
+//| real (p=0.8511/0.5564).                                             |
+//+------------------------------------------------------------------+
+void DrawCandleArrow(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpCdlBuyCol : InpCdlSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpCdlArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Engulfing Buy" : "Engulfing Sell");
+  }
+
+void ComputeCandleSignals(const bool backfill)
+  {
+   int minBars = InpCdlSwingBars + 5;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[], o[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n); ArrayResize(o, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; o[i] = r[i].open; }
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_cdlLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   double lastMarkerPrice = backfill ? 0.0 : g_cdlLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_cdlLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(i < InpCdlSwingBars) continue;
+      bool draw = (i >= drawFrom);
+
+      bool bearPrev = c[i - 1] < o[i - 1];
+      bool bullCur  = c[i] > o[i];
+      bool bullEngulf = bearPrev && bullCur && o[i] <= c[i - 1] && c[i] >= o[i - 1];
+      bool bullPrev = c[i - 1] > o[i - 1];
+      bool bearCur  = c[i] < o[i];
+      bool bearEngulf = bullPrev && bearCur && o[i] >= c[i - 1] && c[i] <= o[i - 1];
+
+      double swingLow = l[i], swingHigh = h[i];
+      for(int j = i - InpCdlSwingBars; j < i; j++)
+        {
+         swingLow  = MathMin(swingLow, l[j]);
+         swingHigh = MathMax(swingHigh, h[j]);
+        }
+
+      int dir = 0;
+      if(bullEngulf && l[i] <= swingLow) dir = 1;
+      else if(bearEngulf && h[i] >= swingHigh) dir = -1;
+      if(dir == 0) continue;
+
+      double swing = (dir > 0) ? l[i] : h[i];
+      double risk = dir * (c[i] - swing);
+      if(risk <= 0.0) continue;
+
+      if(draw)
+        {
+         double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpCdlArrowOffsetATR * atr[i];
+         double stop = swing;
+         double tp   = c[i] + dir * InpCdlRR * risk;
+         datetime t = r[i].time;
+         string id = IntegerToString((long)t);
+         bool isBuy = dir > 0;
+         string arrNm = g_cdl + "arr_" + id;
+         string slNm  = g_cdl + "sl_"  + id;
+         string tpNm  = g_cdl + "tp_"  + id;
+         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+         double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         DrawCandleArrow(arrNm, t, entryPrice, isBuy);
+         DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
+                      "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
+         DrawSigLevel(tpNm, t, t + (InpCdlLineBars + 2) * perSec, tp, InpCdlTPCol, STYLE_DASH,
+                      "Engulfing TP: 1:" + DoubleToString(InpCdlRR, 1) + " R:R (fixed target - no opposite-signal exit exists)");
+         if(!backfill && InpCdlAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: Engulfing %s PRINTED (validated GOLD only, p=0.0010 - "
+                                       "Silver/BTC NOT real) - chart overlay only, does not place/modify/close anything",
+                                       _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
+        }
+     }
+
+   g_cdlLastProcessedBar = r[n - 1].time;
+   g_cdlLastMarkerPrice = lastMarkerPrice; g_cdlLastMarkerTime = lastMarkerTime;
+  }
+
+void PurgeOldCandleObjects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_cdl) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+void ResyncCandleSignals()
+  {
+   ObjectsDeleteAll(0, g_cdl);
+   g_cdlPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_cdlLastProcessedBar = 0;
+   g_cdlLastMarkerPrice = 0.0; g_cdlLastMarkerTime = 0;
+   if(InpShowCandleSignals) ComputeCandleSignals(true);
+  }
+
+//+------------------------------------------------------------------+
+//| v2.02: NEW "Rejection" overlay, per direct request/screenshot: in a |
+//| downtrend (21EMA below 50EMA), price rallies up toward the 50EMA   |
+//| (gets near it, rejects it, or breaks above and comes back) - the    |
+//| sell signal only fires once price (a) breaks back BELOW the 21EMA, |
+//| (b) closes below the Bollinger mid-band, AND (c) a stochastic       |
+//| %K/%D cross in the same (down) direction happened within           |
+//| InpRejStochWindow bars. Mirror conditions for an uptrend/buy.       |
+//| UNVALIDATED - this exact construction has not been back-tested;    |
+//| it is coded exactly as described, flagged clearly as unvalidated.  |
+//+------------------------------------------------------------------+
+void DrawRejectArrow2(const string nm, const datetime t, const double price, const bool isBuy)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 217);   // Wingdings "flag" shape - distinct from every
+                                                        // other overlay's arrow/dot/diamond
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejBuyCol : InpRejSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpRejArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Rejection Buy (unvalidated)" : "Rejection Sell (unvalidated)");
+  }
+
+void ComputeRejectSignals2(const bool backfill)
+  {
+   int minBars = MathMax(InpRejBBPeriod, InpStochKPeriod + InpStochSlowing + InpStochDPeriod) + InpRejLookbackBars + 10;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double e21[], e50[];
+   SigEMA(c, n, InpMA21, e21);
+   SigEMA(c, n, InpMA50, e50);
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   //--- Bollinger mid-band = plain SMA(InpRejBBPeriod) of close
+   double bbMid[];
+   ArrayResize(bbMid, n); ArrayInitialize(bbMid, SIG_NA);
+   for(int i = InpRejBBPeriod - 1; i < n; i++)
+     {
+      double s = 0.0;
+      for(int j = i - InpRejBBPeriod + 1; j <= i; j++) s += c[j];
+      bbMid[i] = s / InpRejBBPeriod;
+     }
+
+   //--- own stochastic, same settings as the Stochastic overlay above,
+   //--- recomputed independently so this overlay never depends on
+   //--- whether that one is even switched on
+   double k[], d[];
+   SigClassicStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, k, d, InpStochMethod, InpStochPriceMode);
+   bool stCrossUp[], stCrossDown[];
+   ArrayResize(stCrossUp, n); ArrayResize(stCrossDown, n);
+   ArrayInitialize(stCrossUp, false); ArrayInitialize(stCrossDown, false);
+   for(int i = 1; i < n; i++)
+     {
+      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
+      stCrossUp[i]   = k[i - 1] <= d[i - 1] && k[i] > d[i];
+      stCrossDown[i] = k[i - 1] >= d[i - 1] && k[i] < d[i];
+     }
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_rjxLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   int lastDir = backfill ? 0 : g_rjxLastDir;
+   double lastMarkerPrice = backfill ? 0.0 : g_rjxLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_rjxLastMarkerTime;
+
+   for(int i = from; i < n; i++)
+     {
+      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e21[i - 1] == SIG_NA || bbMid[i] == SIG_NA || atr[i] == SIG_NA) continue;
+      bool draw = (i >= drawFrom);
+
+      bool bearTrend = e21[i] < e50[i];
+      bool bullTrend = e21[i] > e50[i];
+      double tol = InpRejTouchATR * atr[i];
+
+      int dir = 0;
+
+      //--- SELL: downtrend, price reached/rejected/broke the 50 recently,
+      //--- THEN broke back below the 21 this bar, THEN closes below BB-mid,
+      //--- AND a stoch down-cross happened within the confirm window
+      if(bearTrend && c[i - 1] >= e21[i - 1] && c[i] < e21[i] && c[i] < bbMid[i])
+        {
+         bool reached50 = false;
+         for(int j = MathMax(0, i - InpRejLookbackBars); j < i; j++)
+            if(h[j] >= e50[j] - tol) { reached50 = true; break; }
+         bool stochConfirm = false;
+         for(int j = MathMax(0, i - InpRejStochWindow); j <= i; j++)
+            if(stCrossDown[j]) { stochConfirm = true; break; }
+         if(reached50 && stochConfirm) dir = -1;
+        }
+      //--- BUY: mirror - uptrend, price reached/rejected/broke the 50 from
+      //--- below recently, THEN broke back above the 21, closes above
+      //--- BB-mid, stoch up-cross within the window
+      else if(bullTrend && c[i - 1] <= e21[i - 1] && c[i] > e21[i] && c[i] > bbMid[i])
+        {
+         bool reached50 = false;
+         for(int j = MathMax(0, i - InpRejLookbackBars); j < i; j++)
+            if(l[j] <= e50[j] + tol) { reached50 = true; break; }
+         bool stochConfirm = false;
+         for(int j = MathMax(0, i - InpRejStochWindow); j <= i; j++)
+            if(stCrossUp[j]) { stochConfirm = true; break; }
+         if(reached50 && stochConfirm) dir = 1;
+        }
+      if(dir == 0) continue;
+      if(dir == lastDir) continue;   // same-direction repeat - don't re-fire until the opposite side happens
+      lastDir = dir;
+
+      if(draw)
+        {
+         bool isBuy = dir > 0;
+         double offEntry = InpRejArrowOffsetATR * atr[i];
+         datetime t = r[i].time;
+         string nm = g_rjx + "arr_" + IntegerToString((long)t);
+         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+         double minGap = InpSigMinMarkerGapATR * atr[i];
+         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+         lastMarkerPrice = entryPrice; lastMarkerTime = t;
+         DrawRejectArrow2(nm, t, entryPrice, isBuy);
+         PrintFormat("RejectSignal2 LOG: %s %s @ %s  E21=%s E50=%s BBmid=%s (unvalidated)",
+                     TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
+                     DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
+                     DoubleToString(e50[i], _Digits), DoubleToString(bbMid[i], _Digits));
+         if(!backfill && InpRejAlert)
+           {
+            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+            FireSigAlert(StringFormat("%s %s: Rejection %s PRINTED (21/50 trend + 50EMA reject + 21EMA break + "
+                                       "BB-mid close + stoch confirm) - UNVALIDATED, chart overlay only",
+                                       _Symbol, tf, isBuy ? "BUY" : "SELL"));
+           }
+        }
+     }
+
+   g_rjxLastDir = lastDir;
+   g_rjxLastProcessedBar = r[n - 1].time;
+   g_rjxLastMarkerPrice = lastMarkerPrice; g_rjxLastMarkerTime = lastMarkerTime;
+  }
+
+void PurgeOldReject2Objects()
+  {
+   datetime cutoff = iTime(_Symbol, PERIOD_CURRENT, 1) - (datetime)((long)InpSigDrawDays * 86400);
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+     {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_rjx) != 0) continue;
+      if((datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, 0) < cutoff) ObjectDelete(0, nm);
+     }
+  }
+
+void ResyncRejectSignals2()
+  {
+   ObjectsDeleteAll(0, g_rjx);
+   g_rjxPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_rjxLastDir = 0;
+   g_rjxLastProcessedBar = 0;
+   g_rjxLastMarkerPrice = 0.0; g_rjxLastMarkerTime = 0;
+   if(InpShowRejectSignals2) ComputeRejectSignals2(true);
+  }
 
 //+------------------------------------------------------------------+
 void SetupMAs()
@@ -2059,6 +2732,9 @@ int OnInit()
    //--- call (same creation-order reasoning as RebuildPanel's own header).
    BackfillOverlayLines();
    ResyncEmaCrossSignals();
+   ResyncStochSignals();
+   ResyncCandleSignals();
+   ResyncRejectSignals2();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -2075,6 +2751,9 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, g_pm);
    ObjectsDeleteAll(0, g_emax);
+   ObjectsDeleteAll(0, g_sig);
+   ObjectsDeleteAll(0, g_cdl);
+   ObjectsDeleteAll(0, g_rjx);
    if(g_maHandle21 != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
@@ -2132,6 +2811,21 @@ void CheckNewBar()
      {
       ComputeEmaCrossSignals(false);
       PurgeOldEmaCrossObjects();
+     }
+   if(InpShowStochSignals)
+     {
+      ComputeStochSignals(false);
+      PurgeOldSigObjects();
+     }
+   if(InpShowCandleSignals)
+     {
+      ComputeCandleSignals(false);
+      PurgeOldCandleObjects();
+     }
+   if(InpShowRejectSignals2)
+     {
+      ComputeRejectSignals2(false);
+      PurgeOldReject2Objects();
      }
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
@@ -2308,6 +3002,9 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       if(g_emaxPeriod != (ENUM_TIMEFRAMES)_Period)
         {
          ResyncEmaCrossSignals();
+         ResyncStochSignals();
+         ResyncCandleSignals();
+         ResyncRejectSignals2();
          if(!g_dragging && !AnyEditFocused()) RebuildPanel();
         }
       return;
