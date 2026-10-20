@@ -19,7 +19,33 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.04"
+#property version   "2.05"
+//--- 2.05: Robustness fix, per direct request ("when i flip between the
+//--- 15min and the 5min the moving averages must show correct for each
+//--- time frame, otherwise we need different tradepanels for each
+//--- timeframe"). Confirmed the normal path (MT5's automatic full
+//--- OnDeinit/OnInit reinit on a timeframe switch) already works
+//--- correctly - the few seconds of delay seen after flipping is just
+//--- BackfillOverlayLines() walking InpMAHistoryBars (2500) bars to
+//--- redraw the whole MA/VWAP history fresh, not a bug. BUT found a real
+//--- latent gap: the CHARTEVENT_CHART_CHANGE backstop (for terminals/
+//--- builds that don't do the automatic full reinit) only resynced the
+//--- signal overlays - the 3 MA handles + the cross-alert ATR handle
+//--- (created once in SetupMAs(), fixed to whatever PERIOD_CURRENT was
+//--- AT THAT TIME - VWAP has no handle, it reads PERIOD_CURRENT prices
+//--- directly every call, so it was already timeframe-correct) and every
+//--- hand-drawn MA/VWAP line were never touched there, so on a terminal
+//--- relying on that fallback path, the MAs would silently keep showing
+//--- the OLD timeframe's values forever after a period switch (VWAP's
+//--- own lines would still go stale too, since nothing wiped them).
+//--- Fixed: that handler now releases/recreates the 4 handles, wipes
+//--- every stale MA/VWAP line, redraws the whole history, and resets
+//--- g_lastBarTime - most of the same work OnInit does on a full reinit
+//--- (not byte-identical - this runs after the panel already exists and
+//--- doesn't touch every OnInit-only step - but functionally equivalent
+//--- for what this gap needed), now reachable from the fallback path too.
+//--- (Opus-reviewed: confirmed no double-release/ordering bug, flagged
+//--- the g_lastBarTime gap and this wording, both fixed here.)
 //--- 2.04: New "Continuation" overlay, per direct request - "signals for
 //--- trend continuation, example where price is overbought and the
 //--- stochastic crosses to go back to oversold near the moving
@@ -3474,12 +3500,30 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       return;
      }
    //--- MT5 normally re-runs OnDeinit/OnInit on a period switch, which already
-   //--- resyncs; this is the backstop for terminals/builds that only raise
-   //--- CHART_CHANGE. The period comparison filters out plain scroll/zoom.
+   //--- resyncs everything via OnInit's own SetupMAs()/BackfillOverlayLines()/
+   //--- Resync*() calls - this is the backstop for terminals/builds that only
+   //--- raise CHART_CHANGE instead. The period comparison filters out plain
+   //--- scroll/zoom. See the v2.05 entry in the version-history comment block
+   //--- at the top of this file for why the MA-handle release/rebuild below
+   //--- was added - this backstop used to resync the signal overlays only.
    if(id == CHARTEVENT_CHART_CHANGE)
      {
       if(g_emaxPeriod != (ENUM_TIMEFRAMES)_Period)
         {
+         if(g_maHandle21  != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
+         if(g_maHandle50  != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
+         if(g_maHandle200 != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
+         if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
+         g_maHandle21 = INVALID_HANDLE; g_maHandle50 = INVALID_HANDLE;
+         g_maHandle200 = INVALID_HANDLE; g_atrHandleCross = INVALID_HANDLE;
+         SetupMAs();
+         ObjectsDeleteAll(0, g_pm);
+         BackfillOverlayLines();
+         g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);   // Opus-review fix: OnInit sets this too -
+                                                               // without it, CheckNewBar's very next call
+                                                               // sees a "new" bar that isn't one (harmless,
+                                                               // just one redundant pass) and can fire
+                                                               // CheckCrossProximity a tick early
          ResyncEmaCrossSignals();
          ResyncStochSignals();
          ResyncCandleSignals();
