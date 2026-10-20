@@ -20,23 +20,31 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| v2.16: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
+//| v2.17: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
-//| attached to any chart whose timeframe isn't M15, per direct       |
-//| request: "i though we agreed to split them one specific for 15   |
-//| and one for 5" - a plain duplicate filename wasn't actually       |
-//| enforcing anything, so this one now hard-refuses the wrong chart  |
-//| instead of silently running wherever it's dropped. The TradePanel_EA_M5.mq5 |
+//| attached to any chart whose timeframe isn't M15. The TradePanel_EA_M5.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.15 base (the repeat-alert fix), so   |
-//| this copy now carries that fix too.                                |
+//| refusal. Rebuilt from the v2.16 base (default push notifications  |
+//| reserved to just the MA gap-close warning and the EMA21/50 cross), |
+//| so this copy carries that too.                                     |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M15
 #property copyright "Marco"
-#property version   "2.16"
-//--- 2.16: Locked copy (M15 only) - see the header block above. Rebuilt from
-//--- v2.15 so this copy carries the repeat-alert fix described below too.
+#property version   "2.17"
+//--- 2.17: Locked copy (M15 only) - see the header block above. Rebuilt from
+//--- v2.16 so this copy carries the default-quieter-notifications change too.
+//--- 2.16: Per direct request, push notifications are now reserved for
+//--- only two things by default: the MA 21/50 gap CLOSING warning
+//--- (InpEnableCrossAlert, unchanged - "when the moving averages are
+//--- closing the gap") and the EMA21/50 cross itself, entry AND exit
+//--- (InpEmaCrossAlert, unchanged - "when they actually cross"). Every
+//--- other overlay's alert input now defaults OFF: InpEmaWeakenAlert,
+//--- InpStochCrossAlert, InpCdlAlert, InpRejAlert, InpRejM15Alert,
+//--- InpContAlert. Nothing about what's DRAWN on the chart changed -
+//--- every overlay's arrows/lines still show exactly as before, this
+//--- only quiets the push notifications. Any of these can be switched
+//--- back on individually from the Inputs dialog if wanted later.
 //--- 2.15: Fixed a real repeat-alert bug across 7 of the 8 signal
 //--- overlays, per report: "the old trade panel still giving me the
 //--- same rejection signal over and over." Every overlay except
@@ -1084,7 +1092,12 @@ input color  InpEmaWeakenCol        = clrGold;
 input double InpEmaWeakenOffsetATR  = 1.6;    // own offset, bigger than entry/exit so it never sits on
                                                // top of either of those markers
 input int    InpEmaWeakenSize       = 2;
-input bool   InpEmaWeakenAlert      = true;   // push notification when this fires
+input bool   InpEmaWeakenAlert      = false;  // v2.16: default OFF per direct request - "only give me
+                                               // notification push when the moving averages are closing
+                                               // the gap and when they actually cross, no push
+                                               // notifications for the other signals" - weakening is
+                                               // neither of those (not a gap-closing warning, not a
+                                               // cross), so it's chart-only now. Turn back on if wanted.
 
 input group "=== Stochastic cross signal overlay (re-added by request, v2.02) - UNVALIDATED - VISUAL ONLY, never places/modifies/closes anything ==="
 input bool   InpShowStochSignals   = true;
@@ -1118,7 +1131,9 @@ input color  InpStochTPCol         = C'0,255,0';
 input int    InpStochArrowSize     = 2;   // v2.08: standardized - was 1 (thin enough to look like a dot)
 input int    InpStochLineBars      = 8;
 input double InpStochArrowOffsetATR = 0.5;
-input bool   InpStochCrossAlert    = true;    // push notification when the cross-in-zone signal prints
+input bool   InpStochCrossAlert    = false;   // v2.16: default OFF per direct request - push notifications
+                                               // now reserved for the MA gap-closing warning and the
+                                               // EMA21/50 cross itself only. Chart arrows still show.
 
 input group "=== Candlestick engulfing signal overlay (re-added by request, v2.02) - validated on GOLD ONLY (p=0.0010) - Silver/BTC NOT real (p=0.8511/0.5564) - VISUAL ONLY ==="
 input bool   InpShowCandleSignals  = true;
@@ -1133,7 +1148,7 @@ input color  InpCdlTPCol           = clrYellow;
 input double InpCdlArrowOffsetATR  = 1.0;
 input int    InpCdlArrowSize       = 2;   // v2.08: standardized - was 1 (thin enough to look like a dot)
 input int    InpCdlLineBars        = 8;
-input bool   InpCdlAlert           = true;
+input bool   InpCdlAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 
 input group "=== Rejection signal overlay (NEW, v2.02, per direct request) - UNVALIDATED (not yet back-tested) - VISUAL ONLY - works on whatever timeframe the chart/panel is attached to (M5, M15, or any other) ==="
 input bool   InpShowRejectSignals2 = true;    // trend (21 vs 50) + price reaches/rejects/breaks the 50 +
@@ -1163,7 +1178,7 @@ input color  InpRejBuyCol          = clrSpringGreen;
 input color  InpRejSellCol         = clrOrchid;
 input int    InpRejArrowSize       = 2;
 input double InpRejArrowOffsetATR  = 1.3;     // own offset, distinct from every other overlay's markers
-input bool   InpRejAlert           = true;
+input bool   InpRejAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 
 input group "=== Rejection signal - separate M15 overlay (NEW, v2.03, per direct request) - ALWAYS computed on M15 bars regardless of what timeframe the chart itself is on - same 5 conditions, own label/colour so it's never confused with the chart-timeframe Rejection signal above ==="
 input bool   InpShowRejectSignalsM15 = true;  // shows on an M5 chart too - this one always reads M15 data,
@@ -1173,7 +1188,7 @@ input color  InpRejM15BuyCol       = clrDeepSkyBlue;
 input color  InpRejM15SellCol      = clrHotPink;
 input int    InpRejM15ArrowSize    = 2;
 input double InpRejM15ArrowOffsetATR = 1.3;
-input bool   InpRejM15Alert        = true;
+input bool   InpRejM15Alert        = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 
 input group "=== Trend-continuation signal overlay (NEW, v2.04, per direct request) - UNVALIDATED (tested net loser, p=0.52 vs random on both M5/M15 - shown anyway as a visual aid, same as the overlays above) - VISUAL ONLY ==="
 input bool   InpShowContSignals    = true;    // trend (21 vs 50) + price pulled back near the 21EMA +
@@ -1196,7 +1211,7 @@ input color  InpContTPCol          = C'0,255,0';
 input int    InpContArrowSize      = 2;
 input double InpContArrowOffsetATR = 1.3;
 input int    InpContLineBars       = 8;
-input bool   InpContAlert          = true;
+input bool   InpContAlert          = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 input int    InpContCooldownBars   = 8;       // v2.07 FIX: minimum bars between two SAME-DIRECTION
                                                // Continuation markers - replaces a bug where the overlay
                                                // only ever fired ONCE per trend, then silently suppressed
