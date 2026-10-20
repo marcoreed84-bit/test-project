@@ -20,14 +20,20 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| Intended for: attach to an M15 chart only (one instance per      |
-//| timeframe - see the v2.14 changelog below for why). Identical    |
-//| code to the other copy; the panel's own title bar shows the      |
-//| timeframe it actually ends up running on, read live from the     |
-//| chart, not from this filename.                                    |
+//| v2.15: LOCKED to M15 - this is the M15-only copy of TradePanel_EA. |
+//| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
+//| attached to any chart whose timeframe isn't M15, per direct       |
+//| request: "i though we agreed to split them one specific for 15   |
+//| and one for 5" - a plain duplicate filename wasn't actually       |
+//| enforcing anything, so this one now hard-refuses the wrong chart  |
+//| instead of silently running wherever it's dropped. The M5         |
+//| sibling (TradePanel_EA_M5.mq5) is identical except for this one   |
+//| constant - EXPECTED_PERIOD - and its own symmetric version of     |
+//| this same refusal.                                                 |
 //+------------------------------------------------------------------+
+#define EXPECTED_PERIOD PERIOD_M15
 #property copyright "Marco"
-#property version   "2.14"
+#property version   "2.15"
 //--- 2.14: Opus's object-count/rendering-lag audit, dispatched after
 //--- repeated reports of signals printing much later than they should
 //--- and "rejection signals and nothing on the chart". MEASURED FIRST
@@ -909,16 +915,17 @@
 #include <Trade/Trade.mqh>
 
 input group "=== Trade buttons ==="
-input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens -
-                                                  // stats/close/SL-TP are always scoped to this magic only.
-                                                  // Leave at 0 to auto-derive a DIFFERENT magic per symbol+
-                                                  // timeframe (per direct request, for running two separate
-                                                  // panel instances - one on an M5 chart, one on an M15
-                                                  // chart - without them managing each other's trades) -
-                                                  // see g_effectiveMagic/OnInit. The non-zero default above
-                                                  // is kept EXACTLY as before for backward compatibility -
-                                                  // nothing changes for an existing single-panel setup
-                                                  // unless you deliberately set this to 0.
+input int    InpMagic              = 0;          // v2.15 (Opus-reviewed fix): THIS LOCKED COPY defaults to
+                                                  // 0 ("auto"), not the old fixed 20261014 - that old default
+                                                  // was the same non-zero number in BOTH the M5 and M15
+                                                  // locked files, which would have meant the two panels
+                                                  // silently managed each other's trades even though the
+                                                  // timeframe lock above stops either from attaching to the
+                                                  // wrong chart. 0 auto-derives a magic from _Period (see
+                                                  // g_effectiveMagic/OnInit) so the two locked copies get
+                                                  // DIFFERENT magics by default, with no setup needed. Set a
+                                                  // non-zero value here only if you want this panel to share
+                                                  // a magic with something else on purpose.
 input int    InpArmSeconds         = 60;         // ARM auto-expires after this many seconds unused -
                                                   // starting value only, adjustable live from the panel
                                                   // itself now (Arm delay row) via g_armSeconds
@@ -3729,6 +3736,20 @@ void RebuildPanel()
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   //--- v2.15: hard refusal - this copy is locked to EXPECTED_PERIOD.
+   //--- Checked first, before anything else sets up, so a wrong-chart
+   //--- attach never creates handles/objects/a panel at all - just one
+   //--- Alert() and a clean failure, not a half-initialized EA sitting
+   //--- on the wrong timeframe doing nothing useful.
+   if((ENUM_TIMEFRAMES)_Period != EXPECTED_PERIOD)
+     {
+      string wantTf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)EXPECTED_PERIOD), 7);
+      string gotTf  = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+      Alert("TradePanel_EA_M15: this copy only runs on " + wantTf + " charts - attached to " + gotTf +
+            " instead. Remove it and use TradePanel_EA_M5.mq5 (or plain TradePanel_EA.mq5) on this chart.");
+      return(INIT_FAILED);
+     }
+
    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
 
    //--- v2.13 (Opus-reviewed, a real bug found in the first v2.12 cut and
