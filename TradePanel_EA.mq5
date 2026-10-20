@@ -19,7 +19,37 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.09"
+#property version   "2.10"
+//--- 2.10: Two fixes, per a real Experts-log excerpt the user pasted
+//--- after v2.09 still didn't fix the MA staleness.
+//--- (1) Found a genuine, longstanding format-string bug while reading
+//--- that log: EmaCrossSignal's ENTRY and EXIT Print lines each had 6
+//--- %s/%d placeholders but only 5 arguments (the actual price was
+//--- missing from both) - MQL5's own fallback for a placeholder with no
+//--- matching argument is the literal text "(non-string passed)",
+//--- exactly what showed up as "E50=(non-string passed)" in the user's
+//--- log. Fixed both lines - price is now included, every other value
+//--- shifts back to its correct placeholder. Checked every other
+//--- overlay's own Print line (RejectSignal2/RejectSignalM15/ContSignal/
+//--- EmaWeakenSignal) - all of those already had the right count.
+//--- (2) The real reason the MA lines were still stuck: v2.09's
+//--- MAHistoryReady() gate made the post-switch backfill wait for the
+//--- new MA handles to report calculated data before drawing anything -
+//--- but a real-world MT5 quirk is that BarsCalculated() on a handle for
+//--- a timeframe that hasn't been recently viewed can stay stuck at -1
+//--- for a long time, sometimes indefinitely, if history for that
+//--- symbol/timeframe isn't cached yet. Since step 1 already wipes the
+//--- old lines immediately on a switch, a gate that never opens meant
+//--- the chart was left with NOTHING drawn, forever - "still doing the
+//--- same thing" was this, not the original jagged-old-data symptom.
+//--- Fixed: SyncMAOverlays() no longer waits for permission to draw -
+//--- it draws on the very next check after a switch, whether or not the
+//--- handles are fully ready yet (an early attempt just means a few of
+//--- the most recent bars are briefly missing, which is harmless and
+//--- self-heals), then keeps retrying every ~2s (throttled, can't flash)
+//--- until the handles genuinely do report ready, or 15s pass and it
+//--- accepts whatever it has. Guaranteed to converge either way - never
+//--- stuck waiting on a condition that might not arrive.
 //--- 2.09: Fixed BOTH timeframe-switch bugs reported after v2.06 - "on
 //--- the 15min i see the 5min data moving averages, sometimes it flips
 //--- correct after a while other times it stays like this", then "now
@@ -1056,6 +1086,7 @@ ENUM_TIMEFRAMES g_maPeriod = PERIOD_CURRENT;
 //--- step, set false only by its backfill step.
 bool     g_maBackfillPending = false;
 ulong    g_maPendingSinceMs  = 0;
+ulong    g_maLastBackfillAttemptMs = 0;   // v2.10: throttles retries to at most once per ~2s
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
@@ -1989,7 +2020,8 @@ void ComputeEmaCrossSignals(const bool backfill)
             DrawEmaCrossDot(exId, t, dotPrice, wasLong);
             PrintFormat("EmaCrossSignal LOG: %s EXIT-%s @ %s  E21=%s E50=%s (closing posDir %d -> 0)",
                         TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                        DoubleToString(e21[i], _Digits), DoubleToString(e50[i], _Digits), prevPosDir);
+                        DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
+                        DoubleToString(e50[i], _Digits), prevPosDir);
             if(!backfill && InpEmaCrossAlert)
               {
                string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -2062,7 +2094,8 @@ void ComputeEmaCrossSignals(const bool backfill)
                             "EMA-cross TP: 1:" + DoubleToString(InpEmaCrossRR, 1) + " R:R example (reference only, not the validated exit)");
                PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
                            TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                           DoubleToString(e21[i], _Digits), DoubleToString(e50[i], _Digits), posDir);
+                           DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
+                           DoubleToString(e50[i], _Digits), posDir);
                if(!backfill && InpEmaCrossAlert)
                  {
                   string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -3223,6 +3256,7 @@ bool SyncMAOverlays()
       ObjectsDeleteAll(0, g_pm);          // old timeframe's lines go NOW, never left behind
       g_maBackfillPending = true;
       g_maPendingSinceMs  = GetTickCount64();
+      g_maLastBackfillAttemptMs = 0;   // force the very next SyncMAOverlays() call to draw immediately
       g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
       //--- the 5 overlays that read the chart's own timeframe (Rejection
       //--- M15 always reads M15, so it doesn't need this)
@@ -3233,12 +3267,35 @@ bool SyncMAOverlays()
       ResyncContSignals();
       changed = true;
      }
-   if(g_maBackfillPending && MAHistoryReady())
+   //--- v2.10: NEVER wait forever on MAHistoryReady(). Real-world MT5 can
+   //--- leave a just-created handle's BarsCalculated() stuck at -1 for a
+   //--- long time (or permanently) if history for this symbol/timeframe
+   //--- hasn't been downloaded/cached yet - the old gate ("backfill runs
+   //--- ONLY once MAHistoryReady() is true") could then never fire at
+   //--- all, leaving the chart with the old lines already wiped (step 1
+   //--- above) and nothing ever drawn to replace them - permanently
+   //--- blank/stuck, reported as "still doing the same thing". Now:
+   //--- draw SOMETHING as soon as a retry is due (every ~2s, so this
+   //--- can't flash/spam), whether or not the handles are fully ready -
+   //--- a too-early attempt just means some recent bars are briefly
+   //--- missing (MAValue() skips what it can't read yet, harmlessly),
+   //--- corrected by the NEXT retry a couple seconds later. Keeps
+   //--- retrying until MAHistoryReady() genuinely is true, or 15s have
+   //--- passed (then it accepts whatever it has and stops) - either way,
+   //--- this is now guaranteed to converge, never stuck indefinitely.
+   if(g_maBackfillPending)
      {
-      g_maBackfillPending = false;
-      ObjectsDeleteAll(0, g_pm);          // also clears any segment drawn while waiting
-      BackfillOverlayLines();
-      changed = true;
+      bool ready = MAHistoryReady();
+      bool hardCap = (GetTickCount64() - g_maPendingSinceMs) >= 15000;
+      bool dueForRetry = (GetTickCount64() - g_maLastBackfillAttemptMs) >= 2000;
+      if(ready || hardCap || dueForRetry)
+        {
+         ObjectsDeleteAll(0, g_pm);          // also clears any segment drawn while waiting
+         BackfillOverlayLines();
+         g_maLastBackfillAttemptMs = GetTickCount64();
+         changed = true;
+         if(ready || hardCap) g_maBackfillPending = false;   // otherwise keep retrying
+        }
      }
    return(changed);
   }
