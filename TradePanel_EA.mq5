@@ -1762,7 +1762,7 @@ void DrawSegment(const string tag, const datetime tOld, const double vOld,
   }
 
 //+------------------------------------------------------------------+
-//| v2.13: ONE pass over the chart's objects that drops BOTH expired   |
+//| v2.14: ONE pass over the chart's objects that drops BOTH expired   |
 //| MA/VWAP segments AND expired signal-overlay objects. Replaces       |
 //| PurgeOldSegments() plus six separate PurgeOld*Objects() functions   |
 //| (one per signal overlay) that EACH walked every object on the chart |
@@ -1841,7 +1841,7 @@ void UpdateOverlayLines()
       double vA = SessionVWAP(2), vB = SessionVWAP(1);
       if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP, InpVwapLineWidth);
      }
-   //--- v2.13: the old-segment purge that used to run here (a full scan of
+   //--- v2.14: the old-segment purge that used to run here (a full scan of
    //--- every trend object on the chart, every bar, BEFORE any signal was
    //--- computed) now lives in HousekeepOldObjects(), run from
    //--- CheckNewBar() after the chart has already been redrawn.
@@ -1954,7 +1954,7 @@ double NudgeAwayFromLastMarker(double candidatePrice, datetime candidateTime, bo
   }
 
 //+------------------------------------------------------------------+
-//| v2.13: cross-OVERLAY de-overlap. NudgeAwayFromLastMarker() above   |
+//| v2.14: cross-OVERLAY de-overlap. NudgeAwayFromLastMarker() above   |
 //| only ever compares a new marker with the SAME overlay's previous   |
 //| marker - two DIFFERENT overlays firing on the same candle, same    |
 //| side, at the same ATR offset land on exactly the same pixel, and   |
@@ -2381,7 +2381,7 @@ void ComputeEmaCrossSignals(const bool backfill)
    g_emaxPendingDir = pendingDir; g_emaxPendingBarsElapsed = pendingBarsElapsed;
   }
 
-//--- v2.13: the EMA-cross overlay's own rolling-cap purge
+//--- v2.14: the EMA-cross overlay's own rolling-cap purge
 //--- (PurgeOldEmaCrossObjects) is now part of HousekeepOldObjects().
 
 //+------------------------------------------------------------------+
@@ -3864,7 +3864,7 @@ void CheckNewBar()
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
    UpdateOverlayLines();
-   //--- v2.13: compute + draw every overlay FIRST, with no purge scans in
+   //--- v2.14: compute + draw every overlay FIRST, with no purge scans in
    //--- between - each overlay used to be followed by its own full-chart
    //--- purge scan, so a Rejection/Continuation arrow (computed late in
    //--- this list) waited behind ~5 of those scans before it was even
@@ -3899,7 +3899,7 @@ void CheckNewBar()
    //--- tick, not every 2s) - cheap, not the blanket per-timer redraw
    //--- that was deliberately removed below for performance.
    ChartRedraw(0);
-   //--- v2.13: housekeeping LAST, after this bar's arrows are already on
+   //--- v2.14: housekeeping LAST, after this bar's arrows are already on
    //--- screen, and at most once per hour of bar time (every 12th bar on
    //--- M5, every 4th on M15, every bar on H1 and above). Effect of the
    //--- throttle on what you see: none - between runs, at most ~11 extra
@@ -3927,7 +3927,7 @@ void OnTick()
    //--- tick here keeps TradePanel's chart winning that fight regardless
    //--- of EA load order, without having to touch the other EAs (which
    //--- still default it off correctly for their own solo-chart case).
-   //--- v2.13: only WRITE it when it actually differs. Writing it
+   //--- v2.14: only WRITE it when it actually differs. Writing it
    //--- unconditionally on every tick was itself a chart-property change
    //--- per tick - which (see the v2.09 notes) MT5 answers with a
    //--- CHARTEVENT_CHART_CHANGE event each time, i.e. a stream of
