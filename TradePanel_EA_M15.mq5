@@ -21,19 +21,42 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 //+------------------------------------------------------------------+
-//| v2.22: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
+//| v2.23: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
 //| attached to any chart whose timeframe isn't M15. The TradePanel_EA_M5.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.22 base (smaller/spaced arrows,      |
-//| regenerated distinct colours, MA-avoidance nudge), so this copy    |
-//| carries all of that too.                                           |
+//| refusal. Rebuilt from the v2.23 base (panel button fix, capped     |
+//| Divergence/BB backfill), so this copy carries all of that too.    |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M15
-#property version   "2.22"
-//--- 2.22: Locked copy (M15 only) - see header block above. Rebuilt from
-//--- v2.22 (arrows, colours, MA-avoidance) so this copy carries all of that too.
+#property version   "2.23"
+//--- 2.23: Locked copy (M15 only) - see header block above. Rebuilt from
+//--- v2.23 (panel button fix, capped Divergence/BB backfill) so this copy carries that too.
+//--- 2.22: Several changes, all per direct request. (1) Every entry-
+//--- arrow's WIDTH reduced from 2 to 1 ("smaller"). (2) Every entry-
+//--- arrow's offset-from-candle increased ("spaced away from candles") -
+//--- e.g. InpEmaCrossArrowOffsetATR 1.0->1.6, InpStochArrowOffsetATR
+//--- 0.5->1.1, the rest (Cdl/Rej/RejM15/Div/BB/Fvg/Liq) 1.3->1.9. (3)
+//--- Every one of the 20 entry-arrow buy/sell colours (10 overlay kinds
+//--- x buy/sell) regenerated algorithmically (even hue spacing - buys
+//--- across the green->violet "cool" arc, sells across the magenta->red
+//--- ->yellow "warm" arc) rather than picked by eye - the previous
+//--- v2.20 pass eliminated exact duplicates but left several pairs that
+//--- were still visually near-identical (e.g. EmaCross Sell vs
+//--- Divergence Hidden Sell, Lime vs Chartreuse) - "i see some arrows
+//--- for different signals are still the same colours". (4) New
+//--- NudgeClearOfMALine() - per "make sure the dont print over of
+//--- indicators, like the moving averages" - pushes a marker clear of
+//--- the live 21/50 EMA value at that bar, same one-directional-only
+//--- convention as the existing NudgeAwayFromLastMarker/
+//--- NudgeClearOfOtherOverlays. Wired into the 6 overlays that already
+//--- compute e21/e50 locally (EmaCross, Engulfing, Rejection, Rejection
+//--- M15, Divergence regular+hidden) - Stoch/BB/FVG/Liquidity don't
+//--- currently compute e21/e50 and were left out of this pass, a known
+//--- gap. The panel-button-unresponsiveness and remaining-lag reports
+//--- are being investigated separately (background Opus review) - not
+//--- addressed in this version.
 //--- 2.21: Opus-reviewed (per direct request, "i dont want anymore
 //--- issues") - found and fixed the ROOT CAUSE of "panel windows are
 //--- missing, the moving averages and vwap are also now not visible,
@@ -1388,7 +1411,11 @@ input bool   InpShowFVG            = true;    // lightly-shaded zone (not a soli
                                                // fully closed through (invalidated) or because it just gave
                                                // its one rejection signal (spent)
 input int    InpFvgMaxZones        = 15;      // hard cap on how many FVG zones can be tracked/drawn at once
-input int    InpFvgMaxAgeDays      = 10;      // an unfilled, untouched zone older than this is dropped too -
+input int    InpFvgMaxAgeDays      = 7;       // v2.23: matches InpSigDrawDays' default - per direct request
+                                               // ("limit history to a week... as it moves to the next day the
+                                               // oldest days signals are removed"), every overlay now rolls on
+                                               // the same ~weekly window by default. An unfilled, untouched
+                                               // zone older than this is dropped too -
                                                // keeps the chart from accumulating zones from weeks ago
 input int    InpFvgSwingBars       = 10;      // SL reference = N-bar swing low/high at the trigger bar
 input double InpFvgRR              = 2.0;
@@ -1421,7 +1448,7 @@ input double InpLiqTolATR          = 0.15;    // two swing points within this ma
 input int    InpLiqLookbackBars    = 150;     // the two swing points being compared can't be more than
                                                // this many bars apart - otherwise it's not the same pool
 input int    InpLiqMaxZones        = 15;
-input int    InpLiqMaxAgeDays      = 10;
+input int    InpLiqMaxAgeDays      = 7;       // v2.23: matches InpSigDrawDays' default - see InpFvgMaxAgeDays' own comment
 input int    InpLiqSwingBars       = 10;
 input double InpLiqRR              = 2.0;
 input color  InpLiqBullCol         = C'0,50,60';   // equal lows (support/buy-side liquidity)
@@ -1617,6 +1644,21 @@ ulong g_lastDragUpdateMs = 0;   // throttle - see the mouse-move handler
 struct Ctrl { string name; int dx; int dy; };
 Ctrl g_ctrls[];
 int  g_nCtrls = 0;
+
+//+------------------------------------------------------------------+
+//| True while the user is actively typing in any of this panel's     |
+//| edit boxes. Previously checked OBJPROP_SELECTED, which depends on |
+//| OBJPROP_SELECTABLE being true on the edit object - but SELECTABLE |
+//| has to be FALSE for an OBJ_EDIT to enter text-edit mode on click  |
+//| at all (true just selects/drags it instead). So this is now a     |
+//| plain flag, set true on CHARTEVENT_OBJECT_CLICK for one of these  |
+//| boxes and cleared on CHARTEVENT_OBJECT_ENDEDIT - both of which    |
+//| fire regardless of SELECTABLE.                                    |
+//| v2.23: moved up here (was declared AFTER OnInit(), which needs to  |
+//| reset it on reinit - MQL5 requires a global declared before any    |
+//| function that references it, textually).                           |
+//+------------------------------------------------------------------+
+bool g_editFocused = false;
 
 //+------------------------------------------------------------------+
 void AddCtrl(string name, int dx, int dy)
@@ -3663,7 +3705,16 @@ void ComputeDivSignals(const bool backfill)
    int w = InpDivPivotWindow;
    int minBars = InpStochKPeriod + InpStochSlowing + InpStochDPeriod + 2 * w + 10;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.23 FIX (Opus-found): this overlay is new this session and was
+   //--- never given the same backfill cap as the older overlays always
+   //--- relied on being cheap enough uncapped - unlike those, Divergence
+   //--- has no reason to scan the ENTIRE chart history just to find the
+   //--- single most recent pivot of each type leading into the draw
+   //--- window. Capped to roughly the draw window plus enough warm-up
+   //--- for the pivot-gap tolerance, shrinking the attach-time stall.
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + InpDivMaxPivotGapBars + 50)
+                        : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -3887,7 +3938,11 @@ void ComputeBBSignals(const bool backfill)
   {
    int minBars = InpBBPeriod + InpBBReentryLookback + InpBBSwingBars + 10;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.23 FIX (Opus-found): same reasoning as ComputeDivSignals' own
+   //--- comment - new this session, never capped, no need to scan the
+   //--- entire chart history for a Bollinger re-entry signal
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 50) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -4162,7 +4217,15 @@ void ComputeFvgSignals(const bool backfill)
                if(draw)
                  {
                   double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpFvgArrowOffsetATR * atr[i];
-                  string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
+                  //--- v2.23 FIX (Opus-found): was id = t_i + "_" + zi (the zone's
+                  //--- ARRAY INDEX) - CompactZones() reshuffles indices every call,
+                  //--- so the same zone's signal could get a different id on a
+                  //--- replay (resync, or the "no new bar found" fallback that
+                  //--- reprocesses ~500 bars), producing a duplicate arrow/SL/alert
+                  //--- instead of being recognised as already-drawn. g_fvgZones[zi]
+                  //--- .rectName is derived from the zone's own formation time, not
+                  //--- its position, so it's stable across compaction.
+                  string id = g_fvgZones[zi].rectName + "_" + IntegerToString((long)t_i);
                   string nm = g_fvgSig + "arr_" + id;
                   double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
                   double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
@@ -4323,7 +4386,10 @@ void ComputeLiquiditySignals(const bool backfill)
                if(draw)
                  {
                   double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpLiqArrowOffsetATR * atr[i];
-                  string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
+                  //--- v2.23 FIX (Opus-found) - same reasoning as the FVG overlay's
+                  //--- own comment: rectName is stable across CompactZones(), the
+                  //--- array index zi is not.
+                  string id = g_liqZones[zi].rectName + "_" + IntegerToString((long)t_i);
                   string nm = g_liqSig + "arr_" + id;
                   double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
                   double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
@@ -4900,6 +4966,24 @@ int OnInit()
    //--- panel, so it can't bury it) - otherwise the backfill is left
    //--- pending and OnTick/OnTimer finish it within ~2s, then rebuild the
    //--- panel on top.
+   //--- v2.23 FIX (Opus-found): g_nCtrls/g_ctrls[] are never reset here -
+   //--- MT5 keeps global variables across a reinit (same reasoning as
+   //--- g_maPeriod just above), but BuildPanel() below calls AddCtrl()
+   //--- unconditionally, appending to whatever g_ctrls[] the PREVIOUS
+   //--- compile left behind rather than starting clean. Every single
+   //--- recompile this session has been accumulating stale/duplicate
+   //--- control entries - DragPanel()'s loop over g_nCtrls would then
+   //--- move each duplicated widget multiple times per drag, which is
+   //--- exactly the kind of thing that would make the panel feel broken
+   //--- (jumpy or inconsistent dragging) after a lot of testing/recompiling.
+   g_nCtrls = 0;
+   ArrayResize(g_ctrls, 0);
+   //--- v2.23 FIX (Opus-found): same reasoning - if an edit box's
+   //--- ENDEDIT event never arrived (EA removed/crashed mid-typing),
+   //--- this could stay stuck true across a reinit, silently skipping
+   //--- every per-bar panel rebuild from then on (see AnyEditFocused()'s
+   //--- own use further down) - as if the panel had frozen.
+   g_editFocused = false;
    g_maPeriod = PERIOD_CURRENT;
    SyncMAOverlays();
    ResyncRejectSignalsM15();
@@ -4934,18 +5018,6 @@ void OnDeinit(const int reason)
    g_maBackfillPending = false;
    g_maInitialDrawDone = false;
   }
-
-//+------------------------------------------------------------------+
-//| True while the user is actively typing in any of this panel's     |
-//| edit boxes. Previously checked OBJPROP_SELECTED, which depends on |
-//| OBJPROP_SELECTABLE being true on the edit object - but SELECTABLE |
-//| has to be FALSE for an OBJ_EDIT to enter text-edit mode on click  |
-//| at all (true just selects/drags it instead). So this is now a     |
-//| plain flag, set true on CHARTEVENT_OBJECT_CLICK for one of these  |
-//| boxes and cleared on CHARTEVENT_OBJECT_ENDEDIT - both of which    |
-//| fire regardless of SELECTABLE.                                    |
-//+------------------------------------------------------------------+
-bool g_editFocused = false;
 
 bool AnyEditFocused()
   {
@@ -5238,12 +5310,18 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       return;
      }
    if(sparam == PFX + "delayEdit") { SyncArmSecondsFromEdit(); ChartRedraw(0); return; }
-   if(sparam == PFX + "lotMinus") { AdjustLot(-SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
-   if(sparam == PFX + "lotPlus")  { AdjustLot(+SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
-   if(sparam == PFX + "cntMinus") { AdjustCount(-1); ChartRedraw(0); return; }
-   if(sparam == PFX + "cntPlus")  { AdjustCount(+1); ChartRedraw(0); return; }
-   if(sparam == PFX + "delayMinus") { AdjustArmSeconds(-1); ChartRedraw(0); return; }
-   if(sparam == PFX + "delayPlus")  { AdjustArmSeconds(+1); ChartRedraw(0); return; }
+   //--- v2.23 FIX (Opus-found): these 6 stepper buttons never reset
+   //--- OBJPROP_STATE after handling the click, unlike every other
+   //--- button on the panel - the action DID run each time, but the
+   //--- button stayed drawn in its pressed state until the NEXT click
+   //--- popped it back up, which reads as "the +/- buttons aren't
+   //--- working" even though they were.
+   if(sparam == PFX + "lotMinus") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustLot(-SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
+   if(sparam == PFX + "lotPlus")  { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustLot(+SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
+   if(sparam == PFX + "cntMinus") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustCount(-1); ChartRedraw(0); return; }
+   if(sparam == PFX + "cntPlus")  { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustCount(+1); ChartRedraw(0); return; }
+   if(sparam == PFX + "delayMinus") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustArmSeconds(-1); ChartRedraw(0); return; }
+   if(sparam == PFX + "delayPlus")  { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustArmSeconds(+1); ChartRedraw(0); return; }
    if(sparam == PFX + "armBtn")
      {
       SetArmed(!g_armed);
