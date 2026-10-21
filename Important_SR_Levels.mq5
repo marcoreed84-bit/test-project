@@ -45,7 +45,26 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.05"
+#property version   "1.06"
+//--- 1.06: User reported (with a chart screenshot) that levels only ever
+//--- appeared well ABOVE and well BELOW the price band the market had
+//--- actually been trading in for days, with a visible gap of NO levels
+//--- exactly where price currently is. Real design flaw, not a bug in
+//--- the strict sense: eviction always drops the least-touched level,
+//--- and every brand-new pivot starts at touches=1 - so during an
+//--- active chop, each fresh intraday swing creates a new 1-touch level
+//--- that is immediately the weakest thing in the array and gets evicted
+//--- by older levels elsewhere in the lookback window that already
+//--- reached 2+ touches, before the current zone's level ever got a
+//--- SECOND touch to clear InpMinTouchesToShow and actually get drawn.
+//--- Net effect: only old, already-proven levels survive long-term,
+//--- systematically starving out wherever price is RIGHT NOW. Fixed:
+//--- new InpRecentProtectDays (default 14) - a level formed within this
+//--- many days of the newest bar can never be evicted, however few
+//--- touches it has, giving it time to actually prove itself before
+//--- being judged against older, more-tested levels. Falls back to
+//--- unprotected least-touched eviction only if literally every level in
+//--- the array happens to be recent (so the cap still can't be exceeded).
 //--- 1.05: User reported "40 levels found" in the journal but still zero
 //--- visible lines on the chart, and changing the colour inputs made no
 //--- difference at all - a strong sign the lines never actually existed
@@ -149,6 +168,16 @@ input int      InpLookbackDays     = 730;   // v1.03 FIX: only pivots from the l
                                              // relevant levels. 730 days (~2 years) keeps the level list
                                              // anchored to BTC's current price regime instead of its entire
                                              // multi-order-of-magnitude price history.
+input int      InpRecentProtectDays = 14;   // v1.06 FIX: a level formed within this many days of the newest
+                                             // bar can NEVER be evicted, however few touches it has. Without
+                                             // this, every brand-new pivot starts at touches=1 and is
+                                             // immediate eviction-bait against older levels elsewhere in the
+                                             // lookback window that already reached 2+ touches - so the price
+                                             // zone the market is ACTUALLY in right now could be evicted
+                                             // before it ever got the chance to accumulate a second touch,
+                                             // leaving nothing but old, already-proven levels on screen and a
+                                             // visible gap exactly where price has been trading for days. Set
+                                             // to 0 to disable (go back to pure least-touched eviction).
 
 input group "=== Display ==="
 input color    InpSupportColor     = clrLime;
@@ -379,7 +408,8 @@ int FindNearbyLevelG(SRLevel &levels[], const double price, const bool isSupport
 //+------------------------------------------------------------------+
 void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, const bool isSupport,
                      const double minDistance, const string prefix, const int maxLevels,
-                     const int minTouchesToShow, const color supCol, const color resCol)
+                     const int minTouchesToShow, const color supCol, const color resCol,
+                     const datetime recentCutoff)
   {
    int idx = FindNearbyLevelG(levels, price, isSupport, minDistance);
    if(idx >= 0)
@@ -399,11 +429,26 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
    int n = ArraySize(levels);
    if(n >= maxLevels)
      {
-      //--- drop the least-touched existing level to make room - keeps
-      //--- the most-respected levels, not just whatever is newest
-      int weakest = 0;
-      for(int k = 1; k < n; k++)
-         if(levels[k].touches < levels[weakest].touches) weakest = k;
+      //--- v1.06 FIX: drop the least-touched level, but NEVER one formed
+      //--- within the last InpRecentProtectDays - that's what used to let
+      //--- a current price zone get evicted while it still only had 1
+      //--- touch, before it ever had a chance to prove itself. Only look
+      //--- among levels older than the protection window; if literally
+      //--- every level happens to be recent (e.g. indicator just
+      //--- attached), fall back to evicting the least-touched regardless,
+      //--- so the array can't grow past maxLevels forever.
+      int weakest = -1;
+      for(int k = 0; k < n; k++)
+        {
+         if(recentCutoff != 0 && levels[k].firstTime >= recentCutoff) continue;
+         if(weakest < 0 || levels[k].touches < levels[weakest].touches) weakest = k;
+        }
+      if(weakest < 0)
+        {
+         weakest = 0;
+         for(int k = 1; k < n; k++)
+            if(levels[k].touches < levels[weakest].touches) weakest = k;
+        }
       ObjectDelete(0, levels[weakest].lineName);
       ObjectDelete(0, levels[weakest].labelName);
       levels[weakest] = levels[n - 1];
@@ -452,6 +497,7 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
    ArrayResize(levels, 0);
 
    datetime cutoffTime = (InpDWLookbackDays > 0) ? (rates[maxI].time - (datetime)((long)InpDWLookbackDays * 86400)) : 0;
+   datetime recentCutoff = (InpRecentProtectDays > 0) ? (rates[maxI].time - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, false);
@@ -472,9 +518,9 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
          if(!isPeak && !isTrough) break;
         }
       if(isPeak)         RegisterTouchG(levels, rates[i].time, rates[i].high, false, minDistance, prefix,
-                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol);
+                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol, recentCutoff);
       else if(isTrough)  RegisterTouchG(levels, rates[i].time, rates[i].low,  true,  minDistance, prefix,
-                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol);
+                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol, recentCutoff);
      }
 
    int visible = 0;
@@ -534,6 +580,7 @@ int OnCalculate(const int rates_total,
 
    //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
    datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
+   datetime recentCutoff = (InpRecentProtectDays > 0) ? (time[maxI] - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
 
    //--- v1.01 FIX #4: read ATR PER BAR, not one current value applied
    //--- to all of history - only the slice actually needed this call.
@@ -568,9 +615,9 @@ int OnCalculate(const int rates_total,
          if(!isPeak && !isTrough) break;
         }
       if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
-                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor);
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
       else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
-                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor);
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
      }
 
    if(InpShowDailyLevels)
