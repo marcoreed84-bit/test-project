@@ -45,7 +45,26 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.03"
+#property version   "1.04"
+//--- 1.04: Added a SECOND, independent layer of levels built from DAILY
+//--- and WEEKLY bars directly (via CopyRates(_Symbol, PERIOD_D1/W1, ...)),
+//--- not just fractals on whatever timeframe the chart happens to be on.
+//--- Per direct request: "we would need more recent support and
+//--- resistance as well, there should be daily support and resistance
+//--- levels, weekly?" - the original scan only ever sees pivots on the
+//--- chart's own timeframe, so a daily/weekly swing high or low that
+//--- isn't ALSO a fractal on (say) M15 could be missed or show up late.
+//--- These two new layers run the exact same fractal-confirm + ATR-
+//--- clustering + touch-count logic as the main scan (refactored into
+//--- shared helper functions that take the level array/prefix/colors as
+//--- parameters instead of hardcoded globals), just fed D1/W1 bars and
+//--- drawn in their own colors so you can tell the three layers apart.
+//--- Each only re-scans when a NEW daily/weekly bar has actually closed
+//--- (checked via the newest closed bar's time), not every tick - D1/W1
+//--- history is small enough (a few thousand / a few hundred bars) that
+//--- a full re-scan on that rare event is cheap and simpler/safer than
+//--- replicating the incremental prev_calculated bookkeeping for a
+//--- second and third data source.
 //--- 1.03: Fixed the real reason the journal showed "39 visible levels"
 //--- but the user still only saw a couple of lines on the actual BTC
 //--- chart. Root cause: InpAtrMultiplier x ATR is a DOLLAR distance -
@@ -121,7 +140,24 @@ input bool     InpShowTouchLabels  = true;  // small "xN" text label showing eac
 input color    InpLabelColor       = clrWhite;
 input int      InpLabelFontSize    = 8;
 
-#define PFX "SRL_"
+input group "=== Daily / Weekly levels (independent of the chart's own timeframe) ==="
+input bool     InpShowDailyLevels    = true;   // scan PERIOD_D1 bars directly for daily S/R, regardless of
+                                                // what timeframe this chart is actually showing
+input bool     InpShowWeeklyLevels   = true;   // same, for PERIOD_W1
+input int      InpDWWindow           = 2;      // fractal window on D1/W1 bars - smaller than the intraday
+                                                // one since each bar already represents a full day/week
+input int      InpDWMinTouchesToShow = 2;      // "major levels only" filter, same idea as InpMinTouchesToShow
+input int      InpDWMaxLevels        = 20;     // cap per layer (daily and weekly each get their own 20)
+input int      InpDWLookbackDays     = 1825;   // ~5 years - daily/weekly pivots are rarer and more durable
+                                                // than intraday ones, so a longer lookback makes sense here
+input color    InpDailySupportColor    = clrAqua;
+input color    InpDailyResistanceColor = clrOrange;
+input color    InpWeeklySupportColor    = clrDodgerBlue;
+input color    InpWeeklyResistanceColor = clrMagenta;
+
+#define PFX   "SRL_"
+#define PFX_D "SRLD_"
+#define PFX_W "SRLW_"
 
 struct SRLevel
   {
@@ -135,7 +171,13 @@ struct SRLevel
   };
 
 SRLevel  g_levels[];
-int      g_atrHandle = INVALID_HANDLE;
+SRLevel  g_levelsD[];
+SRLevel  g_levelsW[];
+int      g_atrHandle  = INVALID_HANDLE;
+int      g_atrHandleD = INVALID_HANDLE;
+int      g_atrHandleW = INVALID_HANDLE;
+datetime g_lastDailyBarTime  = 0;
+datetime g_lastWeeklyBarTime = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -156,14 +198,38 @@ int OnInit()
       Print("Important_SR_Levels: failed to create ATR handle.");
       return(INIT_FAILED);
      }
+   if(InpShowDailyLevels)
+     {
+      g_atrHandleD = iATR(_Symbol, PERIOD_D1, InpAtrPeriod);
+      if(g_atrHandleD == INVALID_HANDLE)
+        {
+         Print("Important_SR_Levels: failed to create daily ATR handle.");
+         return(INIT_FAILED);
+        }
+     }
+   if(InpShowWeeklyLevels)
+     {
+      g_atrHandleW = iATR(_Symbol, PERIOD_W1, InpAtrPeriod);
+      if(g_atrHandleW == INVALID_HANDLE)
+        {
+         Print("Important_SR_Levels: failed to create weekly ATR handle.");
+         return(INIT_FAILED);
+        }
+     }
    ArrayResize(g_levels, 0);
+   ArrayResize(g_levelsD, 0);
+   ArrayResize(g_levelsW, 0);
+   g_lastDailyBarTime  = 0;
+   g_lastWeeklyBarTime = 0;
    //--- v1.02: unconditional confirmation line - previously this
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.02 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f",
+   PrintFormat("Important_SR_Levels v1.04 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+               "daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
-               InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier);
+               InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
+               InpShowDailyLevels ? "on" : "off", InpShowWeeklyLevels ? "on" : "off");
    return(INIT_SUCCEEDED);
   }
 
@@ -171,7 +237,11 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    ObjectsDeleteAll(0, PFX);
-   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   ObjectsDeleteAll(0, PFX_D);
+   ObjectsDeleteAll(0, PFX_W);
+   if(g_atrHandle  != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   if(g_atrHandleD != INVALID_HANDLE) IndicatorRelease(g_atrHandleD);
+   if(g_atrHandleW != INVALID_HANDLE) IndicatorRelease(g_atrHandleW);
   }
 
 //+------------------------------------------------------------------+
@@ -179,11 +249,11 @@ void OnDeinit(const int reason)
 //| it hasn't reached InpMinTouchesToShow yet - that's the "major     |
 //| levels only, not minor noise" filter.                             |
 //+------------------------------------------------------------------+
-void RedrawLevel(SRLevel &lvl)
+void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, const color resCol)
   {
-   if(lvl.touches < InpMinTouchesToShow) return;
+   if(lvl.touches < minTouchesToShow) return;
 
-   color col = lvl.isSupport ? InpSupportColor : InpResistanceColor;
+   color col = lvl.isSupport ? supCol : resCol;
 
    if(ObjectFind(0, lvl.lineName) < 0)
      {
@@ -225,14 +295,14 @@ void RedrawLevel(SRLevel &lvl)
 //| Find an existing same-type level within minDistance of price.    |
 //| Returns its index in g_levels, or -1 if none is close enough.    |
 //+------------------------------------------------------------------+
-int FindNearbyLevel(const double price, const bool isSupport, const double minDistance)
+int FindNearbyLevelG(SRLevel &levels[], const double price, const bool isSupport, const double minDistance)
   {
    int best = -1;
    double bestDist = DBL_MAX;
-   for(int k = 0; k < ArraySize(g_levels); k++)
+   for(int k = 0; k < ArraySize(levels); k++)
      {
-      if(g_levels[k].isSupport != isSupport) continue;
-      double d = MathAbs(g_levels[k].price - price);
+      if(levels[k].isSupport != isSupport) continue;
+      double d = MathAbs(levels[k].price - price);
       if(d < minDistance && d < bestDist) { best = k; bestDist = d; }
      }
    return best;
@@ -246,47 +316,111 @@ int FindNearbyLevel(const double price, const bool isSupport, const double minDi
 //| BTC whose volatility has grown by orders of magnitude over its    |
 //| history.                                                          |
 //+------------------------------------------------------------------+
-void RegisterTouch(const datetime t, const double price, const bool isSupport, const double minDistance)
+void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, const bool isSupport,
+                     const double minDistance, const string prefix, const int maxLevels,
+                     const int minTouchesToShow, const color supCol, const color resCol)
   {
-   int idx = FindNearbyLevel(price, isSupport, minDistance);
+   int idx = FindNearbyLevelG(levels, price, isSupport, minDistance);
    if(idx >= 0)
      {
       //--- merged into an existing level: nudge its price toward the
       //--- average of all touches so far (keeps the line representative
       //--- of the whole cluster, not stuck on the very first touch) and
       //--- extend its "last touched" time
-      g_levels[idx].price = (g_levels[idx].price * g_levels[idx].touches + price) / (g_levels[idx].touches + 1);
-      g_levels[idx].touches++;
-      g_levels[idx].lastTime = t;
-      RedrawLevel(g_levels[idx]);
+      levels[idx].price = (levels[idx].price * levels[idx].touches + price) / (levels[idx].touches + 1);
+      levels[idx].touches++;
+      levels[idx].lastTime = t;
+      RedrawLevelG(levels[idx], minTouchesToShow, supCol, resCol);
       return;
      }
 
    //--- genuinely new level
-   int n = ArraySize(g_levels);
-   if(n >= InpMaxLevels)
+   int n = ArraySize(levels);
+   if(n >= maxLevels)
      {
       //--- drop the least-touched existing level to make room - keeps
       //--- the most-respected levels, not just whatever is newest
       int weakest = 0;
       for(int k = 1; k < n; k++)
-         if(g_levels[k].touches < g_levels[weakest].touches) weakest = k;
-      ObjectDelete(0, g_levels[weakest].lineName);
-      ObjectDelete(0, g_levels[weakest].labelName);
-      g_levels[weakest] = g_levels[n - 1];
-      ArrayResize(g_levels, n - 1);
+         if(levels[k].touches < levels[weakest].touches) weakest = k;
+      ObjectDelete(0, levels[weakest].lineName);
+      ObjectDelete(0, levels[weakest].labelName);
+      levels[weakest] = levels[n - 1];
+      ArrayResize(levels, n - 1);
       n = n - 1;
      }
 
-   ArrayResize(g_levels, n + 1);
-   g_levels[n].price     = price;
-   g_levels[n].isSupport = isSupport;
-   g_levels[n].firstTime = t;
-   g_levels[n].lastTime  = t;
-   g_levels[n].touches   = 1;
-   g_levels[n].lineName  = PFX + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
-   g_levels[n].labelName = PFX + "lbl_" + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
-   RedrawLevel(g_levels[n]);
+   ArrayResize(levels, n + 1);
+   levels[n].price     = price;
+   levels[n].isSupport = isSupport;
+   levels[n].firstTime = t;
+   levels[n].lastTime  = t;
+   levels[n].touches   = 1;
+   levels[n].lineName  = prefix + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
+   levels[n].labelName = prefix + "lbl_" + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
+   RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
+  }
+
+//+------------------------------------------------------------------+
+//| Daily/weekly layer: scans a higher timeframe's own bars directly  |
+//| via CopyRates, completely independent of the chart's timeframe.   |
+//| Only does a full rescan when a NEW bar on that timeframe has      |
+//| actually closed (cheap: D1/W1 history is a few thousand bars at   |
+//| most, so a full rescan on that rare event is simpler and safer    |
+//| than replicating the main scan's incremental bookkeeping twice    |
+//| more).                                                             |
+//+------------------------------------------------------------------+
+void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string prefix,
+                   const color supCol, const color resCol, const int atrHandle, datetime &lastBarTime)
+  {
+   int w = InpDWWindow;
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+   int count = CopyRates(_Symbol, tf, 0, 5000, rates);
+   if(count < 2 * w + 2) return;
+
+   //--- newest CLOSED bar is count-2 (count-1 is the currently forming bar)
+   int maxI = count - 2 - w;
+   if(maxI < w) return;
+
+   //--- throttle: only rescan when a new bar has actually closed on this TF
+   if(rates[maxI].time == lastBarTime) return;
+   lastBarTime = rates[maxI].time;
+
+   ObjectsDeleteAll(0, prefix);
+   ArrayResize(levels, 0);
+
+   datetime cutoffTime = (InpDWLookbackDays > 0) ? (rates[maxI].time - (datetime)((long)InpDWLookbackDays * 86400)) : 0;
+
+   double atrBuf[];
+   ArraySetAsSeries(atrBuf, false);
+   int atrCount = maxI - w + 1;
+   if(CopyBuffer(atrHandle, 0, w, atrCount, atrBuf) < atrCount) return;
+
+   for(int i = w; i <= maxI; i++)
+     {
+      if(rates[i].time < cutoffTime) continue;
+      double minDistance = atrBuf[i - w] * InpAtrMultiplier;
+      if(minDistance <= 0.0) continue;
+
+      bool isPeak = true, isTrough = true;
+      for(int k = 1; k <= w; k++)
+        {
+         if(rates[i].high < rates[i - k].high || rates[i].high <= rates[i + k].high) isPeak = false;
+         if(rates[i].low  > rates[i - k].low  || rates[i].low  >= rates[i + k].low)  isTrough = false;
+         if(!isPeak && !isTrough) break;
+        }
+      if(isPeak)         RegisterTouchG(levels, rates[i].time, rates[i].high, false, minDistance, prefix,
+                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol);
+      else if(isTrough)  RegisterTouchG(levels, rates[i].time, rates[i].low,  true,  minDistance, prefix,
+                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol);
+     }
+
+   int visible = 0;
+   for(int k = 0; k < ArraySize(levels); k++)
+      if(levels[k].touches >= InpDWMinTouchesToShow) visible++;
+   PrintFormat("Important_SR_Levels: %s rescan - %d bars checked, %d levels found, %d visible (touches>=%d)",
+               EnumToString(tf), maxI - w + 1, ArraySize(levels), visible, InpDWMinTouchesToShow);
   }
 
 //+------------------------------------------------------------------+
@@ -371,9 +505,18 @@ int OnCalculate(const int rates_total,
          if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
          if(!isPeak && !isTrough) break;
         }
-      if(isPeak)         RegisterTouch(time[i], high[i], false, minDistance);
-      else if(isTrough)  RegisterTouch(time[i], low[i],  true,  minDistance);
+      if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor);
+      else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor);
      }
+
+   if(InpShowDailyLevels)
+      ScanHigherTF(PERIOD_D1, g_levelsD, PFX_D, InpDailySupportColor, InpDailyResistanceColor,
+                   g_atrHandleD, g_lastDailyBarTime);
+   if(InpShowWeeklyLevels)
+      ScanHigherTF(PERIOD_W1, g_levelsW, PFX_W, InpWeeklySupportColor, InpWeeklyResistanceColor,
+                   g_atrHandleW, g_lastWeeklyBarTime);
 
    //--- v1.02: one-time summary once the initial backfill finishes, so
    //--- "I attached it and see nothing" has an actual answer in the
