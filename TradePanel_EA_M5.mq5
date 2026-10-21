@@ -21,19 +21,37 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 //+------------------------------------------------------------------+
-//| v2.18: LOCKED to M5 - this is the M5-only copy of TradePanel_EA.   |
+//| v2.19: LOCKED to M5 - this is the M5-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
 //| attached to any chart whose timeframe isn't M5. The TradePanel_EA_M15.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.18 base (removes Continuation, adds   |
-//| Engulfing confirmation filters, adds the BB outer-band overlay),  |
-//| so this copy carries all of that too.                              |
+//| refusal. Rebuilt from the v2.19 base (adds the FVG and Liquidity  |
+//| zone overlays), so this copy carries that too.                     |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M5
-#property version   "2.18"
-//--- 2.18: Locked copy (M5 only) - see header block above. Rebuilt from
-//--- v2.18 (removes Continuation, Engulfing filters, BB overlay) so this copy carries that too.
+#property version   "2.19"
+//--- 2.19: Locked copy (M5 only) - see header block above. Rebuilt from
+//--- v2.19 (adds the FVG and Liquidity zone overlays) so this copy carries that too.
+//--- 2.18: Three changes, all per direct request. (1) REMOVED the
+//--- trend-continuation overlay entirely (InpShowContSignals and
+//--- everything under it) - it was already flagged UNVALIDATED/net
+//--- loser (p=0.52 vs random) and the request was explicit: "lets remove
+//--- the trend continuation signals." (2) Engulfing overlay gets two new
+//--- confirmation filters, both default ON: InpCdlRequireTrend (skip an
+//--- engulfing candle fighting the 21/50EMA trend - "on the wrong side
+//--- of the trend") and InpCdlMinMADistATR (skip one printing within
+//--- InpCdlMinMADistATR x ATR of either EMA - "too close to a moving
+//--- average"). (3) NEW Bollinger outer-band rejection overlay
+//--- (InpShowBBSignals) - per the attached chart examples: a bar closes
+//--- BEYOND an outer Bollinger band, a later bar (within
+//--- InpBBReentryLookback) closes back INSIDE - sells on re-entry from
+//--- above the upper band, buys on re-entry from below the lower band.
+//--- InpBBRequireRejection (default off, since "sometimes with a nice
+//--- rejection candle" implies not always) optionally requires a
+//--- same-direction rejection wick on the re-entry bar itself. Same
+//--- SL(swing)/TP(RR), collision-nudging, and cooldown conventions as
+//--- every other overlay. UNVALIDATED - chart overlay only.
 //--- 2.17: NEW stochastic divergence overlay, per direct request - "can
 //--- we include a buy sell signal with sl and tp for divergence,
 //--- stochastic divergence". Both kinds: REGULAR divergence (price makes
@@ -1288,6 +1306,64 @@ input bool   InpBBAlert            = false;   // default OFF, same convention as
                                                // since v2.16/2.17 - see InpStochCrossAlert's own comment
 input int    InpBBCooldownBars     = 8;       // same per-direction-cooldown idea as InpDivCooldownBars
 
+input group "=== Fair Value Gap (FVG) zones + rejection signals (NEW, v2.19, per direct request) - UNVALIDATED - VISUAL ONLY ==="
+input bool   InpShowFVG            = true;    // lightly-shaded zone (not a solid block) for each 3-candle
+                                               // imbalance (bullish: candle 3's low is above candle 1's
+                                               // high; bearish: mirror) - fires a BUY/SELL signal the first
+                                               // time price comes back and REJECTS the zone (wicks in,
+                                               // closes back out the way it came), and the zone is removed
+                                               // the moment it's no longer valid - either because it got
+                                               // fully closed through (invalidated) or because it just gave
+                                               // its one rejection signal (spent)
+input int    InpFvgMaxZones        = 15;      // hard cap on how many FVG zones can be tracked/drawn at once
+input int    InpFvgMaxAgeDays      = 10;      // an unfilled, untouched zone older than this is dropped too -
+                                               // keeps the chart from accumulating zones from weeks ago
+input int    InpFvgSwingBars       = 10;      // SL reference = N-bar swing low/high at the trigger bar
+input double InpFvgRR              = 2.0;
+input color  InpFvgBullCol         = C'0,60,0';    // dim/dark fill, NOT a solid bright block - drawn with
+                                                    // OBJPROP_BACK=true so candles render on top of it
+input color  InpFvgBearCol         = C'60,0,0';
+input color  InpFvgArrowBuyCol     = clrLime;      // the REJECTION SIGNAL arrow's own colour - bright,
+                                                    // separate from the dim zone fill above
+input color  InpFvgArrowSellCol    = clrRed;
+input color  InpFvgStopCol         = clrRed;
+input color  InpFvgTPCol           = C'0,255,0';
+input int    InpFvgArrowSize       = 2;
+input double InpFvgArrowOffsetATR  = 1.3;
+input int    InpFvgLineBars        = 8;
+input bool   InpFvgAlert           = false;   // default OFF, same convention as every other non-MA overlay
+input int    InpFvgCooldownBars    = 8;
+
+input group "=== Liquidity (equal highs/lows) zones + rejection signals (NEW, v2.19, per direct request) - UNVALIDATED - VISUAL ONLY ==="
+input bool   InpShowLiquidity      = true;    // a thin shaded band wherever two confirmed swing highs (or
+                                               // two swing lows) sit within InpLiqTolATR of each other -
+                                               // marks resting liquidity (stops) above equal highs / below
+                                               // equal lows. Same rejection-signal + auto-remove behaviour
+                                               // as the FVG zones above: SELL when price sweeps into an
+                                               // equal-highs band and closes back below it, BUY when it
+                                               // sweeps an equal-lows band and closes back above it
+input int    InpLiqPivotWindow     = 5;       // confirmed-swing fractal window, same idea as the
+                                               // Divergence overlay's own InpDivPivotWindow
+input double InpLiqTolATR          = 0.15;    // two swing points within this many ATR of each other count
+                                               // as "equal" (a liquidity pool), not a wide price range
+input int    InpLiqLookbackBars    = 150;     // the two swing points being compared can't be more than
+                                               // this many bars apart - otherwise it's not the same pool
+input int    InpLiqMaxZones        = 15;
+input int    InpLiqMaxAgeDays      = 10;
+input int    InpLiqSwingBars       = 10;
+input double InpLiqRR              = 2.0;
+input color  InpLiqBullCol         = C'0,50,60';   // equal lows (support/buy-side liquidity)
+input color  InpLiqBearCol         = C'60,40,0';   // equal highs (resistance/sell-side liquidity)
+input color  InpLiqArrowBuyCol     = clrLime;
+input color  InpLiqArrowSellCol    = clrRed;
+input color  InpLiqStopCol         = clrRed;
+input color  InpLiqTPCol           = C'0,255,0';
+input int    InpLiqArrowSize       = 2;
+input double InpLiqArrowOffsetATR  = 1.3;
+input int    InpLiqLineBars        = 8;
+input bool   InpLiqAlert           = false;
+input int    InpLiqCooldownBars    = 8;
+
 CTrade trade;
 int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
 
@@ -1406,6 +1482,46 @@ double   g_bbLastMarkerPrice = 0.0;
 datetime g_bbLastMarkerTime  = 0;
 datetime g_bbLastBuyAt  = 0;
 datetime g_bbLastSellAt = 0;
+
+//--- v2.19: shared zone type for FVG + Liquidity overlays - a priced
+//--- rectangle that is either "support" (bullish - reject = BUY) or
+//--- "resistance" (bearish - reject = SELL), tracked until it's either
+//--- invalidated (closed fully through) or spent (gave its one
+//--- rejection signal), at which point it's removed, not left stale.
+struct SigZone
+  {
+   double   top;
+   double   bottom;
+   bool     bullish;
+   datetime startTime;
+   bool     active;
+   string   rectName;
+  };
+
+string   g_fvg = "TPFVG_";       // zone RECTANGLES only - lifecycle owned entirely by PruneZones(),
+                                  // never touched by HousekeepOldObjects()
+string   g_fvgSig = "TPFVGX_";   // this overlay's signal arrows/SL/TP - one-shot markers, cleaned up
+                                  // by HousekeepOldObjects() same as every other overlay's signals
+SigZone  g_fvgZones[];
+datetime g_fvgLastProcessedBar = 0;
+double   g_fvgLastMarkerPrice = 0.0;
+datetime g_fvgLastMarkerTime  = 0;
+datetime g_fvgLastBuyAt = 0, g_fvgLastSellAt = 0;
+
+string   g_liq = "TPLIQ_";       // zone RECTANGLES only - see g_fvg's own comment, same reasoning
+string   g_liqSig = "TPLIQX_";   // this overlay's signal arrows/SL/TP
+SigZone  g_liqZones[];
+datetime g_liqLastProcessedBar = 0;
+double   g_liqLastMarkerPrice = 0.0;
+datetime g_liqLastMarkerTime  = 0;
+datetime g_liqLastBuyAt = 0, g_liqLastSellAt = 0;
+//--- single most-recent confirmed swing of each type, same rolling-
+//--- previous-pivot pattern as the Divergence overlay's g_divLowTime/
+//--- g_divHighTime - a new pivot within tolerance of the stored one
+//--- forms a liquidity zone, then REPLACES it (so the next pivot is
+//--- compared against this one, not the original)
+bool     g_liqHaveLow = false;  datetime g_liqLowTime = 0;  double g_liqLowPrice = 0.0;
+bool     g_liqHaveHigh = false; datetime g_liqHighTime = 0; double g_liqHighPrice = 0.0;
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1925,7 +2041,8 @@ void HousekeepOldObjects()
       if(StringFind(nm, g_pm) == 0)        cutoff = segCutoff;
       else if(StringFind(nm, g_rjxm) == 0) cutoff = m15Cutoff;
       else if(StringFind(nm, g_emax) == 0 || StringFind(nm, g_sig) == 0 || StringFind(nm, g_cdl) == 0
-              || StringFind(nm, g_rjx) == 0 || StringFind(nm, g_div) == 0 || StringFind(nm, g_bb) == 0)
+              || StringFind(nm, g_rjx) == 0 || StringFind(nm, g_div) == 0 || StringFind(nm, g_bb) == 0
+              || StringFind(nm, g_fvgSig) == 0 || StringFind(nm, g_liqSig) == 0)
          cutoff = sigCutoff;
       else continue;   // panel widgets, other programs' / the user's own objects - never touched
       if(cutoff <= 0) continue;
@@ -2115,6 +2232,12 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    names[6] = g_rjxm + "arr_"  + id;
    names[7] = g_div  + "arr_"  + id;
    names[8] = g_bb   + "arr_"  + id;
+   //--- v2.19: FVG/Liquidity arrow names include a zone-index suffix
+   //--- (g_fvgSig + "arr_" + id + "_" + zoneIndex), so an exact-name
+   //--- lookup here can't work the way it does for the other overlays -
+   //--- intentionally NOT added to this de-overlap check; their own
+   //--- NudgeAwayFromLastMarker call (against each other, within the
+   //--- same overlay) still applies
    double others[9];
    int m = 0;
    for(int j = 0; j < 9; j++)
@@ -2265,6 +2388,71 @@ void SigBollinger(const double &c[], const int n, const int period, const double
       mid[i]   = m;
       upper[i] = m + dev * sd;
       lower[i] = m - dev * sd;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| v2.19: shared zone-rectangle drawing for FVG + Liquidity. Lightly   |
+//| shaded, not a solid block - OBJPROP_BACK=true draws it BEHIND the   |
+//| candles (MT5 has no real alpha transparency on a rectangle fill,    |
+//| this is the closest native approximation), and the caller passes a |
+//| dim/dark colour, never a bright one. Right edge (t2) is updated     |
+//| every call while the zone is active, so it visually grows forward   |
+//| with time; removed entirely (ObjectDelete, not just hidden) the     |
+//| moment the zone is no longer valid - see ProcessZoneBar() below.    |
+//+------------------------------------------------------------------+
+void DrawZoneRect(const string nm, const datetime t1, const datetime t2, const double top,
+                   const double bottom, const color col)
+  {
+   if(ObjectFind(0, nm) < 0)
+     {
+      if(!ObjectCreate(0, nm, OBJ_RECTANGLE, 0, t1, top, t2, bottom))
+        {
+         PrintFormat("TradePanel_EA: ObjectCreate FAILED for zone %s - error %d", nm, GetLastError());
+         return;
+        }
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, nm, OBJPROP_BACK, true);
+      ObjectSetInteger(0, nm, OBJPROP_FILL, true);
+      ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+     }
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectMove(0, nm, 0, t1, top);
+   ObjectMove(0, nm, 1, t2, bottom);
+  }
+
+//+------------------------------------------------------------------+
+//| v2.19: the one rule both zone overlays share - "price comes back to |
+//| those levels to reject them". A zone is only ever touched, then     |
+//| resolved ONE of two ways on the very bar that resolves it:          |
+//|  - REJECTED: price wicks INTO the zone but CLOSES back out the way  |
+//|    it came (support: low dips into the zone, close ends back above  |
+//|    it; resistance: mirror) - this IS the buy/sell signal, and the   |
+//|    zone is spent (removed) immediately after firing it.             |
+//|  - INVALIDATED: price CLOSES fully through the zone (support:       |
+//|    close ends below it; resistance: mirror) - no signal, the zone   |
+//|    simply no longer means anything and is removed.                  |
+//| A bar that only wicks in without closing cleanly either way leaves  |
+//| the zone active/untouched-by-this-function - still being tested.    |
+//+------------------------------------------------------------------+
+void ProcessZoneBar(const SigZone &z, const double cBar, const double hBar, const double lBar,
+                     bool &reject, bool &invalidate)
+  {
+   reject = false; invalidate = false;
+   if(!z.active) return;
+   if(z.bullish)
+     {
+      if(lBar > z.top) return;         // hasn't even reached the zone yet
+      if(cBar < z.bottom) invalidate = true;
+      else if(cBar > z.top) reject = true;
+     }
+   else
+     {
+      if(hBar < z.bottom) return;
+      if(cBar > z.top) invalidate = true;
+      else if(cBar < z.bottom) reject = true;
      }
   }
 
@@ -3692,6 +3880,373 @@ void ResyncBBSignals()
   }
 
 //+------------------------------------------------------------------+
+void DrawZoneSignalArrow(const string nm, const datetime t, const double price, const bool isBuy,
+                          const color buyCol, const color sellCol, const int arrowSize, const string tip)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? buyCol : sellCol);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, arrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip);
+  }
+
+//+------------------------------------------------------------------+
+//| v2.19: trims a zone array down to InpXMaxZones (drops the OLDEST    |
+//| active zone - by startTime - when over cap) and drops any active    |
+//| zone older than maxAgeDays that's never been touched. Keeps the     |
+//| chart from accumulating zones indefinitely.                         |
+//+------------------------------------------------------------------+
+void PruneZones(SigZone &zones[], const int maxZones, const datetime ageCutoff)
+  {
+   for(int k = ArraySize(zones) - 1; k >= 0; k--)
+     {
+      if(!zones[k].active) continue;
+      if(ageCutoff != 0 && zones[k].startTime < ageCutoff)
+        {
+         ObjectDelete(0, zones[k].rectName);
+         zones[k].active = false;
+        }
+     }
+   while(maxZones > 0)
+     {
+      int activeCount = 0, oldest = -1;
+      for(int k = 0; k < ArraySize(zones); k++)
+        {
+         if(!zones[k].active) continue;
+         activeCount++;
+         if(oldest < 0 || zones[k].startTime < zones[oldest].startTime) oldest = k;
+        }
+      if(activeCount <= maxZones || oldest < 0) break;
+      ObjectDelete(0, zones[oldest].rectName);
+      zones[oldest].active = false;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| v2.19: Fair Value Gap zones + rejection signals (NEW, per direct     |
+//| request). Standard 3-candle imbalance: bullish if candle i's low is  |
+//| above candle i-2's high (a gap price never traded through on the     |
+//| way up); bearish mirror. Per direct request, "the fvg and liquidity  |
+//| blocks must also give buy and sell signals when price comes back to  |
+//| those levels to reject them" - handled generically by                |
+//| ProcessZoneBar() above (touch-in, close-back-out = signal; close     |
+//| fully through = invalidated), applied to every active zone on every  |
+//| new bar BEFORE checking that same bar for a brand-new gap.           |
+//+------------------------------------------------------------------+
+void ComputeFvgSignals(const bool backfill)
+  {
+   int minBars = InpFvgSwingBars + 10;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int from = minBars;
+   if(!backfill)
+     {
+      for(int p = n - 1; p >= minBars; p--)
+        {
+         if(r[p].time <= g_fvgLastProcessedBar) break;
+         from = p;
+        }
+     }
+   double lastMarkerPrice = backfill ? 0.0 : g_fvgLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_fvgLastMarkerTime;
+
+   for(int i = MathMax(from, 2); i < n; i++)
+     {
+      datetime t_i = r[i].time;
+
+      //--- process existing zones against THIS bar first - a zone can
+      //--- only ever be touched by a bar AFTER it was formed
+      for(int zi = 0; zi < ArraySize(g_fvgZones); zi++)
+        {
+         if(!g_fvgZones[zi].active) continue;
+         bool reject, invalidate;
+         ProcessZoneBar(g_fvgZones[zi], c[i], h[i], l[i], reject, invalidate);
+         if(invalidate)
+           {
+            ObjectDelete(0, g_fvgZones[zi].rectName);
+            g_fvgZones[zi].active = false;
+           }
+         else if(reject)
+           {
+            bool isBuy = g_fvgZones[zi].bullish;
+            datetime lastAt = isBuy ? g_fvgLastBuyAt : g_fvgLastSellAt;
+            if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpFvgCooldownBars * perSec)
+              {
+               if(isBuy) g_fvgLastBuyAt = t_i; else g_fvgLastSellAt = t_i;
+               double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpFvgArrowOffsetATR * atr[i];
+               string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
+               string nm = g_fvgSig + "arr_" + id;
+               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+               entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+               entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
+               lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
+               bool wasNew = (ObjectFind(0, nm) < 0);
+               DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpFvgArrowBuyCol, InpFvgArrowSellCol,
+                                    InpFvgArrowSize, isBuy ? "FVG Rejection Buy (unvalidated)" :
+                                    "FVG Rejection Sell (unvalidated)");
+
+               double swing = isBuy ? l[i] : h[i];
+               for(int j = i - InpFvgSwingBars + 1; j < i; j++)
+                  if(j >= 0) swing = isBuy ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+               double risk = isBuy ? (c[i] - swing) : (swing - c[i]);
+               if(risk > 0.0)
+                 {
+                  double tp = isBuy ? c[i] + InpFvgRR * risk : c[i] - InpFvgRR * risk;
+                  DrawSigLevel(g_fvgSig + "sl_" + id, t_i, t_i + InpFvgLineBars * perSec, swing, InpFvgStopCol, STYLE_SOLID,
+                               "FVG SL: recent " + IntegerToString(InpFvgSwingBars) + "-bar swing (unvalidated)");
+                  DrawSigLevel(g_fvgSig + "tp_" + id, t_i, t_i + (InpFvgLineBars + 2) * perSec, tp, InpFvgTPCol, STYLE_DASH,
+                               "FVG TP: 1:" + DoubleToString(InpFvgRR, 1) + " R:R example (unvalidated)");
+                 }
+               if(!backfill && wasNew && InpFvgAlert)
+                 {
+                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                  FireSigAlert(StringFormat("%s %s: FVG Rejection %s PRINTED - UNVALIDATED, chart overlay only",
+                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                 }
+              }
+            //--- zone is spent either way (gave its signal or hit cooldown) -
+            //--- remove it so it can't keep re-signalling every bar it's tested
+            ObjectDelete(0, g_fvgZones[zi].rectName);
+            g_fvgZones[zi].active = false;
+           }
+        }
+
+      //--- NOW check this bar for a brand-new gap (3-candle: i-2, i-1, i)
+      bool bullGap = l[i] > h[i - 2];
+      bool bearGap = h[i] < l[i - 2];
+      if(bullGap || bearGap)
+        {
+         int zi = ArraySize(g_fvgZones);
+         ArrayResize(g_fvgZones, zi + 1);
+         g_fvgZones[zi].top       = bullGap ? l[i] : l[i - 2];
+         g_fvgZones[zi].bottom    = bullGap ? h[i - 2] : h[i];
+         g_fvgZones[zi].bullish   = bullGap;
+         g_fvgZones[zi].startTime = r[i - 1].time;
+         g_fvgZones[zi].active    = true;
+         g_fvgZones[zi].rectName  = g_fvg + (bullGap ? "bull_" : "bear_") + IntegerToString((long)t_i);
+        }
+     }
+
+   //--- extend every still-active zone's right edge forward, and prune
+   datetime ageCutoff = (InpFvgMaxAgeDays > 0) ? (r[n - 1].time - (datetime)((long)InpFvgMaxAgeDays * 86400)) : 0;
+   PruneZones(g_fvgZones, InpFvgMaxZones, ageCutoff);
+   for(int zi = 0; zi < ArraySize(g_fvgZones); zi++)
+      if(g_fvgZones[zi].active)
+         DrawZoneRect(g_fvgZones[zi].rectName, g_fvgZones[zi].startTime, r[n - 1].time,
+                      g_fvgZones[zi].top, g_fvgZones[zi].bottom,
+                      g_fvgZones[zi].bullish ? InpFvgBullCol : InpFvgBearCol);
+
+   g_fvgLastProcessedBar = r[n - 1].time;
+   g_fvgLastMarkerPrice = lastMarkerPrice; g_fvgLastMarkerTime = lastMarkerTime;
+  }
+
+void ResyncFvgSignals()
+  {
+   ObjectsDeleteAll(0, g_fvg);
+   ObjectsDeleteAll(0, g_fvgSig);
+   ArrayResize(g_fvgZones, 0);
+   g_fvgLastProcessedBar = 0;
+   g_fvgLastMarkerPrice = 0.0; g_fvgLastMarkerTime = 0;
+   g_fvgLastBuyAt = 0; g_fvgLastSellAt = 0;
+   if(InpShowFVG) ComputeFvgSignals(true);
+  }
+
+//+------------------------------------------------------------------+
+//| v2.19: Liquidity (equal highs/lows) zones + rejection signals (NEW, |
+//| per direct request). Confirmed swing pivots via the same fractal    |
+//| window approach as the Divergence overlay; a new pivot within       |
+//| InpLiqTolATR of the single previously-stored pivot of the same type |
+//| (and within InpLiqLookbackBars) forms a thin zone spanning the two  |
+//| prices - equal highs = resistance/sell-side liquidity (SELL on      |
+//| reject), equal lows = support/buy-side liquidity (BUY on reject).   |
+//| Same ProcessZoneBar() touch/reject/invalidate rule as FVG.          |
+//+------------------------------------------------------------------+
+void ComputeLiquiditySignals(const bool backfill)
+  {
+   int w = InpLiqPivotWindow;
+   int minBars = InpLiqSwingBars + 2 * w + 10;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int maxI = n - 1 - w;
+   if(maxI < w) return;
+   int from = w;
+   if(!backfill)
+     {
+      for(int p = maxI; p >= w; p--)
+        {
+         if(r[p].time <= g_liqLastProcessedBar) break;
+         from = p;
+        }
+     }
+   double lastMarkerPrice = backfill ? 0.0 : g_liqLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_liqLastMarkerTime;
+   bool haveLow = backfill ? false : g_liqHaveLow;
+   datetime lowT = backfill ? 0 : g_liqLowTime; double lowP = backfill ? 0.0 : g_liqLowPrice;
+   bool haveHigh = backfill ? false : g_liqHaveHigh;
+   datetime highT = backfill ? 0 : g_liqHighTime; double highP = backfill ? 0.0 : g_liqHighPrice;
+
+   for(int i = from; i <= maxI; i++)
+     {
+      datetime t_i = r[i].time;
+
+      //--- process existing zones against this bar first
+      for(int zi = 0; zi < ArraySize(g_liqZones); zi++)
+        {
+         if(!g_liqZones[zi].active) continue;
+         bool reject, invalidate;
+         ProcessZoneBar(g_liqZones[zi], c[i], h[i], l[i], reject, invalidate);
+         if(invalidate)
+           {
+            ObjectDelete(0, g_liqZones[zi].rectName);
+            g_liqZones[zi].active = false;
+           }
+         else if(reject)
+           {
+            bool isBuy = g_liqZones[zi].bullish;
+            datetime lastAt = isBuy ? g_liqLastBuyAt : g_liqLastSellAt;
+            if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpLiqCooldownBars * perSec)
+              {
+               if(isBuy) g_liqLastBuyAt = t_i; else g_liqLastSellAt = t_i;
+               double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpLiqArrowOffsetATR * atr[i];
+               string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
+               string nm = g_liqSig + "arr_" + id;
+               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+               entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+               entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
+               lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
+               bool wasNew = (ObjectFind(0, nm) < 0);
+               DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpLiqArrowBuyCol, InpLiqArrowSellCol,
+                                    InpLiqArrowSize, isBuy ? "Liquidity Sweep Buy (unvalidated)" :
+                                    "Liquidity Sweep Sell (unvalidated)");
+
+               double swing = isBuy ? l[i] : h[i];
+               for(int j = i - InpLiqSwingBars + 1; j < i; j++)
+                  if(j >= 0) swing = isBuy ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+               double risk = isBuy ? (c[i] - swing) : (swing - c[i]);
+               if(risk > 0.0)
+                 {
+                  double tp = isBuy ? c[i] + InpLiqRR * risk : c[i] - InpLiqRR * risk;
+                  DrawSigLevel(g_liqSig + "sl_" + id, t_i, t_i + InpLiqLineBars * perSec, swing, InpLiqStopCol, STYLE_SOLID,
+                               "Liquidity SL: recent " + IntegerToString(InpLiqSwingBars) + "-bar swing (unvalidated)");
+                  DrawSigLevel(g_liqSig + "tp_" + id, t_i, t_i + (InpLiqLineBars + 2) * perSec, tp, InpLiqTPCol, STYLE_DASH,
+                               "Liquidity TP: 1:" + DoubleToString(InpLiqRR, 1) + " R:R example (unvalidated)");
+                 }
+               if(!backfill && wasNew && InpLiqAlert)
+                 {
+                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                  FireSigAlert(StringFormat("%s %s: Liquidity Sweep %s PRINTED - UNVALIDATED, chart overlay only",
+                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                 }
+              }
+            ObjectDelete(0, g_liqZones[zi].rectName);
+            g_liqZones[zi].active = false;
+           }
+        }
+
+      //--- confirmed-pivot detection, same fractal window as elsewhere
+      if(atr[i] == SIG_NA || atr[i] <= 0.0) { continue; }
+      bool isPivotLow = true, isPivotHigh = true;
+      for(int jx = 1; jx <= w; jx++)
+        {
+         if(l[i] > l[i - jx] || l[i] >= l[i + jx]) isPivotLow = false;
+         if(h[i] < h[i - jx] || h[i] <= h[i + jx]) isPivotHigh = false;
+         if(!isPivotLow && !isPivotHigh) break;
+        }
+
+      if(isPivotLow)
+        {
+         if(haveLow && (t_i - lowT) <= (datetime)InpLiqLookbackBars * perSec &&
+            MathAbs(l[i] - lowP) <= InpLiqTolATR * atr[i])
+           {
+            int zi = ArraySize(g_liqZones);
+            ArrayResize(g_liqZones, zi + 1);
+            g_liqZones[zi].top       = MathMax(l[i], lowP);
+            g_liqZones[zi].bottom    = MathMin(l[i], lowP);
+            if(g_liqZones[zi].top <= g_liqZones[zi].bottom) g_liqZones[zi].top = g_liqZones[zi].bottom + 0.05 * atr[i];
+            g_liqZones[zi].bullish   = true;
+            g_liqZones[zi].startTime = lowT;
+            g_liqZones[zi].active    = true;
+            g_liqZones[zi].rectName  = g_liq + "bull_" + IntegerToString((long)t_i);
+           }
+         haveLow = true; lowT = t_i; lowP = l[i];
+        }
+      if(isPivotHigh)
+        {
+         if(haveHigh && (t_i - highT) <= (datetime)InpLiqLookbackBars * perSec &&
+            MathAbs(h[i] - highP) <= InpLiqTolATR * atr[i])
+           {
+            int zi = ArraySize(g_liqZones);
+            ArrayResize(g_liqZones, zi + 1);
+            g_liqZones[zi].top       = MathMax(h[i], highP);
+            g_liqZones[zi].bottom    = MathMin(h[i], highP);
+            if(g_liqZones[zi].top <= g_liqZones[zi].bottom) g_liqZones[zi].top = g_liqZones[zi].bottom + 0.05 * atr[i];
+            g_liqZones[zi].bullish   = false;
+            g_liqZones[zi].startTime = highT;
+            g_liqZones[zi].active    = true;
+            g_liqZones[zi].rectName  = g_liq + "bear_" + IntegerToString((long)t_i);
+           }
+         haveHigh = true; highT = t_i; highP = h[i];
+        }
+     }
+
+   datetime ageCutoff = (InpLiqMaxAgeDays > 0) ? (r[maxI].time - (datetime)((long)InpLiqMaxAgeDays * 86400)) : 0;
+   PruneZones(g_liqZones, InpLiqMaxZones, ageCutoff);
+   for(int zi = 0; zi < ArraySize(g_liqZones); zi++)
+      if(g_liqZones[zi].active)
+         DrawZoneRect(g_liqZones[zi].rectName, g_liqZones[zi].startTime, r[maxI].time,
+                      g_liqZones[zi].top, g_liqZones[zi].bottom,
+                      g_liqZones[zi].bullish ? InpLiqBullCol : InpLiqBearCol);
+
+   g_liqLastProcessedBar = r[maxI].time;
+   g_liqLastMarkerPrice = lastMarkerPrice; g_liqLastMarkerTime = lastMarkerTime;
+   g_liqHaveLow = haveLow; g_liqLowTime = lowT; g_liqLowPrice = lowP;
+   g_liqHaveHigh = haveHigh; g_liqHighTime = highT; g_liqHighPrice = highP;
+  }
+
+void ResyncLiquiditySignals()
+  {
+   ObjectsDeleteAll(0, g_liq);
+   ObjectsDeleteAll(0, g_liqSig);
+   ArrayResize(g_liqZones, 0);
+   g_liqLastProcessedBar = 0;
+   g_liqLastMarkerPrice = 0.0; g_liqLastMarkerTime = 0;
+   g_liqLastBuyAt = 0; g_liqLastSellAt = 0;
+   g_liqHaveLow = false; g_liqLowTime = 0; g_liqLowPrice = 0.0;
+   g_liqHaveHigh = false; g_liqHighTime = 0; g_liqHighPrice = 0.0;
+   if(InpShowLiquidity) ComputeLiquiditySignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- v1.58: REVERTED to the plain built-in iMA handles only (see
@@ -3791,6 +4346,8 @@ bool SyncMAOverlays()
       ResyncRejectSignals2();
       ResyncDivSignals();
       ResyncBBSignals();
+      ResyncFvgSignals();
+      ResyncLiquiditySignals();
       changed = true;
      }
    //--- v2.10: NEVER wait forever on MAHistoryReady(). Real-world MT5 can
@@ -4183,6 +4740,10 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_rjxm);
    ObjectsDeleteAll(0, g_div);
    ObjectsDeleteAll(0, g_bb);
+   ObjectsDeleteAll(0, g_fvg);
+   ObjectsDeleteAll(0, g_fvgSig);
+   ObjectsDeleteAll(0, g_liq);
+   ObjectsDeleteAll(0, g_liqSig);
    ReleaseMAHandles();
    g_maPeriod = PERIOD_CURRENT;      // globals survive a reinit - "nothing built" now
    g_maBackfillPending = false;
@@ -4261,6 +4822,8 @@ void CheckNewBar()
    if(InpShowRejectSignals2)   ComputeRejectSignals2(false);
    if(InpShowDivSignals)       ComputeDivSignals(false);
    if(InpShowBBSignals)        ComputeBBSignals(false);
+   if(InpShowFVG)              ComputeFvgSignals(false);
+   if(InpShowLiquidity)        ComputeLiquiditySignals(false);
    if(InpShowRejectSignalsM15) ComputeRejectSignalsM15(false);
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
