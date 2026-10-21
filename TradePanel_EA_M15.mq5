@@ -19,21 +19,20 @@
 //|  (25/50/75%/CLOSE ALL) fires immediately - reducing risk never   |
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
+#property copyright "Marco"
 //+------------------------------------------------------------------+
 //| v2.17: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
 //| attached to any chart whose timeframe isn't M15. The TradePanel_EA_M5.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.16 base (default push notifications  |
-//| reserved to just the MA gap-close warning and the EMA21/50 cross), |
-//| so this copy carries that too.                                     |
+//| refusal. Rebuilt from the v2.17 base (adds the stochastic          |
+//| divergence overlay), so this copy carries that too.                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M15
-#property copyright "Marco"
 #property version   "2.17"
-//--- 2.17: Locked copy (M15 only) - see the header block above. Rebuilt from
-//--- v2.16 so this copy carries the default-quieter-notifications change too.
+//--- 2.17: Locked copy (M15 only) - see header block above. Rebuilt from
+//--- v2.17 (adds the stochastic divergence overlay) so this copy carries that too.
 //--- 2.16: Per direct request, push notifications are now reserved for
 //--- only two things by default: the MA 21/50 gap CLOSING warning
 //--- (InpEnableCrossAlert, unchanged - "when the moving averages are
@@ -1222,6 +1221,43 @@ input int    InpContCooldownBars   = 8;       // v2.07 FIX: minimum bars between
                                                // track, so repeat same-direction signals are expected and
                                                // should fire, just not on every single consecutive bar
 
+input group "=== Stochastic divergence signal overlay (NEW, v2.17, per direct request) - UNVALIDATED - VISUAL ONLY ==="
+input bool   InpShowDivSignals     = true;    // REGULAR divergence (price makes a new high/low that the
+                                               // stochastic does NOT confirm - reversal signal) and HIDDEN
+                                               // divergence (price pulls back less than the stochastic
+                                               // does, in an existing trend - continuation signal), both
+                                               // bullish and bearish. See each colour input below for which
+                                               // is which.
+input int    InpDivPivotWindow     = 5;       // confirmed-swing fractal window (bars closed on each side) -
+                                               // same idea as InpRejSwingBars' own window, just applied to
+                                               // finding the price pivots divergence is measured between
+input int    InpDivMaxPivotGapBars = 60;      // the two swing points being compared can't be more than this
+                                               // many bars apart - otherwise it's comparing pivots from
+                                               // different market regimes, not a real divergence
+input int    InpDivSwingBars       = 10;      // SL reference = N-bar swing low/high at the trigger bar
+input double InpDivRR              = 2.0;     // R:R convention for the TP reference line - example only
+input color  InpDivRegBuyCol       = clrLime;      // REGULAR bullish divergence (price lower low, stoch
+                                                    // higher low) - reversal buy
+input color  InpDivRegSellCol      = clrRed;       // REGULAR bearish divergence (price higher high, stoch
+                                                    // lower high) - reversal sell
+input color  InpDivHidBuyCol       = clrDeepSkyBlue;  // HIDDEN bullish divergence (price higher low, stoch
+                                                       // lower low, in an uptrend) - continuation buy
+input color  InpDivHidSellCol      = clrOrangeRed;    // HIDDEN bearish divergence (price lower high, stoch
+                                                       // higher high, in a downtrend) - continuation sell
+input color  InpDivStopCol         = clrRed;
+input color  InpDivTPCol           = C'0,255,0';
+input int    InpDivArrowSize       = 2;
+input double InpDivArrowOffsetATR  = 1.3;
+input int    InpDivLineBars        = 8;
+input bool   InpDivAlert           = false;   // default OFF, same convention as every other non-MA overlay
+                                               // since v2.16/2.17 - see InpStochCrossAlert's own comment
+input int    InpDivCooldownBars    = 8;       // minimum bars between two signals of the SAME kind (regular
+                                               // bullish / regular bearish / hidden bullish / hidden
+                                               // bearish) - same per-direction-cooldown idea as
+                                               // InpContCooldownBars, for the same reason: divergence has
+                                               // no "open position" concept, so repeat signals are expected
+                                               // and should fire, just not on every single consecutive bar
+
 CTrade trade;
 int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
 
@@ -1323,6 +1359,25 @@ double   g_cntLastMarkerPrice = 0.0;
 datetime g_cntLastMarkerTime  = 0;
 datetime g_cntLastBuyAt  = 0;   // v2.07: per-direction cooldown tracking, not a dedupe block
 datetime g_cntLastSellAt = 0;
+
+//--- v2.17: stochastic divergence overlay (NEW) - own namespace. Tracks
+//--- the single most recent CONFIRMED swing low and swing high (price +
+//--- the stochastic %K value at that same bar) so each newly confirmed
+//--- pivot can be compared against the previous one of the same type -
+//--- that comparison IS the divergence check, nothing more is stored.
+string   g_div = "TPDIV_";
+ENUM_TIMEFRAMES g_divPeriod = PERIOD_CURRENT;
+datetime g_divLastProcessedBar = 0;
+double   g_divLastMarkerPrice = 0.0;
+datetime g_divLastMarkerTime  = 0;
+bool     g_divHaveLow  = false;
+datetime g_divLowTime  = 0; double g_divLowPrice  = 0.0; double g_divLowK  = 0.0;
+bool     g_divHaveHigh = false;
+datetime g_divHighTime = 0; double g_divHighPrice = 0.0; double g_divHighK = 0.0;
+datetime g_divLastRegBuyAt  = 0;   // regular bullish  (reversal)
+datetime g_divLastRegSellAt = 0;   // regular bearish  (reversal)
+datetime g_divLastHidBuyAt  = 0;   // hidden bullish   (continuation)
+datetime g_divLastHidSellAt = 0;   // hidden bearish   (continuation)
 
 string   PFX = "TPNL_";
 int      g_panelX = 40, g_panelY = 40;
@@ -1842,7 +1897,7 @@ void HousekeepOldObjects()
       if(StringFind(nm, g_pm) == 0)        cutoff = segCutoff;
       else if(StringFind(nm, g_rjxm) == 0) cutoff = m15Cutoff;
       else if(StringFind(nm, g_emax) == 0 || StringFind(nm, g_sig) == 0 || StringFind(nm, g_cdl) == 0
-              || StringFind(nm, g_rjx) == 0 || StringFind(nm, g_cnt) == 0)
+              || StringFind(nm, g_rjx) == 0 || StringFind(nm, g_cnt) == 0 || StringFind(nm, g_div) == 0)
          cutoff = sigCutoff;
       else continue;   // panel widgets, other programs' / the user's own objects - never touched
       if(cutoff <= 0) continue;
@@ -2022,7 +2077,7 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
   {
    if(minGap <= 0.0) return price;
    string id = IntegerToString((long)t);
-   string names[8];
+   string names[9];
    names[0] = g_emax + "arr_"  + id;
    names[1] = g_emax + "exit_" + id;
    names[2] = g_emax + "weak_" + id;
@@ -2031,9 +2086,10 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    names[5] = g_rjx  + "arr_"  + id;
    names[6] = g_rjxm + "arr_"  + id;
    names[7] = g_cnt  + "arr_"  + id;
-   double others[8];
+   names[8] = g_div  + "arr_"  + id;
+   double others[9];
    int m = 0;
-   for(int j = 0; j < 8; j++)
+   for(int j = 0; j < 9; j++)
      {
       if(names[j] == selfName || ObjectFind(0, names[j]) < 0) continue;
       others[m] = ObjectGetDouble(0, names[j], OBJPROP_PRICE, 0);
@@ -3381,6 +3437,222 @@ void ResyncContSignals()
   }
 
 //+------------------------------------------------------------------+
+void DrawDivArrow(const string nm, const datetime t, const double price, const bool isBuy, const bool regular)
+  {
+   if(ObjectFind(0, nm) >= 0) return;
+   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
+   color col = regular ? (isBuy ? InpDivRegBuyCol : InpDivRegSellCol) : (isBuy ? InpDivHidBuyCol : InpDivHidSellCol);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpDivArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, (regular ? "Regular " : "Hidden ") + string(isBuy ? "Bullish" : "Bearish") +
+                    " Divergence " + (isBuy ? "Buy" : "Sell") + " (unvalidated)");
+  }
+
+//+------------------------------------------------------------------+
+//| v2.17: stochastic divergence overlay (NEW, per direct request).      |
+//| REGULAR divergence = reversal: price makes a new swing extreme the   |
+//| stochastic does NOT confirm (lower low in price / higher low in      |
+//| stoch = regular bullish; higher high in price / lower high in stoch  |
+//| = regular bearish). HIDDEN divergence = trend CONTINUATION: during a |
+//| pullback, price moves LESS than the stochastic does (higher low in   |
+//| price / lower low in stoch, only in an existing uptrend = hidden     |
+//| bullish; lower high in price / higher high in stoch, only in an      |
+//| existing downtrend = hidden bearish) - the trend filter (21 vs 50    |
+//| EMA) only applies to the HIDDEN cases, since hidden divergence is    |
+//| specifically a continuation-of-trend signal, not a standalone        |
+//| reversal one like regular divergence is.                             |
+//+------------------------------------------------------------------+
+void ComputeDivSignals(const bool backfill)
+  {
+   int w = InpDivPivotWindow;
+   int minBars = InpStochKPeriod + InpStochSlowing + InpStochDPeriod + 2 * w + 10;
+   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
+   int total = backfill ? available : MathMin(available, minBars + 500);
+   if(total < minBars) return;
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
+   if(n < minBars) return;
+
+   double c[], h[], l[];
+   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
+   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
+
+   double atr[];
+   SigATR(h, l, c, n, 14, atr);
+   double k[], d[];
+   SigClassicStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, k, d, InpStochMethod, InpStochPriceMode);
+   double e21[], e50[];
+   SigEMA(c, n, InpMA21, e21);
+   SigEMA(c, n, InpMA50, e50);
+
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int maxI = n - 1 - w;
+   if(maxI < w) return;
+   int from = w;
+   if(!backfill)
+     {
+      for(int p = maxI; p >= w; p--)
+        {
+         if(r[p].time <= g_divLastProcessedBar) break;
+         from = p;
+        }
+     }
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
+
+   bool haveLow = backfill ? false : g_divHaveLow;
+   datetime lowT = backfill ? 0 : g_divLowTime;
+   double lowP = backfill ? 0.0 : g_divLowPrice, lowK = backfill ? 0.0 : g_divLowK;
+   bool haveHigh = backfill ? false : g_divHaveHigh;
+   datetime highT = backfill ? 0 : g_divHighTime;
+   double highP = backfill ? 0.0 : g_divHighPrice, highK = backfill ? 0.0 : g_divHighK;
+   double lastMarkerPrice = backfill ? 0.0 : g_divLastMarkerPrice;
+   datetime lastMarkerTime = backfill ? 0 : g_divLastMarkerTime;
+
+   for(int i = from; i <= maxI; i++)
+     {
+      if(k[i] == SIG_NA || atr[i] == SIG_NA || atr[i] <= 0.0 || e21[i] == SIG_NA || e50[i] == SIG_NA) continue;
+      bool draw = (i >= drawFrom);
+      datetime t_i = r[i].time;
+
+      bool isPivotLow = true, isPivotHigh = true;
+      for(int jx = 1; jx <= w; jx++)
+        {
+         if(l[i] > l[i - jx] || l[i] >= l[i + jx]) isPivotLow = false;
+         if(h[i] < h[i - jx] || h[i] <= h[i + jx]) isPivotHigh = false;
+         if(!isPivotLow && !isPivotHigh) break;
+        }
+
+      if(isPivotLow)
+        {
+         if(haveLow && (t_i - lowT) <= (datetime)InpDivMaxPivotGapBars * perSec && k[i] != SIG_NA && lowK != SIG_NA)
+           {
+            int dir = 0; bool regular = false;
+            if(l[i] < lowP && k[i] > lowK) { dir = 1; regular = true; }
+            else if(l[i] > lowP && k[i] < lowK && e21[i] > e50[i]) { dir = 1; regular = false; }
+            if(dir != 0)
+              {
+               datetime lastAt = regular ? g_divLastRegBuyAt : g_divLastHidBuyAt;
+               if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpDivCooldownBars * perSec)
+                 {
+                  if(regular) g_divLastRegBuyAt = t_i; else g_divLastHidBuyAt = t_i;
+                  if(draw)
+                    {
+                     string id = IntegerToString((long)t_i);
+                     string nm = g_div + (regular ? "reg_arr_" : "hid_arr_") + id;
+                     double offEntry = InpDivArrowOffsetATR * atr[i];
+                     double minGap = InpSigMinMarkerGapATR * atr[i];
+                     double entryPrice = l[i] - offEntry;
+                     entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, false, lastMarkerPrice, lastMarkerTime, minGap);
+                     entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, false, minGap, nm);
+                     lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
+                     bool wasNew = (ObjectFind(0, nm) < 0);
+                     DrawDivArrow(nm, t_i, entryPrice, true, regular);
+
+                     double swing = l[i];
+                     for(int j = i - InpDivSwingBars + 1; j < i; j++)
+                        if(j >= 0) swing = MathMin(swing, l[j]);
+                     double risk = c[i] - swing;
+                     if(risk > 0.0)
+                       {
+                        double tp = c[i] + InpDivRR * risk;
+                        DrawSigLevel(g_div + "sl_" + id, t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
+                                     (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
+                                     IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
+                        DrawSigLevel(g_div + "tp_" + id, t_i, t_i + (InpDivLineBars + 2) * perSec, tp, InpDivTPCol, STYLE_DASH,
+                                     (regular ? "Regular" : "Hidden") + string(" Div TP: 1:") +
+                                     DoubleToString(InpDivRR, 1) + " R:R example (unvalidated)");
+                       }
+                     if(!backfill && wasNew && InpDivAlert)
+                       {
+                        string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                        FireSigAlert(StringFormat("%s %s: %s Bullish Divergence BUY PRINTED - UNVALIDATED, chart "
+                                                   "overlay only", _Symbol, tf, regular ? "Regular" : "Hidden"));
+                       }
+                    }
+                 }
+              }
+           }
+         haveLow = true; lowT = t_i; lowP = l[i]; lowK = k[i];
+        }
+
+      if(isPivotHigh)
+        {
+         if(haveHigh && (t_i - highT) <= (datetime)InpDivMaxPivotGapBars * perSec && k[i] != SIG_NA && highK != SIG_NA)
+           {
+            int dir = 0; bool regular = false;
+            if(h[i] > highP && k[i] < highK) { dir = -1; regular = true; }
+            else if(h[i] < highP && k[i] > highK && e21[i] < e50[i]) { dir = -1; regular = false; }
+            if(dir != 0)
+              {
+               datetime lastAt = regular ? g_divLastRegSellAt : g_divLastHidSellAt;
+               if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpDivCooldownBars * perSec)
+                 {
+                  if(regular) g_divLastRegSellAt = t_i; else g_divLastHidSellAt = t_i;
+                  if(draw)
+                    {
+                     string id = IntegerToString((long)t_i);
+                     string nm = g_div + (regular ? "reg_arr_" : "hid_arr_") + id;
+                     double offEntry = InpDivArrowOffsetATR * atr[i];
+                     double minGap = InpSigMinMarkerGapATR * atr[i];
+                     double entryPrice = h[i] + offEntry;
+                     entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, true, lastMarkerPrice, lastMarkerTime, minGap);
+                     entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, true, minGap, nm);
+                     lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
+                     bool wasNew = (ObjectFind(0, nm) < 0);
+                     DrawDivArrow(nm, t_i, entryPrice, false, regular);
+
+                     double swing = h[i];
+                     for(int j = i - InpDivSwingBars + 1; j < i; j++)
+                        if(j >= 0) swing = MathMax(swing, h[j]);
+                     double risk = swing - c[i];
+                     if(risk > 0.0)
+                       {
+                        double tp = c[i] - InpDivRR * risk;
+                        DrawSigLevel(g_div + "sl_" + id, t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
+                                     (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
+                                     IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
+                        DrawSigLevel(g_div + "tp_" + id, t_i, t_i + (InpDivLineBars + 2) * perSec, tp, InpDivTPCol, STYLE_DASH,
+                                     (regular ? "Regular" : "Hidden") + string(" Div TP: 1:") +
+                                     DoubleToString(InpDivRR, 1) + " R:R example (unvalidated)");
+                       }
+                     if(!backfill && wasNew && InpDivAlert)
+                       {
+                        string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                        FireSigAlert(StringFormat("%s %s: %s Bearish Divergence SELL PRINTED - UNVALIDATED, chart "
+                                                   "overlay only", _Symbol, tf, regular ? "Regular" : "Hidden"));
+                       }
+                    }
+                 }
+              }
+           }
+         haveHigh = true; highT = t_i; highP = h[i]; highK = k[i];
+        }
+     }
+
+   g_divLastProcessedBar = r[maxI].time;
+   g_divHaveLow = haveLow; g_divLowTime = lowT; g_divLowPrice = lowP; g_divLowK = lowK;
+   g_divHaveHigh = haveHigh; g_divHighTime = highT; g_divHighPrice = highP; g_divHighK = highK;
+   g_divLastMarkerPrice = lastMarkerPrice; g_divLastMarkerTime = lastMarkerTime;
+  }
+
+void ResyncDivSignals()
+  {
+   ObjectsDeleteAll(0, g_div);
+   g_divPeriod = (ENUM_TIMEFRAMES)_Period;
+   g_divLastProcessedBar = 0;
+   g_divLastMarkerPrice = 0.0; g_divLastMarkerTime = 0;
+   g_divHaveLow = false; g_divLowTime = 0; g_divLowPrice = 0.0; g_divLowK = 0.0;
+   g_divHaveHigh = false; g_divHighTime = 0; g_divHighPrice = 0.0; g_divHighK = 0.0;
+   g_divLastRegBuyAt = 0; g_divLastRegSellAt = 0; g_divLastHidBuyAt = 0; g_divLastHidSellAt = 0;
+   if(InpShowDivSignals) ComputeDivSignals(true);
+  }
+
+//+------------------------------------------------------------------+
 void SetupMAs()
   {
    //--- v1.58: REVERTED to the plain built-in iMA handles only (see
@@ -3479,6 +3751,7 @@ bool SyncMAOverlays()
       ResyncCandleSignals();
       ResyncRejectSignals2();
       ResyncContSignals();
+      ResyncDivSignals();
       changed = true;
      }
    //--- v2.10: NEVER wait forever on MAHistoryReady(). Real-world MT5 can
@@ -3946,6 +4219,7 @@ void CheckNewBar()
    if(InpShowStochSignals)     ComputeStochSignals(false);
    if(InpShowCandleSignals)    ComputeCandleSignals(false);
    if(InpShowRejectSignals2)   ComputeRejectSignals2(false);
+   if(InpShowDivSignals)       ComputeDivSignals(false);
    if(InpShowRejectSignalsM15) ComputeRejectSignalsM15(false);
    if(InpShowContSignals)      ComputeContSignals(false);
    CheckCrossProximity();
