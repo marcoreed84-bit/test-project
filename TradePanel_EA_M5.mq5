@@ -21,18 +21,35 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 //+------------------------------------------------------------------+
-//| v2.20: LOCKED to M5 - this is the M5-only copy of TradePanel_EA.   |
+//| v2.21: LOCKED to M5 - this is the M5-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
 //| attached to any chart whose timeframe isn't M5. The TradePanel_EA_M15.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.20 base (distinct signal colours,    |
-//| TP lines removed), so this copy carries that too.                  |
+//| refusal. Rebuilt from the v2.21 base (fixes the OnInit hang that   |
+//| was the root cause of the missing panel/MA/VWAP), so this copy    |
+//| carries that fix too.                                              |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M5
-#property version   "2.20"
-//--- 2.20: Locked copy (M5 only) - see header block above. Rebuilt from
-//--- v2.20 (distinct signal colours, TP lines removed) so this copy carries that too.
+#property version   "2.21"
+//--- 2.21: Locked copy (M5 only) - see header block above. Rebuilt from
+//--- v2.21 (fixes the OnInit hang) so this copy carries that fix too.
+//--- 2.20: Two changes, per direct request. (1) Every overlay's entry-
+//--- arrow buy/sell colour audited for duplicates - clrLime was used by
+//--- FIVE different overlays' buy signal (EMA Cross, Divergence Regular,
+//--- BB, FVG, Liquidity) and clrRed by FOUR different sell signals
+//--- (Divergence Regular, BB, FVG, Liquidity), clrDeepSkyBlue by two
+//--- (Rejection M15 Buy, Divergence Hidden Buy) - every entry-arrow
+//--- colour across all 10 overlay kinds is now distinct (InpDivRegBuyCol,
+//--- InpDivRegSellCol, InpDivHidBuyCol, InpBBBuyCol, InpBBSellCol,
+//--- InpFvgArrowBuyCol/SellCol, InpLiqArrowBuyCol/SellCol all changed -
+//--- SL/TP line colours untouched, those were never the complaint). (2)
+//--- REMOVED every overlay's TP (R:R) line - "remove all the RR lines
+//--- take profit lines, leave the swing stop loss lines". The SL line
+//--- is kept everywhere; the TP distance calculation itself is left in
+//--- place (still used nowhere else, genuinely dead now, but removing it
+//--- outright risked touching risk/SL logic unnecessarily for a change
+//--- that's purely about what gets DRAWN).
 //--- 2.19: NEW FVG (Fair Value Gap) and Liquidity (equal highs/lows)
 //--- zone overlays, per direct request - "the fvg and liquidity blocks
 //--- must also give buy and sell signals when price comes back to those
@@ -2241,7 +2258,13 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
   {
    if(minGap <= 0.0) return price;
    string id = IntegerToString((long)t);
-   string names[9];
+   //--- v2.21 FIX (Opus-found): Divergence names its arrows
+   //--- "reg_buy_"/"hid_buy_"/"reg_sell_"/"hid_sell_", never plain
+   //--- "arr_" - the old single g_div+"arr_"+id entry here could never
+   //--- actually match anything, so Divergence arrows were silently
+   //--- exempt from this de-overlap check the whole time. All four real
+   //--- name patterns now included.
+   string names[12];
    names[0] = g_emax + "arr_"  + id;
    names[1] = g_emax + "exit_" + id;
    names[2] = g_emax + "weak_" + id;
@@ -2249,17 +2272,20 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    names[4] = g_cdl  + "arr_"  + id;
    names[5] = g_rjx  + "arr_"  + id;
    names[6] = g_rjxm + "arr_"  + id;
-   names[7] = g_div  + "arr_"  + id;
-   names[8] = g_bb   + "arr_"  + id;
+   names[7] = g_div  + "reg_buy_"  + id;
+   names[8] = g_div  + "hid_buy_"  + id;
+   names[9] = g_div  + "reg_sell_" + id;
+   names[10] = g_div + "hid_sell_" + id;
+   names[11] = g_bb  + "arr_"  + id;
    //--- v2.19: FVG/Liquidity arrow names include a zone-index suffix
    //--- (g_fvgSig + "arr_" + id + "_" + zoneIndex), so an exact-name
    //--- lookup here can't work the way it does for the other overlays -
    //--- intentionally NOT added to this de-overlap check; their own
    //--- NudgeAwayFromLastMarker call (against each other, within the
    //--- same overlay) still applies
-   double others[9];
+   double others[12];
    int m = 0;
-   for(int j = 0; j < 9; j++)
+   for(int j = 0; j < 12; j++)
      {
       if(names[j] == selfName || ObjectFind(0, names[j]) < 0) continue;
       others[m] = ObjectGetDouble(0, names[j], OBJPROP_PRICE, 0);
@@ -2395,7 +2421,11 @@ void SigBollinger(const double &c[], const int n, const int period, const double
    ArrayResize(mid, n);   ArrayInitialize(mid, SIG_NA);
    ArrayResize(upper, n); ArrayInitialize(upper, SIG_NA);
    ArrayResize(lower, n); ArrayInitialize(lower, SIG_NA);
-   if(n < period) return;
+   //--- v2.21 FIX (Opus-found): period<=0 (e.g. InpBBPeriod set to 0 or
+   //--- negative) made the loop start at mid[-1] - an out-of-range write
+   //--- that crashes the EA. Only reachable if that input is changed from
+   //--- its default, but cheap to guard outright.
+   if(period <= 0 || n < period) return;
    for(int i = period - 1; i < n; i++)
      {
       double s = 0.0;
@@ -3643,7 +3673,11 @@ void ComputeDivSignals(const bool backfill)
                   if(draw)
                     {
                      string id = IntegerToString((long)t_i);
-                     string nm = g_div + (regular ? "reg_arr_" : "hid_arr_") + id;
+                     //--- v2.21 FIX (Opus-found): "buy"/"sell" added - a single bar CAN be
+                     //--- both a confirmed pivot low and pivot high (an outside bar engulfing
+                     //--- its whole fractal window), which would otherwise make this buy
+                     //--- branch's name collide with the sell branch's for the same bar/kind
+                     string nm = g_div + (regular ? "reg_buy_" : "hid_buy_") + id;
                      double offEntry = InpDivArrowOffsetATR * atr[i];
                      double minGap = InpSigMinMarkerGapATR * atr[i];
                      double entryPrice = l[i] - offEntry;
@@ -3660,10 +3694,15 @@ void ComputeDivSignals(const bool backfill)
                      if(risk > 0.0)
                        {
                         double tp = c[i] + InpDivRR * risk;
-                        DrawSigLevel(g_div + "sl_" + id, t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
+                        //--- v2.21 FIX (Opus-found): was g_div+"sl_"+id, shared by BOTH the
+                        //--- buy and sell branches on the same bar - a bar that happened to
+                        //--- be both a confirmed pivot low AND pivot high (rare, but possible
+                        //--- on a single very-wide-range bar) would silently have its second
+                        //--- SL line skipped (DrawSigLevel no-ops if the name already exists).
+                        //--- Now derived from nm (already unique per reg/hid AND per bar).
+                        DrawSigLevel(nm + "_sl", t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
-                        //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3694,7 +3733,7 @@ void ComputeDivSignals(const bool backfill)
                   if(draw)
                     {
                      string id = IntegerToString((long)t_i);
-                     string nm = g_div + (regular ? "reg_arr_" : "hid_arr_") + id;
+                     string nm = g_div + (regular ? "reg_sell_" : "hid_sell_") + id;
                      double offEntry = InpDivArrowOffsetATR * atr[i];
                      double minGap = InpSigMinMarkerGapATR * atr[i];
                      double entryPrice = h[i] + offEntry;
@@ -3711,10 +3750,15 @@ void ComputeDivSignals(const bool backfill)
                      if(risk > 0.0)
                        {
                         double tp = c[i] - InpDivRR * risk;
-                        DrawSigLevel(g_div + "sl_" + id, t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
+                        //--- v2.21 FIX (Opus-found): was g_div+"sl_"+id, shared by BOTH the
+                        //--- buy and sell branches on the same bar - a bar that happened to
+                        //--- be both a confirmed pivot low AND pivot high (rare, but possible
+                        //--- on a single very-wide-range bar) would silently have its second
+                        //--- SL line skipped (DrawSigLevel no-ops if the name already exists).
+                        //--- Now derived from nm (already unique per reg/hid AND per bar).
+                        DrawSigLevel(nm + "_sl", t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
-                        //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3911,6 +3955,28 @@ void DrawZoneSignalArrow(const string nm, const datetime t, const double price, 
 //| zone older than maxAgeDays that's never been touched. Keeps the     |
 //| chart from accumulating zones indefinitely.                         |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| v2.21 FIX (Opus-found): an invalidated/spent zone was only ever    |
+//| marked active=false and left sitting in the array forever - never  |
+//| reclaimed, so over weeks of live running the array (and the O(bars |
+//| x zones) per-tick scan cost) would grow without bound. Compacts    |
+//| dead entries out after every call. Safe to reorder: rectName is    |
+//| derived from the zone's own formation time, never from its array   |
+//| index, so nothing depends on position staying fixed.               |
+//+------------------------------------------------------------------+
+void CompactZones(SigZone &zones[])
+  {
+   int n = ArraySize(zones);
+   int w = 0;
+   for(int k = 0; k < n; k++)
+     {
+      if(!zones[k].active) continue;
+      if(w != k) zones[w] = zones[k];
+      w++;
+     }
+   if(w != n) ArrayResize(zones, w);
+  }
+
 void PruneZones(SigZone &zones[], const int maxZones, const datetime ageCutoff)
   {
    for(int k = ArraySize(zones) - 1; k >= 0; k--)
@@ -3952,7 +4018,27 @@ void ComputeFvgSignals(const bool backfill)
   {
    int minBars = InpFvgSwingBars + 10;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.21 FIX (Opus-found, CRITICAL): the backfill used to request
+   //--- `available` - the ENTIRE chart history (often 100,000+ bars) -
+   //--- with no cap, unlike every other overlay in this file (which all
+   //--- cap their backfill draw window via InpSigDrawDays). Combined with
+   //--- an O(bars x zones) inner scan (every bar re-checks every zone
+   //--- ever created) and zero compaction of spent/invalidated zones,
+   //--- this measured out to ~1.1 BILLION inner-loop iterations and tens
+   //--- of thousands of queued synchronous chart-object calls on a
+   //--- 100k-bar GOLD M5 history - taking MINUTES inside OnInit, which
+   //--- runs BEFORE BuildPanel()/the MA-VWAP backfill. Net effect: no
+   //--- panel, no MAs, no VWAP, and when the user removed the EA while it
+   //--- was still stuck, MT5 force-killed it without ever calling
+   //--- OnDeinit, leaving every object behind. Fixed at the root: the
+   //--- backfill SCAN WINDOW itself is now capped to roughly
+   //--- InpFvgMaxAgeDays worth of bars (+ a startup margin) - anything
+   //--- older would be pruned by PruneZones() within one tick anyway, so
+   //--- scanning further back was always wasted work, not just slow.
+   int maxAgeBars = (InpFvgMaxAgeDays > 0)
+                     ? (int)((long)InpFvgMaxAgeDays * 86400 / PeriodSeconds(PERIOD_CURRENT)) + minBars + 50
+                     : available;
+   int total = backfill ? MathMin(available, maxAgeBars) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -3974,12 +4060,19 @@ void ComputeFvgSignals(const bool backfill)
          from = p;
         }
      }
+   //--- v2.21 FIX: also gate actual object creation (arrow/SL/alert) to
+   //--- the last InpSigDrawDays, same convention as every other overlay -
+   //--- the zone itself still forms/tracks across the whole scan window
+   //--- above, just doesn't draw/alert for ancient history
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
    double lastMarkerPrice = backfill ? 0.0 : g_fvgLastMarkerPrice;
    datetime lastMarkerTime = backfill ? 0 : g_fvgLastMarkerTime;
 
    for(int i = MathMax(from, 2); i < n; i++)
      {
       datetime t_i = r[i].time;
+      bool draw = (i >= drawFrom);
 
       //--- process existing zones against THIS bar first - a zone can
       //--- only ever be touched by a bar AFTER it was formed
@@ -4000,35 +4093,36 @@ void ComputeFvgSignals(const bool backfill)
             if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpFvgCooldownBars * perSec)
               {
                if(isBuy) g_fvgLastBuyAt = t_i; else g_fvgLastSellAt = t_i;
-               double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpFvgArrowOffsetATR * atr[i];
-               string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
-               string nm = g_fvgSig + "arr_" + id;
-               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-               entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-               entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
-               lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
-               bool wasNew = (ObjectFind(0, nm) < 0);
-               DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpFvgArrowBuyCol, InpFvgArrowSellCol,
-                                    InpFvgArrowSize, isBuy ? "FVG Rejection Buy (unvalidated)" :
-                                    "FVG Rejection Sell (unvalidated)");
+               if(draw)
+                 {
+                  double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpFvgArrowOffsetATR * atr[i];
+                  string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
+                  string nm = g_fvgSig + "arr_" + id;
+                  double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+                  double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+                  entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+                  entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
+                  lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
+                  bool wasNew = (ObjectFind(0, nm) < 0);
+                  DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpFvgArrowBuyCol, InpFvgArrowSellCol,
+                                       InpFvgArrowSize, isBuy ? "FVG Rejection Buy (unvalidated)" :
+                                       "FVG Rejection Sell (unvalidated)");
 
-               double swing = isBuy ? l[i] : h[i];
-               for(int j = i - InpFvgSwingBars + 1; j < i; j++)
-                  if(j >= 0) swing = isBuy ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-               double risk = isBuy ? (c[i] - swing) : (swing - c[i]);
-               if(risk > 0.0)
-                 {
-                  double tp = isBuy ? c[i] + InpFvgRR * risk : c[i] - InpFvgRR * risk;
-                  DrawSigLevel(g_fvgSig + "sl_" + id, t_i, t_i + InpFvgLineBars * perSec, swing, InpFvgStopCol, STYLE_SOLID,
-                               "FVG SL: recent " + IntegerToString(InpFvgSwingBars) + "-bar swing (unvalidated)");
-                  //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
-                 }
-               if(!backfill && wasNew && InpFvgAlert)
-                 {
-                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                  FireSigAlert(StringFormat("%s %s: FVG Rejection %s PRINTED - UNVALIDATED, chart overlay only",
-                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                  double swing = isBuy ? l[i] : h[i];
+                  for(int j = i - InpFvgSwingBars + 1; j < i; j++)
+                     if(j >= 0) swing = isBuy ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+                  double risk = isBuy ? (c[i] - swing) : (swing - c[i]);
+                  if(risk > 0.0)
+                    {
+                     DrawSigLevel(g_fvgSig + "sl_" + id, t_i, t_i + InpFvgLineBars * perSec, swing, InpFvgStopCol, STYLE_SOLID,
+                                  "FVG SL: recent " + IntegerToString(InpFvgSwingBars) + "-bar swing (unvalidated)");
+                    }
+                  if(!backfill && wasNew && InpFvgAlert)
+                    {
+                     string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                     FireSigAlert(StringFormat("%s %s: FVG Rejection %s PRINTED - UNVALIDATED, chart overlay only",
+                                                _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                    }
                  }
               }
             //--- zone is spent either way (gave its signal or hit cooldown) -
@@ -4057,6 +4151,7 @@ void ComputeFvgSignals(const bool backfill)
    //--- extend every still-active zone's right edge forward, and prune
    datetime ageCutoff = (InpFvgMaxAgeDays > 0) ? (r[n - 1].time - (datetime)((long)InpFvgMaxAgeDays * 86400)) : 0;
    PruneZones(g_fvgZones, InpFvgMaxZones, ageCutoff);
+   CompactZones(g_fvgZones);
    for(int zi = 0; zi < ArraySize(g_fvgZones); zi++)
       if(g_fvgZones[zi].active)
          DrawZoneRect(g_fvgZones[zi].rectName, g_fvgZones[zi].startTime, r[n - 1].time,
@@ -4093,7 +4188,15 @@ void ComputeLiquiditySignals(const bool backfill)
    int w = InpLiqPivotWindow;
    int minBars = InpLiqSwingBars + 2 * w + 10;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.21 FIX (Opus-found, CRITICAL) - same root cause and fix as
+   //--- ComputeFvgSignals' own comment: backfill scan window capped to
+   //--- roughly InpLiqMaxAgeDays worth of bars instead of the entire
+   //--- chart history, since anything older gets pruned within one tick
+   //--- anyway.
+   int maxAgeBars = (InpLiqMaxAgeDays > 0)
+                     ? (int)((long)InpLiqMaxAgeDays * 86400 / PeriodSeconds(PERIOD_CURRENT)) + minBars + 50
+                     : available;
+   int total = backfill ? MathMin(available, maxAgeBars) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -4117,6 +4220,10 @@ void ComputeLiquiditySignals(const bool backfill)
          from = p;
         }
      }
+   //--- v2.21 FIX: gate object creation to InpSigDrawDays, same
+   //--- convention as every other overlay
+   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int drawFrom = backfill ? MathMax(from, maxI - sigDrawBars) : from;
    double lastMarkerPrice = backfill ? 0.0 : g_liqLastMarkerPrice;
    datetime lastMarkerTime = backfill ? 0 : g_liqLastMarkerTime;
    bool haveLow = backfill ? false : g_liqHaveLow;
@@ -4127,6 +4234,7 @@ void ComputeLiquiditySignals(const bool backfill)
    for(int i = from; i <= maxI; i++)
      {
       datetime t_i = r[i].time;
+      bool draw = (i >= drawFrom);
 
       //--- process existing zones against this bar first
       for(int zi = 0; zi < ArraySize(g_liqZones); zi++)
@@ -4146,35 +4254,36 @@ void ComputeLiquiditySignals(const bool backfill)
             if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpLiqCooldownBars * perSec)
               {
                if(isBuy) g_liqLastBuyAt = t_i; else g_liqLastSellAt = t_i;
-               double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpLiqArrowOffsetATR * atr[i];
-               string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
-               string nm = g_liqSig + "arr_" + id;
-               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-               entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-               entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
-               lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
-               bool wasNew = (ObjectFind(0, nm) < 0);
-               DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpLiqArrowBuyCol, InpLiqArrowSellCol,
-                                    InpLiqArrowSize, isBuy ? "Liquidity Sweep Buy (unvalidated)" :
-                                    "Liquidity Sweep Sell (unvalidated)");
+               if(draw)
+                 {
+                  double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpLiqArrowOffsetATR * atr[i];
+                  string id = IntegerToString((long)t_i) + "_" + IntegerToString(zi);
+                  string nm = g_liqSig + "arr_" + id;
+                  double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
+                  double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
+                  entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
+                  entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
+                  lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
+                  bool wasNew = (ObjectFind(0, nm) < 0);
+                  DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpLiqArrowBuyCol, InpLiqArrowSellCol,
+                                       InpLiqArrowSize, isBuy ? "Liquidity Sweep Buy (unvalidated)" :
+                                       "Liquidity Sweep Sell (unvalidated)");
 
-               double swing = isBuy ? l[i] : h[i];
-               for(int j = i - InpLiqSwingBars + 1; j < i; j++)
-                  if(j >= 0) swing = isBuy ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-               double risk = isBuy ? (c[i] - swing) : (swing - c[i]);
-               if(risk > 0.0)
-                 {
-                  double tp = isBuy ? c[i] + InpLiqRR * risk : c[i] - InpLiqRR * risk;
-                  DrawSigLevel(g_liqSig + "sl_" + id, t_i, t_i + InpLiqLineBars * perSec, swing, InpLiqStopCol, STYLE_SOLID,
-                               "Liquidity SL: recent " + IntegerToString(InpLiqSwingBars) + "-bar swing (unvalidated)");
-                  //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
-                 }
-               if(!backfill && wasNew && InpLiqAlert)
-                 {
-                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                  FireSigAlert(StringFormat("%s %s: Liquidity Sweep %s PRINTED - UNVALIDATED, chart overlay only",
-                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                  double swing = isBuy ? l[i] : h[i];
+                  for(int j = i - InpLiqSwingBars + 1; j < i; j++)
+                     if(j >= 0) swing = isBuy ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
+                  double risk = isBuy ? (c[i] - swing) : (swing - c[i]);
+                  if(risk > 0.0)
+                    {
+                     DrawSigLevel(g_liqSig + "sl_" + id, t_i, t_i + InpLiqLineBars * perSec, swing, InpLiqStopCol, STYLE_SOLID,
+                                  "Liquidity SL: recent " + IntegerToString(InpLiqSwingBars) + "-bar swing (unvalidated)");
+                    }
+                  if(!backfill && wasNew && InpLiqAlert)
+                    {
+                     string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
+                     FireSigAlert(StringFormat("%s %s: Liquidity Sweep %s PRINTED - UNVALIDATED, chart overlay only",
+                                                _Symbol, tf, isBuy ? "BUY" : "SELL"));
+                    }
                  }
               }
             ObjectDelete(0, g_liqZones[zi].rectName);
@@ -4230,6 +4339,7 @@ void ComputeLiquiditySignals(const bool backfill)
 
    datetime ageCutoff = (InpLiqMaxAgeDays > 0) ? (r[maxI].time - (datetime)((long)InpLiqMaxAgeDays * 86400)) : 0;
    PruneZones(g_liqZones, InpLiqMaxZones, ageCutoff);
+   CompactZones(g_liqZones);
    for(int zi = 0; zi < ArraySize(g_liqZones); zi++)
       if(g_liqZones[zi].active)
          DrawZoneRect(g_liqZones[zi].rectName, g_liqZones[zi].startTime, r[maxI].time,
