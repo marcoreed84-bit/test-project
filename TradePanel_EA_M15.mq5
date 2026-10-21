@@ -21,18 +21,43 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 //+------------------------------------------------------------------+
-//| v2.24: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
+//| v2.25: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
 //| attached to any chart whose timeframe isn't M15. The TradePanel_EA_M5.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.24 base (all 9 overlays now cap their |
-//| backfill), so this copy carries that too.                          |
+//| refusal. Rebuilt from the v2.25 base (zones now always drawn on    |
+//| formation, spent-zone colour change), so this copy carries that    |
+//| too.                                                                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M15
-#property version   "2.24"
-//--- 2.24: Locked copy (M15 only) - see header block above. Rebuilt from
-//--- v2.24 (all 9 overlays now cap their backfill) so this copy carries that too.
+#property version   "2.25"
+//--- 2.25: Locked copy (M15 only) - see header block above. Rebuilt from
+//--- v2.25 (zones always drawn on formation, spent-zone colour) so this copy carries that too.
+//--- 2.24: Per report ("mt5 still hanging... this happened when trying
+//--- to size the chart") - two things. (1) Capped the remaining 5
+//--- overlays' backfill (EmaCross, Stoch, Engulfing, Rejection,
+//--- RejectionM15) the same way FVG/Liquidity (v2.21) and Divergence/BB
+//--- (v2.23) already were - these 5 are pre-existing and were tolerably
+//--- fast ON THEIR OWN, but stacked with 4 brand-new overlays all doing
+//--- their own OnInit-time scans in the same call, the combined
+//--- synchronous cost was still enough to hang attach. All 9 overlays
+//--- now bound their backfill scan to roughly InpSigDrawDays worth of
+//--- bars instead of the entire chart history. (2) Checked the
+//--- CHARTEVENT_CHART_CHANGE handler specifically (chart resizing fires
+//--- this event too, not just timeframe switches) - MaintainOverlaySync()
+//--- is already correctly guarded (confirmed: the full resync path only
+//--- runs on an ACTUAL timeframe change, never on resize/scroll/zoom
+//--- alone), so a resize does NOT re-trigger the heavy backfill path.
+//--- The remaining, most likely explanation for a resize specifically
+//--- hanging is MT5's own chart engine having to re-layout every object
+//--- on the chart when the window size changes - this EA's MA/VWAP
+//--- overlay alone draws ~7,900 hand-drawn OBJ_TREND segments at the
+//--- existing InpMAHistoryBars=2500 default (long predates this
+//--- session), and this session's new overlays add several hundred more
+//--- on top. This is a rendering cost inside MT5 itself, not something
+//--- fixable in EA code - the lever is reducing total object count
+//--- (InpMAHistoryBars, or how many overlays are left enabled at once).
 //--- 2.23: Opus-reviewed again (panel buttons + remaining lag). Real
 //--- fixes: (1) Divergence and BB (both new this session) were still
 //--- backfilling the ENTIRE chart history on attach, same shape of
@@ -1449,6 +1474,11 @@ input double InpFvgRR              = 2.0;
 input color  InpFvgBullCol         = C'0,60,0';    // dim/dark fill, NOT a solid bright block - drawn with
                                                     // OBJPROP_BACK=true so candles render on top of it
 input color  InpFvgBearCol         = C'60,0,0';
+input color  InpFvgSpentCol        = C'90,90,90';  // v2.25: per direct request - a zone changes to this
+                                                    // colour once a signal has actually fired off it
+                                                    // (still removed after InpFvgMaxAgeDays like any other
+                                                    // zone), so a spent/already-used zone reads differently
+                                                    // from one that's still untested
 input color  InpFvgArrowBuyCol     = C'93,25,255'; // the REJECTION SIGNAL arrow's own colour - bright,
                                                     // separate from the dim zone fill above
 input color  InpFvgArrowSellCol    = C'255,201,12';
@@ -1480,6 +1510,8 @@ input int    InpLiqSwingBars       = 10;
 input double InpLiqRR              = 2.0;
 input color  InpLiqBullCol         = C'0,50,60';   // equal lows (support/buy-side liquidity)
 input color  InpLiqBearCol         = C'60,40,0';   // equal highs (resistance/sell-side liquidity)
+input color  InpLiqSpentCol        = C'90,90,90';  // v2.25: same idea as InpFvgSpentCol - a zone changes to
+                                                    // this colour once a signal has fired off it
 input color  InpLiqArrowBuyCol     = C'178,25,255';
 input color  InpLiqArrowSellCol    = C'255,255,12';
 input color  InpLiqStopCol         = clrRed;
@@ -4186,9 +4218,19 @@ void CompactZones(SigZone &zones[])
 
 void PruneZones(SigZone &zones[], const int maxZones, const datetime ageCutoff)
   {
+   //--- v2.25 FIX: a SPENT zone (reject already fired - see the caller's
+   //--- own v2.25 comment) is left deliberately active==false but its
+   //--- rectangle is deliberately NOT deleted at that point anymore, so
+   //--- it stays visible as a record of what triggered the signal. That
+   //--- means this age-cutoff pass has to check EVERY zone regardless of
+   //--- active state now, not just active ones - otherwise a spent
+   //--- zone's rectangle would never get deleted at all (CompactZones()
+   //--- drops its array bookkeeping once inactive, but dropping the
+   //--- bookkeeping is not the same as deleting the chart OBJECT) and
+   //--- would leak on the chart forever instead of aging out with
+   //--- everything else.
    for(int k = ArraySize(zones) - 1; k >= 0; k--)
      {
-      if(!zones[k].active) continue;
       if(ageCutoff != 0 && zones[k].startTime < ageCutoff)
         {
          ObjectDelete(0, zones[k].rectName);
@@ -4322,6 +4364,13 @@ void ComputeFvgSignals(const bool backfill)
                   DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpFvgArrowBuyCol, InpFvgArrowSellCol,
                                        InpFvgArrowSize, isBuy ? "FVG Rejection Buy (unvalidated)" :
                                        "FVG Rejection Sell (unvalidated)");
+                  //--- v2.25: per direct request - "lets have the blocks change
+                  //--- colour if a signal is triggered off them" - only recolors
+                  //--- when a signal actually drew (not when cooldown silently
+                  //--- blocked one), frozen at its current extent since the zone
+                  //--- is about to be deactivated right after this.
+                  DrawZoneRect(g_fvgZones[zi].rectName, g_fvgZones[zi].startTime, t_i,
+                               g_fvgZones[zi].top, g_fvgZones[zi].bottom, InpFvgSpentCol);
 
                   double swing = isBuy ? l[i] : h[i];
                   for(int j = i - InpFvgSwingBars + 1; j < i; j++)
@@ -4340,9 +4389,19 @@ void ComputeFvgSignals(const bool backfill)
                     }
                  }
               }
-            //--- zone is spent either way (gave its signal or hit cooldown) -
-            //--- remove it so it can't keep re-signalling every bar it's tested
-            ObjectDelete(0, g_fvgZones[zi].rectName);
+            //--- v2.25 FIX - per direct request/report: "i just got a buy
+            //--- signal for a fvg, but there was not gap on the chart...
+            //--- futher down was one but not near the signal". Root cause:
+            //--- this used to ObjectDelete the zone's rectangle in the SAME
+            //--- step as drawing the signal arrow - the gap that actually
+            //--- justified the signal was always already gone by the time
+            //--- anyone looked at the chart, which is exactly backwards.
+            //--- Deactivated (stops it being retested/re-signalled - it IS
+            //--- "spent") but the rectangle itself is now left on the
+            //--- chart as a static record of what triggered the signal -
+            //--- it simply stops being extended further right once
+            //--- inactive, and still ages out naturally via PruneZones'
+            //--- InpFvgMaxAgeDays cutoff like everything else.
             g_fvgZones[zi].active = false;
            }
         }
@@ -4360,6 +4419,24 @@ void ComputeFvgSignals(const bool backfill)
          g_fvgZones[zi].startTime = r[i - 1].time;
          g_fvgZones[zi].active    = true;
          g_fvgZones[zi].rectName  = g_fvg + (bullGap ? "bull_" : "bear_") + IntegerToString((long)t_i);
+         //--- v2.25 FIX - per report: "i was looking at the chart the
+         //--- whole time there was not gap printed there". Root cause:
+         //--- the rectangle used to only ever get CREATED in the one
+         //--- draw-all-active-zones loop that runs ONCE at the end of
+         //--- this whole function - so a zone that formed AND got
+         //--- touched/rejected/invalidated within the SAME processing
+         //--- batch (very possible during backfill, which processes many
+         //--- bars in one call) would resolve and become inactive before
+         //--- that final loop ever ran, meaning its rectangle was NEVER
+         //--- drawn at all - while the signal arrow still fired
+         //--- unconditionally, since that draw is inline and doesn't
+         //--- depend on the zone still being active later. Now drawn
+         //--- immediately on formation instead, so every zone gets a
+         //--- rectangle the moment it exists, regardless of how quickly
+         //--- it then gets resolved.
+         DrawZoneRect(g_fvgZones[zi].rectName, g_fvgZones[zi].startTime, t_i,
+                      g_fvgZones[zi].top, g_fvgZones[zi].bottom,
+                      g_fvgZones[zi].bullish ? InpFvgBullCol : InpFvgBearCol);
         }
      }
 
@@ -4486,6 +4563,9 @@ void ComputeLiquiditySignals(const bool backfill)
                   DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpLiqArrowBuyCol, InpLiqArrowSellCol,
                                        InpLiqArrowSize, isBuy ? "Liquidity Sweep Buy (unvalidated)" :
                                        "Liquidity Sweep Sell (unvalidated)");
+                  //--- v2.25: per direct request - see the FVG overlay's own comment
+                  DrawZoneRect(g_liqZones[zi].rectName, g_liqZones[zi].startTime, t_i,
+                               g_liqZones[zi].top, g_liqZones[zi].bottom, InpLiqSpentCol);
 
                   double swing = isBuy ? l[i] : h[i];
                   for(int j = i - InpLiqSwingBars + 1; j < i; j++)
@@ -4504,7 +4584,11 @@ void ComputeLiquiditySignals(const bool backfill)
                     }
                  }
               }
-            ObjectDelete(0, g_liqZones[zi].rectName);
+            //--- v2.25 FIX - same reasoning as the FVG overlay's own
+            //--- comment: deactivated (spent, won't be retested) but no
+            //--- longer deleted here, so the rectangle stays on the chart
+            //--- as a record of what triggered the signal - it ages out
+            //--- naturally via PruneZones' InpLiqMaxAgeDays cutoff.
             g_liqZones[zi].active = false;
            }
         }
@@ -4533,6 +4617,12 @@ void ComputeLiquiditySignals(const bool backfill)
             g_liqZones[zi].startTime = lowT;
             g_liqZones[zi].active    = true;
             g_liqZones[zi].rectName  = g_liq + "bull_" + IntegerToString((long)t_i);
+            //--- v2.25 FIX - same reasoning as the FVG overlay's own
+            //--- comment: draw the rectangle immediately on formation,
+            //--- not only in the end-of-function sweep (which only
+            //--- catches zones still active by then)
+            DrawZoneRect(g_liqZones[zi].rectName, g_liqZones[zi].startTime, t_i,
+                         g_liqZones[zi].top, g_liqZones[zi].bottom, InpLiqBullCol);
            }
          haveLow = true; lowT = t_i; lowP = l[i];
         }
@@ -4550,6 +4640,8 @@ void ComputeLiquiditySignals(const bool backfill)
             g_liqZones[zi].startTime = highT;
             g_liqZones[zi].active    = true;
             g_liqZones[zi].rectName  = g_liq + "bear_" + IntegerToString((long)t_i);
+            DrawZoneRect(g_liqZones[zi].rectName, g_liqZones[zi].startTime, t_i,
+                         g_liqZones[zi].top, g_liqZones[zi].bottom, InpLiqBearCol);
            }
          haveHigh = true; highT = t_i; highP = h[i];
         }
