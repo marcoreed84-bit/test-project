@@ -45,7 +45,21 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.01"
+#property version   "1.02"
+//--- 1.02: Fixed two real "silently never scans" bugs, found while
+//--- diagnosing a report of attaching this and seeing no levels at
+//--- all. Both early "not enough bars yet" checks in OnCalculate were
+//--- returning rates_total (meaning "fully handled") instead of 0 -
+//--- if MT5 called this indicator before the symbol's full history had
+//--- loaded, it would claim the backfill was already done and NEVER
+//--- actually run it once more history arrived. Also added two Print
+//--- lines that were missing entirely before: one in OnInit confirming
+//--- the indicator actually attached and what settings it's using, and
+//--- one after the first full backfill showing how many pivots were
+//--- found vs. how many cleared InpMinTouchesToShow and are actually
+//--- visible - previously this indicator only ever printed on an
+//--- ERROR, so "nothing in the Experts journal" told you nothing about
+//--- whether it was running normally or not running at all.
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -116,6 +130,13 @@ int OnInit()
       return(INIT_FAILED);
      }
    ArrayResize(g_levels, 0);
+   //--- v1.02: unconditional confirmation line - previously this
+   //--- indicator only ever printed on an ERROR, so "nothing in the
+   //--- journal" told you nothing about whether it was actually
+   //--- running. Now it always confirms attach + settings here.
+   PrintFormat("Important_SR_Levels v1.02 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f",
+               _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
+               InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier);
    return(INIT_SUCCEEDED);
   }
 
@@ -254,7 +275,12 @@ int OnCalculate(const int rates_total,
                  const int &spread[])
   {
    int w = InpLeftRightWindow;
-   if(rates_total < 2 * w + 2) return(rates_total);
+   //--- v1.02 FIX: "not enough bars yet" must return 0, not rates_total -
+   //--- returning rates_total claims the whole history is fully handled,
+   //--- so if MT5 later loads more history (common right after attach,
+   //--- or on a symbol whose history is still downloading), this
+   //--- indicator would never go back and actually run the real scan.
+   if(rates_total < 2 * w + 2) return(0);
 
    //--- v1.01 FIX #2: prev_calculated resetting to 0 (a history
    //--- reload/gap-fill, NOT necessarily "freshly attached") must wipe
@@ -271,7 +297,7 @@ int OnCalculate(const int rates_total,
    //--- forming) - a pivot candidate at index i needs w closed bars on
    //--- BOTH sides, so the last checkable candidate is (rates_total-2-w)
    int maxI = rates_total - 2 - w;
-   if(maxI < w) return(rates_total);
+   if(maxI < w) return(0);   // v1.02 FIX - same reasoning as above
 
    //--- v1.01 FIX #1: exactly the candidates that could NOT have been
    //--- fully confirmed last call - no extra margin. A closed bar's
@@ -316,6 +342,20 @@ int OnCalculate(const int rates_total,
         }
       if(isPeak)         RegisterTouch(time[i], high[i], false, minDistance);
       else if(isTrough)  RegisterTouch(time[i], low[i],  true,  minDistance);
+     }
+
+   //--- v1.02: one-time summary once the initial backfill finishes, so
+   //--- "I attached it and see nothing" has an actual answer in the
+   //--- journal instead of silence either way.
+   if(prev_calculated <= 0)
+     {
+      int visible = 0;
+      for(int k = 0; k < ArraySize(g_levels); k++)
+         if(g_levels[k].touches >= InpMinTouchesToShow) visible++;
+      PrintFormat("Important_SR_Levels: initial scan done - %d bars checked, %d levels found, "
+                  "%d visible (touches>=%d), %d hidden below the touch threshold",
+                  maxI - startI + 1, ArraySize(g_levels), visible, InpMinTouchesToShow,
+                  ArraySize(g_levels) - visible);
      }
 
    return(rates_total);
