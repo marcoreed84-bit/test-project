@@ -45,7 +45,27 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.04"
+#property version   "1.05"
+//--- 1.05: User reported "40 levels found" in the journal but still zero
+//--- visible lines on the chart, and changing the colour inputs made no
+//--- difference at all - a strong sign the lines never actually existed
+//--- on the chart in the first place, since a colour change on a line
+//--- that was never drawn is naturally invisible too. Root cause found:
+//--- ObjectCreate()'s return value was NEVER checked anywhere in this
+//--- file. If it silently fails - a name collision with some other
+//--- object/indicator on the same chart, an invalid price, anything -
+//--- the level stays tracked in the g_levels array exactly as if it had
+//--- drawn fine, so the scan summary happily reports "N levels found"
+//--- while the chart has nothing on it, with zero way to tell from the
+//--- journal. Fixed: ObjectCreate's result is now checked, and a failure
+//--- logs the exact object name, price and GetLastError() code. Also
+//--- added LogLevelDiagnostics(), printed after every scan (intraday,
+//--- daily, weekly): counts how many tracked levels ACTUALLY have a
+//--- matching object on the chart right now (via ObjectFind), and prints
+//--- the price range those levels span next to the current bid price -
+//--- so "found but never drawn" (this bug) and "drawn but off-screen"
+//--- (a different, already-considered cause) are told apart by the
+//--- journal instead of guessed at.
 //--- 1.04: Added a SECOND, independent layer of levels built from DAILY
 //--- and WEEKLY bars directly (via CopyRates(_Symbol, PERIOD_D1/W1, ...)),
 //--- not just fractals on whatever timeframe the chart happens to be on.
@@ -257,7 +277,18 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
 
    if(ObjectFind(0, lvl.lineName) < 0)
      {
-      ObjectCreate(0, lvl.lineName, OBJ_HLINE, 0, 0, lvl.price);
+      //--- v1.05 FIX: ObjectCreate's return value was never checked - if
+      //--- it silently failed (name collision with another object on
+      //--- this chart, invalid price, etc.) the level was still tracked
+      //--- in g_levels as if it had drawn fine, so the scan summary could
+      //--- say "N levels found" while literally zero lines existed on
+      //--- the chart, with no way to tell from the journal. Now logged.
+      if(!ObjectCreate(0, lvl.lineName, OBJ_HLINE, 0, 0, lvl.price))
+        {
+         PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                     lvl.lineName, DoubleToString(lvl.price, _Digits), GetLastError());
+         return;
+        }
       ObjectSetInteger(0, lvl.lineName, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, lvl.lineName, OBJPROP_HIDDEN, true);
      }
@@ -289,6 +320,36 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
       ObjectSetInteger(0, lvl.labelName, OBJPROP_COLOR, InpLabelColor);
       ObjectSetInteger(0, lvl.labelName, OBJPROP_FONTSIZE, InpLabelFontSize);
      }
+  }
+
+//+------------------------------------------------------------------+
+//| v1.05: prints exactly what "N levels found" could not tell you -  |
+//| how many of the tracked, visible-threshold-clearing levels have   |
+//| an object that ACTUALLY EXISTS on the chart (ObjectFind >= 0),    |
+//| and the price range they span vs. the current price - so "found  |
+//| but not seen" (ObjectCreate silently failed) and "found and drawn |
+//| but nowhere near current price" (off-screen) are told apart.      |
+//+------------------------------------------------------------------+
+void LogLevelDiagnostics(SRLevel &levels[], const int minTouchesToShow, const string label)
+  {
+   int tracked = 0, verified = 0;
+   double minPrice = DBL_MAX, maxPrice = -DBL_MAX;
+   for(int k = 0; k < ArraySize(levels); k++)
+     {
+      if(levels[k].touches < minTouchesToShow) continue;
+      tracked++;
+      if(ObjectFind(0, levels[k].lineName) >= 0) verified++;
+      if(levels[k].price < minPrice) minPrice = levels[k].price;
+      if(levels[k].price > maxPrice) maxPrice = levels[k].price;
+     }
+   double curPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(tracked == 0)
+      PrintFormat("Important_SR_Levels [%s]: 0 levels clear the touch threshold - nothing to draw.", label);
+   else
+      PrintFormat("Important_SR_Levels [%s]: %d tracked, %d actually verified ON CHART (ObjectFind) - "
+                  "price range %s .. %s, current price %s",
+                  label, tracked, verified, DoubleToString(minPrice, _Digits), DoubleToString(maxPrice, _Digits),
+                  DoubleToString(curPrice, _Digits));
   }
 
 //+------------------------------------------------------------------+
@@ -421,6 +482,7 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
       if(levels[k].touches >= InpDWMinTouchesToShow) visible++;
    PrintFormat("Important_SR_Levels: %s rescan - %d bars checked, %d levels found, %d visible (touches>=%d)",
                EnumToString(tf), maxI - w + 1, ArraySize(levels), visible, InpDWMinTouchesToShow);
+   LogLevelDiagnostics(levels, InpDWMinTouchesToShow, EnumToString(tf));
   }
 
 //+------------------------------------------------------------------+
@@ -530,6 +592,7 @@ int OnCalculate(const int rates_total,
                   "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
                   maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
                   ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
+      LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
      }
 
    return(rates_total);
