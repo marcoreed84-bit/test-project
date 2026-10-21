@@ -45,7 +45,24 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.02"
+#property version   "1.03"
+//--- 1.03: Fixed the real reason the journal showed "39 visible levels"
+//--- but the user still only saw a couple of lines on the actual BTC
+//--- chart. Root cause: InpAtrMultiplier x ATR is a DOLLAR distance -
+//--- back when BTC traded at a few hundred dollars, ATR was tiny, so
+//--- pivots from that era clustered extremely tightly and accumulated
+//--- huge touch counts over the years BTC spent in that price range.
+//--- Since eviction (when over InpMaxLevels) always drops the
+//--- LEAST-touched level, those old high-touch-count clusters from
+//--- BTC's early, cheap history were winning every eviction and
+//--- crowding out genuinely current, tradeable levels - and since
+//--- they're also all priced far below BTC's current price, they'd
+//--- render bunched together off-screen from wherever you're actually
+//--- looking on the chart. Added InpLookbackDays (default 730, ~2
+//--- years) - pivots older than this are no longer even ELIGIBLE to be
+//--- registered as a level at all, so the old cheap-era clusters can
+//--- never form or compete for the level slots in the first place. Set
+//--- to 0 to go back to scanning all available history.
 //--- 1.02: Fixed two real "silently never scans" bugs, found while
 //--- diagnosing a report of attaching this and seeing no levels at
 //--- all. Both early "not enough bars yet" checks in OnCalculate were
@@ -83,6 +100,16 @@ input int      InpMinTouchesToShow = 2;     // Per direct request: a level only 
                                              // touched/respected at least this many times - a single
                                              // untested pivot is noise, not a major level. Set to 1 to show
                                              // every pivot immediately (back to the old behavior).
+input int      InpLookbackDays     = 730;   // v1.03 FIX: only pivots from the last N calendar days are even
+                                             // ELIGIBLE to be registered as a level (0 = no limit, scan
+                                             // all available history). Added because the clustering distance
+                                             // (InpAtrMultiplier x ATR) was tiny back when BTC traded at a
+                                             // few hundred dollars - old pivots from that era cluster into a
+                                             // handful of extremely high-touch-count "super levels" that
+                                             // then win every eviction and crowd out genuinely current,
+                                             // relevant levels. 730 days (~2 years) keeps the level list
+                                             // anchored to BTC's current price regime instead of its entire
+                                             // multi-order-of-magnitude price history.
 
 input group "=== Display ==="
 input color    InpSupportColor     = clrLime;
@@ -309,6 +336,9 @@ int OnCalculate(const int rates_total,
    int startI = (prev_calculated <= 0) ? w : MathMax(w, prev_calculated - 1 - w);
    if(startI > maxI) return(rates_total);
 
+   //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
+   datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
+
    //--- v1.01 FIX #4: read ATR PER BAR, not one current value applied
    //--- to all of history - only the slice actually needed this call.
    int atrCount = maxI - startI + 1;
@@ -324,6 +354,7 @@ int OnCalculate(const int rates_total,
 
    for(int i = startI; i <= maxI; i++)
      {
+      if(time[i] < cutoffTime) continue;   // v1.03: outside the lookback window - not eligible at all
       double minDistance = atrBuf[i - startI] * InpAtrMultiplier;
       if(minDistance <= 0.0) continue;
 
@@ -352,10 +383,10 @@ int OnCalculate(const int rates_total,
       int visible = 0;
       for(int k = 0; k < ArraySize(g_levels); k++)
          if(g_levels[k].touches >= InpMinTouchesToShow) visible++;
-      PrintFormat("Important_SR_Levels: initial scan done - %d bars checked, %d levels found, "
-                  "%d visible (touches>=%d), %d hidden below the touch threshold",
-                  maxI - startI + 1, ArraySize(g_levels), visible, InpMinTouchesToShow,
-                  ArraySize(g_levels) - visible);
+      PrintFormat("Important_SR_Levels: initial scan done - %d bars checked (lookback cutoff: %s), "
+                  "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
+                  maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
+                  ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
      }
 
    return(rates_total);
