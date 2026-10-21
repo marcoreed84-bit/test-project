@@ -45,7 +45,24 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.06"
+#property version   "1.07"
+//--- 1.07: Added a second, completely independent construction per
+//--- direct request - "the levels you have in the aurelius ea for
+//--- support and resistance, the grey dashed lines, gold seems to
+//--- respect these levels." Checked Aurelius_EA.mq5's SRLevels()/
+//--- SRDistanceATR() (lines ~2846-2871): it is NOT a fractal/touch-count
+//--- system at all - just the max high / min low of the prior
+//--- InpSRDays (default 3) COMPLETED daily bars, recomputed fresh every
+//--- day, drawn dashed in a dimmed silver (InpColSR). This is a real,
+//--- live-confirmed construction on gold (the combined slope x S/R
+//--- block, REAL-CONFIRMED 2026-09-24) - NOT independently validated on
+//--- BTC, just offered here because it structurally sidesteps every
+//--- problem the fractal layers above have been hitting: no old-era
+//--- levels (nothing to look back further than InpRecentHLDays days),
+//--- no eviction competition (only ever 2 lines total), no chop-
+//--- starvation (always anchored to the last few days by construction).
+//--- New ScanRecentHL() function, InpShowRecentHL/InpRecentHLDays/
+//--- InpRecentHLColor inputs, redraws once per new completed daily bar.
 //--- 1.06: User reported (with a chart screenshot) that levels only ever
 //--- appeared well ABOVE and well BELOW the price band the market had
 //--- actually been trading in for days, with a visible gap of NO levels
@@ -204,9 +221,27 @@ input color    InpDailyResistanceColor = clrOrange;
 input color    InpWeeklySupportColor    = clrDodgerBlue;
 input color    InpWeeklyResistanceColor = clrMagenta;
 
+input group "=== Recent N-day high/low (Aurelius-style rolling channel) ==="
+input bool     InpShowRecentHL      = true;      // A completely different, much simpler construction, lifted
+                                                  // from Aurelius_EA's own SRLevels()/SRDistanceATR() - just the
+                                                  // max high / min low of the prior InpRecentHLDays COMPLETED
+                                                  // daily bars, recomputed fresh every day. No fractal
+                                                  // detection, no touch accumulation, no eviction competition -
+                                                  // always anchored to the last few days by construction, so it
+                                                  // can never be crowded out by old levels or starved during
+                                                  // chop the way the fractal layers above can. This exact
+                                                  // construction is REAL-CONFIRMED on live GOLD (2026-09-24,
+                                                  // the combined slope x S/R block) - NOT independently
+                                                  // validated on BTC, just offered here since it structurally
+                                                  // sidesteps the problems the fractal layers have been hitting.
+input int      InpRecentHLDays      = 3;         // Matches Aurelius's own InpSRDays default
+input color    InpRecentHLColor     = C'120,144,176';  // same dimmed silver Aurelius uses, so a static recent
+                                                  // level never competes for attention with the live chart
+
 #define PFX   "SRL_"
 #define PFX_D "SRLD_"
 #define PFX_W "SRLW_"
+#define PFX_RHL "SRLRHL_"
 
 struct SRLevel
   {
@@ -227,6 +262,7 @@ int      g_atrHandleD = INVALID_HANDLE;
 int      g_atrHandleW = INVALID_HANDLE;
 datetime g_lastDailyBarTime  = 0;
 datetime g_lastWeeklyBarTime = 0;
+datetime g_lastRecentHLBarTime = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -270,6 +306,7 @@ int OnInit()
    ArrayResize(g_levelsW, 0);
    g_lastDailyBarTime  = 0;
    g_lastWeeklyBarTime = 0;
+   g_lastRecentHLBarTime = 0;
    //--- v1.02: unconditional confirmation line - previously this
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
@@ -288,6 +325,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, PFX_D);
    ObjectsDeleteAll(0, PFX_W);
+   ObjectsDeleteAll(0, PFX_RHL);
    if(g_atrHandle  != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
    if(g_atrHandleD != INVALID_HANDLE) IndicatorRelease(g_atrHandleD);
    if(g_atrHandleW != INVALID_HANDLE) IndicatorRelease(g_atrHandleW);
@@ -476,6 +514,65 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
 //| than replicating the main scan's incremental bookkeeping twice    |
 //| more).                                                             |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Aurelius-style recent N-day high/low - lifted directly from that  |
+//| EA's own SRLevels()/UpdateLevelLines() pattern: just the max high |
+//| / min low of the prior InpRecentHLDays COMPLETED D1 bars (shift 1 |
+//| onward, so today never leaks in), redrawn whenever that window    |
+//| actually changes (a new day closes). No fractal confirmation, no  |
+//| touch count, no eviction - this is deliberately the simplest      |
+//| possible construction, matching what's REAL-CONFIRMED on gold.    |
+//+------------------------------------------------------------------+
+void ScanRecentHL()
+  {
+   int n = MathMax(1, InpRecentHLDays);
+   datetime d0 = iTime(_Symbol, PERIOD_D1, 0);
+   if(d0 == g_lastRecentHLBarTime) return;   // only recompute once per new daily bar
+   g_lastRecentHLBarTime = d0;
+
+   double hi = -DBL_MAX, lo = DBL_MAX;
+   for(int i = 1; i <= n; i++)
+     {
+      double dh = iHigh(_Symbol, PERIOD_D1, i);
+      double dl = iLow(_Symbol, PERIOD_D1, i);
+      if(dh <= 0.0 || dl <= 0.0)
+        {
+         Print("Important_SR_Levels: recent-HL skipped - D1 history not ready yet.");
+         return;
+        }
+      if(dh > hi) hi = dh;
+      if(dl < lo) lo = dl;
+     }
+
+   string nmHi = PFX_RHL + "hi", nmLo = PFX_RHL + "lo";
+   for(int pass = 0; pass < 2; pass++)
+     {
+      string nm = (pass == 0) ? nmHi : nmLo;
+      double price = (pass == 0) ? hi : lo;
+      if(ObjectFind(0, nm) < 0)
+        {
+         if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, price))
+           {
+            PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                        nm, DoubleToString(price, _Digits), GetLastError());
+            continue;
+           }
+         ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+        }
+      ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLColor);
+      ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DASH);
+      ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+      ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+      ObjectSetString(0, nm, OBJPROP_TOOLTIP,
+                       "Recent " + IntegerToString(n) + "-day " + (pass == 0 ? "high" : "low") + ": " +
+                       DoubleToString(price, _Digits) + " (Aurelius-style rolling S/R)");
+     }
+   PrintFormat("Important_SR_Levels: recent-HL updated - last %d completed D1 bars, hi=%s lo=%s",
+               n, DoubleToString(hi, _Digits), DoubleToString(lo, _Digits));
+  }
+
+//+------------------------------------------------------------------+
 void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string prefix,
                    const color supCol, const color resCol, const int atrHandle, datetime &lastBarTime)
   {
@@ -626,6 +723,8 @@ int OnCalculate(const int rates_total,
    if(InpShowWeeklyLevels)
       ScanHigherTF(PERIOD_W1, g_levelsW, PFX_W, InpWeeklySupportColor, InpWeeklyResistanceColor,
                    g_atrHandleW, g_lastWeeklyBarTime);
+   if(InpShowRecentHL)
+      ScanRecentHL();
 
    //--- v1.02: one-time summary once the initial backfill finishes, so
    //--- "I attached it and see nothing" has an actual answer in the
