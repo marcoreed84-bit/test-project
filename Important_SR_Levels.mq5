@@ -45,7 +45,19 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.08"
+#property version   "1.09"
+//--- 1.09: Per direct request - "we need to filter the important ones
+//--- somehow, this is too many" - a screenshot showed 10+ overlapping
+//--- S/R lines crowding a single BTC trading range. InpMinTouchesToShow
+//--- was only ever a FLOOR (show nothing below N touches), never a CAP -
+//--- a busy range can produce a dozen+ levels that all individually
+//--- clear it. New InpShowTopN (default 6) adds a hard cap: only the
+//--- top N levels BY TOUCH COUNT, per layer (intraday/daily/weekly each
+//--- capped independently), are actually drawn on the chart - everything
+//--- else that clears the touch threshold keeps accumulating touches
+//--- internally and can rank back into the top N later, it's just not
+//--- drawn while it's outside it. New ApplyTopNFilter(), called every
+//--- OnCalculate right before the label refresh.
 //--- 1.08: Per direct request - "can we label the lines at the end" -
 //--- the touch-count label (InpShowTouchLabels) used to sit at the
 //--- level's last-touch time, which could be buried mid-chart, easy to
@@ -186,6 +198,17 @@ input int      InpMinTouchesToShow = 2;     // Per direct request: a level only 
                                              // touched/respected at least this many times - a single
                                              // untested pivot is noise, not a major level. Set to 1 to show
                                              // every pivot immediately (back to the old behavior).
+input int      InpShowTopN         = 6;     // v1.09 FIX: "we need to filter the important ones somehow,
+                                             // this is too many" - InpMinTouchesToShow alone could still
+                                             // let a dozen+ levels all clear the bar and flood the chart
+                                             // (reported: a 1-hour BTC range showing 10+ overlapping S/R
+                                             // lines). This caps it HARD: only the top N levels BY TOUCH
+                                             // COUNT, per layer (intraday/daily/weekly each get their own
+                                             // top N), are actually drawn - everything else that clears
+                                             // InpMinTouchesToShow still counts toward touches internally,
+                                             // it just isn't shown until it ranks back into the top N. Set
+                                             // to 0 to disable (show everything that clears the touch
+                                             // threshold, the old behavior).
 input int      InpLookbackDays     = 730;   // v1.03 FIX: only pivots from the last N calendar days are even
                                              // ELIGIBLE to be registered as a level (0 = no limit, scan
                                              // all available history). Added because the clustering distance
@@ -423,6 +446,51 @@ void RefreshRightEdgeLabels(SRLevel &levels[], const int minTouchesToShow, const
       ObjectSetDouble(0, levels[k].labelName, OBJPROP_PRICE, levels[k].price);
       ObjectSetString(0, levels[k].labelName, OBJPROP_TEXT,
                        (levels[k].isSupport ? " S x" : " R x") + IntegerToString(levels[k].touches));
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| v1.09: hard cap on how many levels in one layer are ACTUALLY DRAWN |
+//| at once - per direct request ("we need to filter the important    |
+//| ones somehow, this is too many"). InpMinTouchesToShow alone is a   |
+//| floor, not a cap - a busy range can produce a dozen+ levels that   |
+//| all clear it. Ranks the levels that clear the touch threshold by   |
+//| touch count (descending) and only keeps the top InpShowTopN drawn  |
+//| on the chart; the rest stay fully tracked internally (so they can  |
+//| still accumulate touches and re-enter the top N later) but their   |
+//| chart objects are removed. Simple selection sort - array is capped |
+//| at InpMaxLevels (default 40) so this is cheap even every tick.     |
+//+------------------------------------------------------------------+
+void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int topN,
+                      const color supCol, const color resCol)
+  {
+   if(topN <= 0) return;   // 0 = disabled, old "show everything that clears the threshold" behavior
+   int idx[];
+   ArrayResize(idx, 0);
+   for(int k = 0; k < ArraySize(levels); k++)
+     {
+      if(levels[k].touches < minTouchesToShow) continue;
+      int sz = ArraySize(idx);
+      ArrayResize(idx, sz + 1);
+      idx[sz] = k;
+     }
+   int m = ArraySize(idx);
+   for(int a = 0; a < m; a++)
+     {
+      int best = a;
+      for(int b = a + 1; b < m; b++)
+         if(levels[idx[b]].touches > levels[idx[best]].touches) best = b;
+      if(best != a) { int tmp = idx[a]; idx[a] = idx[best]; idx[best] = tmp; }
+     }
+   for(int a = 0; a < m; a++)
+     {
+      if(a < topN)
+         RedrawLevelG(levels[idx[a]], minTouchesToShow, supCol, resCol);   // ensure it's drawn (idempotent)
+      else
+        {
+         if(ObjectFind(0, levels[idx[a]].lineName) >= 0)  ObjectDelete(0, levels[idx[a]].lineName);
+         if(ObjectFind(0, levels[idx[a]].labelName) >= 0) ObjectDelete(0, levels[idx[a]].labelName);
+        }
      }
   }
 
@@ -799,6 +867,11 @@ int OnCalculate(const int rates_total,
                    g_atrHandleW, g_lastWeeklyBarTime);
    if(InpShowRecentHL)
       ScanRecentHL();
+
+   //--- v1.09: cap how many levels per layer are actually drawn
+   ApplyTopNFilter(g_levels,  InpMinTouchesToShow,   InpShowTopN, InpSupportColor,         InpResistanceColor);
+   ApplyTopNFilter(g_levelsD, InpDWMinTouchesToShow, InpShowTopN, InpDailySupportColor,    InpDailyResistanceColor);
+   ApplyTopNFilter(g_levelsW, InpDWMinTouchesToShow, InpShowTopN, InpWeeklySupportColor,   InpWeeklyResistanceColor);
 
    //--- v1.08: refresh every visible label's position to the right edge
    //--- every call, not just when a level is actually touched
