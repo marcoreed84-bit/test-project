@@ -21,18 +21,45 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 //+------------------------------------------------------------------+
-//| v2.23: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
+//| v2.24: LOCKED to M15 - this is the M15-only copy of TradePanel_EA.   |
 //| OnInit() below refuses to run (INIT_FAILED, with an Alert()) if   |
 //| attached to any chart whose timeframe isn't M15. The TradePanel_EA_M5.mq5 |
 //| sibling is identical except for this one constant -               |
 //| EXPECTED_PERIOD - and its own symmetric version of this same      |
-//| refusal. Rebuilt from the v2.23 base (panel button fix, capped     |
-//| Divergence/BB backfill), so this copy carries all of that too.    |
+//| refusal. Rebuilt from the v2.24 base (all 9 overlays now cap their |
+//| backfill), so this copy carries that too.                          |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M15
-#property version   "2.23"
-//--- 2.23: Locked copy (M15 only) - see header block above. Rebuilt from
-//--- v2.23 (panel button fix, capped Divergence/BB backfill) so this copy carries that too.
+#property version   "2.24"
+//--- 2.24: Locked copy (M15 only) - see header block above. Rebuilt from
+//--- v2.24 (all 9 overlays now cap their backfill) so this copy carries that too.
+//--- 2.23: Opus-reviewed again (panel buttons + remaining lag). Real
+//--- fixes: (1) Divergence and BB (both new this session) were still
+//--- backfilling the ENTIRE chart history on attach, same shape of
+//--- problem as the v2.21 FVG/Liquidity hang, just O(n) not O(n^2) -
+//--- now capped like every other overlay, shrinking the attach-time
+//--- stall that was likely the real reason the panel looked unresponsive
+//--- right after attach (the event thread is single-threaded - while
+//--- OnInit is busy, clicks queue up or get dropped). (2) FVG/Liquidity
+//--- signal object names used the zone's ARRAY INDEX (zi), which
+//--- CompactZones() (new in v2.21) reshuffles - a replayed bar could
+//--- give the same zone's signal a different id and draw a duplicate
+//--- arrow/SL. Now derived from the zone's own stable rectName instead.
+//--- (3) The 6 lot/count/delay +/- stepper buttons never reset
+//--- OBJPROP_STATE after a click - the action DID fire each time, but
+//--- the button stayed drawn pressed until the NEXT click, which reads
+//--- exactly like "the +/- buttons aren't working". Fixed to match
+//--- every other button on the panel. (4) g_nCtrls/g_ctrls[] and
+//--- g_editFocused were never reset in OnInit() - MT5 keeps globals
+//--- across a reinit, so BuildPanel() was appending to whatever
+//--- g_ctrls[] a PREVIOUS compile left behind rather than starting
+//--- clean; after many recompiles this session, DragPanel() would have
+//--- been moving each duplicated widget multiple times per drag -
+//--- exactly "i can not make changes on the window panel". Also, per
+//--- direct request ("can we limit history to a week... oldest days
+//--- signals are removed") - InpSigDrawDays was already 7 by default
+//--- (nothing to change there), but InpFvgMaxAgeDays/InpLiqMaxAgeDays
+//--- (10) now match it for consistency across every overlay.
 //--- 2.22: Several changes, all per direct request. (1) Every entry-
 //--- arrow's WIDTH reduced from 2 to 1 ("smaller"). (2) Every entry-
 //--- arrow's offset-from-candle increased ("spaced away from candles") -
@@ -2638,7 +2665,18 @@ void ComputeEmaCrossSignals(const bool backfill)
   {
    int minBars = InpMA50 + InpEmaCrossSwingBars + 5;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.24 FIX: this overlay (pre-existing before this session) was
+   //--- always uncapped on backfill like every overlay here except FVG/
+   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
+   //--- its own this was apparently tolerable, but stacked together with
+   //--- four new overlays all doing their own full/capped scans in the
+   //--- same OnInit() call, the combined synchronous cost was still
+   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
+   //--- the same way as the others - the signal/trend state this overlay
+   //--- needs only requires a bounded recent window, not the entire
+   //--- chart history, to warm up correctly.
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -2998,7 +3036,18 @@ void ComputeStochSignals(const bool backfill)
   {
    int minBars = InpStochKPeriod + InpStochSlowing + InpStochDPeriod + InpStochSwingBars;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.24 FIX: this overlay (pre-existing before this session) was
+   //--- always uncapped on backfill like every overlay here except FVG/
+   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
+   //--- its own this was apparently tolerable, but stacked together with
+   //--- four new overlays all doing their own full/capped scans in the
+   //--- same OnInit() call, the combined synchronous cost was still
+   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
+   //--- the same way as the others - the signal/trend state this overlay
+   //--- needs only requires a bounded recent window, not the entire
+   //--- chart history, to warm up correctly.
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -3156,7 +3205,18 @@ void ComputeCandleSignals(const bool backfill)
   {
    int minBars = InpCdlSwingBars + 5;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.24 FIX: this overlay (pre-existing before this session) was
+   //--- always uncapped on backfill like every overlay here except FVG/
+   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
+   //--- its own this was apparently tolerable, but stacked together with
+   //--- four new overlays all doing their own full/capped scans in the
+   //--- same OnInit() call, the combined synchronous cost was still
+   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
+   //--- the same way as the others - the signal/trend state this overlay
+   //--- needs only requires a bounded recent window, not the entire
+   //--- chart history, to warm up correctly.
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -3321,7 +3381,18 @@ void ComputeRejectSignals2(const bool backfill)
   {
    int minBars = MathMax(InpRejBBPeriod, InpStochKPeriod + InpStochSlowing + InpStochDPeriod) + InpRejLookbackBars + 10;
    int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.24 FIX: this overlay (pre-existing before this session) was
+   //--- always uncapped on backfill like every overlay here except FVG/
+   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
+   //--- its own this was apparently tolerable, but stacked together with
+   //--- four new overlays all doing their own full/capped scans in the
+   //--- same OnInit() call, the combined synchronous cost was still
+   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
+   //--- the same way as the others - the signal/trend state this overlay
+   //--- needs only requires a bounded recent window, not the entire
+   //--- chart history, to warm up correctly.
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
@@ -3522,7 +3593,22 @@ void ComputeRejectSignalsM15(const bool backfill)
   {
    int minBars = MathMax(InpRejBBPeriod, InpStochKPeriod + InpStochSlowing + InpStochDPeriod) + InpRejLookbackBars + 10;
    int available = Bars(_Symbol, PERIOD_M15) - 1;
-   int total = backfill ? available : MathMin(available, minBars + 500);
+   //--- v2.24 FIX: this overlay (pre-existing before this session) was
+   //--- always uncapped on backfill like every overlay here except FVG/
+   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
+   //--- its own this was apparently tolerable, but stacked together with
+   //--- four new overlays all doing their own full/capped scans in the
+   //--- same OnInit() call, the combined synchronous cost was still
+   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
+   //--- the same way as the others - the signal/trend state this overlay
+   //--- needs only requires a bounded recent window, not the entire
+   //--- chart history, to warm up correctly. NOTE: this overlay always
+   //--- reads PERIOD_M15 (see CopyRates below), so the cap uses M15's own
+   //--- bar duration, not the chart's - the other 4 copies of this exact
+   //--- comment block use PERIOD_CURRENT correctly, this one is the only
+   //--- PERIOD_M15 exception.
+   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_M15));
+   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
    if(total < minBars) return;
    MqlRates r[];
    int n = CopyRates(_Symbol, PERIOD_M15, 1, total, r);
