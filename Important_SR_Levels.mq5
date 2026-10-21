@@ -45,7 +45,18 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.07"
+#property version   "1.08"
+//--- 1.08: Per direct request - "can we label the lines at the end" -
+//--- the touch-count label (InpShowTouchLabels) used to sit at the
+//--- level's last-touch time, which could be buried mid-chart, easy to
+//--- miss. Moved to the chart's RIGHT EDGE instead, and now includes
+//--- the S/R letter (" S x3" / " R x5"), not just the touch count.
+//--- New RefreshRightEdgeLabels(), called every OnCalculate (not just
+//--- when a level is actually touched) so the label keeps tracking
+//--- forward with "now" instead of going stale between touches. Also
+//--- added matching right-edge labels ("3D Hi"/"3D Lo") to the recent-HL
+//--- lines from v1.07, which previously had no visible label at all -
+//--- only a tooltip on hover.
 //--- 1.07: Added a second, completely independent construction per
 //--- direct request - "the levels you have in the aurelius ea for
 //--- support and resistance, the grey dashed lines, gold seems to
@@ -263,6 +274,9 @@ int      g_atrHandleW = INVALID_HANDLE;
 datetime g_lastDailyBarTime  = 0;
 datetime g_lastWeeklyBarTime = 0;
 datetime g_lastRecentHLBarTime = 0;
+double   g_recentHLHi = 0.0;
+double   g_recentHLLo = 0.0;
+bool     g_recentHLReady = false;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -307,6 +321,7 @@ int OnInit()
    g_lastDailyBarTime  = 0;
    g_lastWeeklyBarTime = 0;
    g_lastRecentHLBarTime = 0;
+   g_recentHLReady = false;
    //--- v1.02: unconditional confirmation line - previously this
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
@@ -371,6 +386,13 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
 
    if(InpShowTouchLabels)
      {
+      //--- v1.08: label moved to the chart's RIGHT EDGE (per direct
+      //--- request - "can we label the lines at the end"), instead of
+      //--- sitting at the level's last-touch time where it could be
+      //--- buried mid-chart. Created here with a placeholder position;
+      //--- RefreshRightEdgeLabels() (called every OnCalculate, not just
+      //--- when a level is touched) keeps it pinned to "now" so it tracks
+      //--- forward with price instead of going stale between touches.
       if(ObjectFind(0, lvl.labelName) < 0)
         {
          ObjectCreate(0, lvl.labelName, OBJ_TEXT, 0, lvl.lastTime, lvl.price);
@@ -378,14 +400,29 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
          ObjectSetInteger(0, lvl.labelName, OBJPROP_HIDDEN, true);
          ObjectSetInteger(0, lvl.labelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
         }
-      //--- placed at the time of the level's MOST RECENT touch (not the
-      //--- chart's right edge - a level last touched months ago sits
-      //--- where it was last actually touched, not dragged to "now")
-      ObjectSetInteger(0, lvl.labelName, OBJPROP_TIME, 0, lvl.lastTime);
-      ObjectSetDouble(0, lvl.labelName, OBJPROP_PRICE, lvl.price);
-      ObjectSetString(0, lvl.labelName, OBJPROP_TEXT, " x" + IntegerToString(lvl.touches));
       ObjectSetInteger(0, lvl.labelName, OBJPROP_COLOR, InpLabelColor);
       ObjectSetInteger(0, lvl.labelName, OBJPROP_FONTSIZE, InpLabelFontSize);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| v1.08: pins every visible level's label to the chart's right edge |
+//| ("nowTime"), called every OnCalculate regardless of whether any   |
+//| level was actually touched this tick - otherwise a label would    |
+//| only move when its level got a new touch, and sit stale (at the   |
+//| OLD nowTime from whenever that last happened) in between.         |
+//+------------------------------------------------------------------+
+void RefreshRightEdgeLabels(SRLevel &levels[], const int minTouchesToShow, const datetime nowTime)
+  {
+   if(!InpShowTouchLabels) return;
+   for(int k = 0; k < ArraySize(levels); k++)
+     {
+      if(levels[k].touches < minTouchesToShow) continue;
+      if(ObjectFind(0, levels[k].labelName) < 0) continue;
+      ObjectSetInteger(0, levels[k].labelName, OBJPROP_TIME, 0, nowTime);
+      ObjectSetDouble(0, levels[k].labelName, OBJPROP_PRICE, levels[k].price);
+      ObjectSetString(0, levels[k].labelName, OBJPROP_TEXT,
+                       (levels[k].isSupport ? " S x" : " R x") + IntegerToString(levels[k].touches));
      }
   }
 
@@ -543,6 +580,9 @@ void ScanRecentHL()
       if(dh > hi) hi = dh;
       if(dl < lo) lo = dl;
      }
+   g_recentHLHi = hi;
+   g_recentHLLo = lo;
+   g_recentHLReady = true;
 
    string nmHi = PFX_RHL + "hi", nmLo = PFX_RHL + "lo";
    for(int pass = 0; pass < 2; pass++)
@@ -570,6 +610,40 @@ void ScanRecentHL()
      }
    PrintFormat("Important_SR_Levels: recent-HL updated - last %d completed D1 bars, hi=%s lo=%s",
                n, DoubleToString(hi, _Digits), DoubleToString(lo, _Digits));
+  }
+
+//+------------------------------------------------------------------+
+//| v1.08: right-edge labels for the recent-HL lines (these had NO    |
+//| label of any kind before - price-only tooltip on hover), called   |
+//| every OnCalculate alongside the fractal layers' own label refresh.|
+//+------------------------------------------------------------------+
+void RefreshRecentHLLabels(const datetime nowTime)
+  {
+   if(!InpShowRecentHL || !InpShowTouchLabels || !g_recentHLReady) return;
+   string nmHiLbl = PFX_RHL + "lbl_hi", nmLoLbl = PFX_RHL + "lbl_lo";
+   for(int pass = 0; pass < 2; pass++)
+     {
+      string nm = (pass == 0) ? nmHiLbl : nmLoLbl;
+      double price = (pass == 0) ? g_recentHLHi : g_recentHLLo;
+      if(ObjectFind(0, nm) < 0)
+        {
+         if(!ObjectCreate(0, nm, OBJ_TEXT, 0, nowTime, price))
+           {
+            PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                        nm, DoubleToString(price, _Digits), GetLastError());
+            continue;
+           }
+         ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+        }
+      ObjectSetInteger(0, nm, OBJPROP_TIME, 0, nowTime);
+      ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+      ObjectSetString(0, nm, OBJPROP_TEXT, (pass == 0 ? " " : " ") + IntegerToString(InpRecentHLDays) +
+                       "D " + (pass == 0 ? "Hi" : "Lo"));
+      ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLColor);
+      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, InpLabelFontSize);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -725,6 +799,14 @@ int OnCalculate(const int rates_total,
                    g_atrHandleW, g_lastWeeklyBarTime);
    if(InpShowRecentHL)
       ScanRecentHL();
+
+   //--- v1.08: refresh every visible label's position to the right edge
+   //--- every call, not just when a level is actually touched
+   datetime nowTime = TimeCurrent();
+   RefreshRightEdgeLabels(g_levels,  InpMinTouchesToShow,   nowTime);
+   RefreshRightEdgeLabels(g_levelsD, InpDWMinTouchesToShow, nowTime);
+   RefreshRightEdgeLabels(g_levelsW, InpDWMinTouchesToShow, nowTime);
+   RefreshRecentHLLabels(nowTime);
 
    //--- v1.02: one-time summary once the initial backfill finishes, so
    //--- "I attached it and see nothing" has an actual answer in the
