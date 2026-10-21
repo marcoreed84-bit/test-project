@@ -45,7 +45,24 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.09"
+#property version   "1.10"
+//--- 1.10: Per direct request - "maybe just change the support and
+//--- resistance indicator... focus to show the support and resistance
+//--- levels according to the 4 hour timeframe and up, and maybe include
+//--- the 3 days high and low, open and close". Two changes:
+//--- (1) The intraday (chart's own timeframe) fractal layer is now OFF
+//--- by default (InpShowIntradayLevels) - noisy/minor on a fast chart
+//--- timeframe compared to H4+. New H4 layer added (InpShowH4Levels,
+//--- on by default), reusing the exact same ScanHigherTF() construction
+//--- already used for daily/weekly, so the indicator now defaults to
+//--- showing H4 + daily + weekly fractal S/R, with intraday available
+//--- as an opt-in. (2) The existing Aurelius-style recent-N-day
+//--- high/low layer (already defaulting to 3 days) now optionally also
+//--- draws the OPEN of the oldest of those days and the CLOSE of the
+//--- most recent completed day (InpShowRecentOC, on by default) -
+//--- together with the existing high/low this reads as a single
+//--- synthetic N-day OHLC bar, each with its own colour and right-edge
+//--- label, same pattern as everything else in this file.
 //--- 1.09: Per direct request - "we need to filter the important ones
 //--- somehow, this is too many" - a screenshot showed 10+ overlapping
 //--- S/R lines crowding a single BTC trading range. InpMinTouchesToShow
@@ -240,16 +257,31 @@ input bool     InpShowTouchLabels  = true;  // small "xN" text label showing eac
 input color    InpLabelColor       = clrWhite;
 input int      InpLabelFontSize    = 8;
 
-input group "=== Daily / Weekly levels (independent of the chart's own timeframe) ==="
+input group "=== Intraday levels (the chart's own timeframe) ==="
+input bool     InpShowIntradayLevels = false;  // v1.10: default OFF - per direct request ("maybe just change
+                                                // the support and resistance indicator... focus to show the
+                                                // support and resistance levels according to the 4 hour
+                                                // timeframe and up") - fractal pivots on a fast intraday
+                                                // chart timeframe are noisy/minor compared to H4+; the
+                                                // InpLeftRightWindow/InpAtrMultiplier/InpMaxLevels/
+                                                // InpLookbackDays/InpRecentProtectDays inputs above still
+                                                // configure this layer whenever it's switched back on
+
+input group "=== H4 / Daily / Weekly levels (independent of the chart's own timeframe) ==="
+input bool     InpShowH4Levels       = true;   // v1.10 NEW - per direct request, "4 hour timeframe and up" -
+                                                // scans PERIOD_H4 bars directly, same construction as the
+                                                // daily/weekly layers below
 input bool     InpShowDailyLevels    = true;   // scan PERIOD_D1 bars directly for daily S/R, regardless of
                                                 // what timeframe this chart is actually showing
 input bool     InpShowWeeklyLevels   = true;   // same, for PERIOD_W1
-input int      InpDWWindow           = 2;      // fractal window on D1/W1 bars - smaller than the intraday
-                                                // one since each bar already represents a full day/week
+input int      InpDWWindow           = 2;      // fractal window on H4/D1/W1 bars - smaller than the intraday
+                                                // one since each bar already represents a large chunk of time
 input int      InpDWMinTouchesToShow = 2;      // "major levels only" filter, same idea as InpMinTouchesToShow
-input int      InpDWMaxLevels        = 20;     // cap per layer (daily and weekly each get their own 20)
-input int      InpDWLookbackDays     = 1825;   // ~5 years - daily/weekly pivots are rarer and more durable
+input int      InpDWMaxLevels        = 20;     // cap per layer (H4/daily/weekly each get their own 20)
+input int      InpDWLookbackDays     = 1825;   // ~5 years - H4/daily/weekly pivots are rarer and more durable
                                                 // than intraday ones, so a longer lookback makes sense here
+input color    InpH4SupportColor       = clrYellowGreen;
+input color    InpH4ResistanceColor    = clrTomato;
 input color    InpDailySupportColor    = clrAqua;
 input color    InpDailyResistanceColor = clrOrange;
 input color    InpWeeklySupportColor    = clrDodgerBlue;
@@ -271,8 +303,17 @@ input bool     InpShowRecentHL      = true;      // A completely different, much
 input int      InpRecentHLDays      = 3;         // Matches Aurelius's own InpSRDays default
 input color    InpRecentHLColor     = C'120,144,176';  // same dimmed silver Aurelius uses, so a static recent
                                                   // level never competes for attention with the live chart
+input bool     InpShowRecentOC      = true;      // v1.10 NEW - per direct request ("include the 3 days high
+                                                  // and low, open and close") - two more lines: the OPEN of
+                                                  // the OLDEST of the InpRecentHLDays completed days, and the
+                                                  // CLOSE of the most recent completed day - together with
+                                                  // the existing Hi/Lo this reads as a single synthetic
+                                                  // N-day OHLC bar
+input color    InpRecentOpenColor   = C'176,144,120';  // dimmed orange-ish, distinct from the Hi/Lo silver
+input color    InpRecentCloseColor  = C'144,176,120';  // dimmed green-ish
 
 #define PFX   "SRL_"
+#define PFX_H4 "SRLH4_"
 #define PFX_D "SRLD_"
 #define PFX_W "SRLW_"
 #define PFX_RHL "SRLRHL_"
@@ -289,16 +330,21 @@ struct SRLevel
   };
 
 SRLevel  g_levels[];
+SRLevel  g_levelsH4[];
 SRLevel  g_levelsD[];
 SRLevel  g_levelsW[];
-int      g_atrHandle  = INVALID_HANDLE;
-int      g_atrHandleD = INVALID_HANDLE;
-int      g_atrHandleW = INVALID_HANDLE;
+int      g_atrHandle   = INVALID_HANDLE;
+int      g_atrHandleH4 = INVALID_HANDLE;
+int      g_atrHandleD  = INVALID_HANDLE;
+int      g_atrHandleW  = INVALID_HANDLE;
+datetime g_lastH4BarTime     = 0;
 datetime g_lastDailyBarTime  = 0;
 datetime g_lastWeeklyBarTime = 0;
 datetime g_lastRecentHLBarTime = 0;
 double   g_recentHLHi = 0.0;
 double   g_recentHLLo = 0.0;
+double   g_recentOpen  = 0.0;
+double   g_recentClose = 0.0;
 bool     g_recentHLReady = false;
 
 //+------------------------------------------------------------------+
@@ -320,6 +366,15 @@ int OnInit()
       Print("Important_SR_Levels: failed to create ATR handle.");
       return(INIT_FAILED);
      }
+   if(InpShowH4Levels)
+     {
+      g_atrHandleH4 = iATR(_Symbol, PERIOD_H4, InpAtrPeriod);
+      if(g_atrHandleH4 == INVALID_HANDLE)
+        {
+         Print("Important_SR_Levels: failed to create H4 ATR handle.");
+         return(INIT_FAILED);
+        }
+     }
    if(InpShowDailyLevels)
      {
       g_atrHandleD = iATR(_Symbol, PERIOD_D1, InpAtrPeriod);
@@ -339,8 +394,10 @@ int OnInit()
         }
      }
    ArrayResize(g_levels, 0);
+   ArrayResize(g_levelsH4, 0);
    ArrayResize(g_levelsD, 0);
    ArrayResize(g_levelsW, 0);
+   g_lastH4BarTime     = 0;
    g_lastDailyBarTime  = 0;
    g_lastWeeklyBarTime = 0;
    g_lastRecentHLBarTime = 0;
@@ -349,10 +406,11 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.04 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
-               "daily=%s  weekly=%s",
+   PrintFormat("Important_SR_Levels v1.10 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+               "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
+               InpShowIntradayLevels ? "on" : "off", InpShowH4Levels ? "on" : "off",
                InpShowDailyLevels ? "on" : "off", InpShowWeeklyLevels ? "on" : "off");
    return(INIT_SUCCEEDED);
   }
@@ -361,12 +419,14 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    ObjectsDeleteAll(0, PFX);
+   ObjectsDeleteAll(0, PFX_H4);
    ObjectsDeleteAll(0, PFX_D);
    ObjectsDeleteAll(0, PFX_W);
    ObjectsDeleteAll(0, PFX_RHL);
-   if(g_atrHandle  != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
-   if(g_atrHandleD != INVALID_HANDLE) IndicatorRelease(g_atrHandleD);
-   if(g_atrHandleW != INVALID_HANDLE) IndicatorRelease(g_atrHandleW);
+   if(g_atrHandle   != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   if(g_atrHandleH4 != INVALID_HANDLE) IndicatorRelease(g_atrHandleH4);
+   if(g_atrHandleD  != INVALID_HANDLE) IndicatorRelease(g_atrHandleD);
+   if(g_atrHandleW  != INVALID_HANDLE) IndicatorRelease(g_atrHandleW);
   }
 
 //+------------------------------------------------------------------+
@@ -650,6 +710,13 @@ void ScanRecentHL()
      }
    g_recentHLHi = hi;
    g_recentHLLo = lo;
+   //--- v1.10: Open = the OPEN of the OLDEST of the n completed days
+   //--- (shift n), Close = the CLOSE of the most recent completed day
+   //--- (shift 1) - together with hi/lo above this reads as a single
+   //--- synthetic n-day OHLC bar, per direct request ("include the 3
+   //--- days high and low, open and close")
+   g_recentOpen  = iOpen(_Symbol, PERIOD_D1, n);
+   g_recentClose = iClose(_Symbol, PERIOD_D1, 1);
    g_recentHLReady = true;
 
    string nmHi = PFX_RHL + "hi", nmLo = PFX_RHL + "lo";
@@ -676,8 +743,38 @@ void ScanRecentHL()
                        "Recent " + IntegerToString(n) + "-day " + (pass == 0 ? "high" : "low") + ": " +
                        DoubleToString(price, _Digits) + " (Aurelius-style rolling S/R)");
      }
-   PrintFormat("Important_SR_Levels: recent-HL updated - last %d completed D1 bars, hi=%s lo=%s",
-               n, DoubleToString(hi, _Digits), DoubleToString(lo, _Digits));
+
+   if(InpShowRecentOC && g_recentOpen > 0.0 && g_recentClose > 0.0)
+     {
+      string nmOp = PFX_RHL + "op", nmCl = PFX_RHL + "cl";
+      for(int pass = 0; pass < 2; pass++)
+        {
+         string nm = (pass == 0) ? nmOp : nmCl;
+         double price = (pass == 0) ? g_recentOpen : g_recentClose;
+         color col = (pass == 0) ? InpRecentOpenColor : InpRecentCloseColor;
+         if(ObjectFind(0, nm) < 0)
+           {
+            if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, price))
+              {
+               PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                           nm, DoubleToString(price, _Digits), GetLastError());
+               continue;
+              }
+            ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+           }
+         ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+         ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+         ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+         ObjectSetString(0, nm, OBJPROP_TOOLTIP,
+                          IntegerToString(n) + "-day " + (pass == 0 ? "Open" : "Close") + ": " +
+                          DoubleToString(price, _Digits));
+        }
+     }
+   PrintFormat("Important_SR_Levels: recent-HL updated - last %d completed D1 bars, hi=%s lo=%s open=%s close=%s",
+               n, DoubleToString(hi, _Digits), DoubleToString(lo, _Digits),
+               DoubleToString(g_recentOpen, _Digits), DoubleToString(g_recentClose, _Digits));
   }
 
 //+------------------------------------------------------------------+
@@ -710,6 +807,41 @@ void RefreshRecentHLLabels(const datetime nowTime)
       ObjectSetString(0, nm, OBJPROP_TEXT, (pass == 0 ? " " : " ") + IntegerToString(InpRecentHLDays) +
                        "D " + (pass == 0 ? "Hi" : "Lo"));
       ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLColor);
+      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, InpLabelFontSize);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| v1.10: right-edge labels for the Open/Close lines, same pattern as |
+//| RefreshRecentHLLabels() above.                                     |
+//+------------------------------------------------------------------+
+void RefreshRecentOCLabels(const datetime nowTime)
+  {
+   if(!InpShowRecentHL || !InpShowRecentOC || !InpShowTouchLabels || !g_recentHLReady) return;
+   if(g_recentOpen <= 0.0 || g_recentClose <= 0.0) return;
+   string nmOpLbl = PFX_RHL + "lbl_op", nmClLbl = PFX_RHL + "lbl_cl";
+   for(int pass = 0; pass < 2; pass++)
+     {
+      string nm = (pass == 0) ? nmOpLbl : nmClLbl;
+      double price = (pass == 0) ? g_recentOpen : g_recentClose;
+      color col = (pass == 0) ? InpRecentOpenColor : InpRecentCloseColor;
+      if(ObjectFind(0, nm) < 0)
+        {
+         if(!ObjectCreate(0, nm, OBJ_TEXT, 0, nowTime, price))
+           {
+            PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                        nm, DoubleToString(price, _Digits), GetLastError());
+            continue;
+           }
+         ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+        }
+      ObjectSetInteger(0, nm, OBJPROP_TIME, 0, nowTime);
+      ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+      ObjectSetString(0, nm, OBJPROP_TEXT, " " + IntegerToString(InpRecentHLDays) +
+                       "D " + (pass == 0 ? "Open" : "Close"));
+      ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, InpLabelFontSize);
      }
   }
@@ -783,82 +915,111 @@ int OnCalculate(const int rates_total,
                  const int &spread[])
   {
    int w = InpLeftRightWindow;
-   //--- v1.02 FIX: "not enough bars yet" must return 0, not rates_total -
-   //--- returning rates_total claims the whole history is fully handled,
-   //--- so if MT5 later loads more history (common right after attach,
-   //--- or on a symbol whose history is still downloading), this
-   //--- indicator would never go back and actually run the real scan.
-   if(rates_total < 2 * w + 2) return(0);
-
-   //--- v1.01 FIX #2: prev_calculated resetting to 0 (a history
-   //--- reload/gap-fill, NOT necessarily "freshly attached") must wipe
-   //--- the existing level list and chart objects first - otherwise the
-   //--- whole history gets re-scanned on top of what's already there,
-   //--- roughly doubling every touch count.
-   if(prev_calculated <= 0)
+   //--- v1.10: the whole intraday (chart's own timeframe) fractal scan is
+   //--- now OFF by default and gated behind InpShowIntradayLevels - per
+   //--- direct request to focus on H4 and up instead. When it's off,
+   //--- none of this block's early-returns apply (they're specific to
+   //--- the intraday scan's own incremental bookkeeping) - execution
+   //--- falls straight through to the H4/daily/weekly/recent-HL layers
+   //--- below, which have always had their own independent re-scan-on-
+   //--- new-bar logic, not tied to this function's return value.
+   if(InpShowIntradayLevels)
      {
-      ObjectsDeleteAll(0, PFX);
-      ArrayResize(g_levels, 0);
-     }
+      //--- v1.02 FIX: "not enough bars yet" must return 0, not rates_total -
+      //--- returning rates_total claims the whole history is fully handled,
+      //--- so if MT5 later loads more history (common right after attach,
+      //--- or on a symbol whose history is still downloading), this
+      //--- indicator would never go back and actually run the real scan.
+      if(rates_total < 2 * w + 2) return(0);
 
-   //--- the newest CLOSED bar is rates_total-2 (rates_total-1 is still
-   //--- forming) - a pivot candidate at index i needs w closed bars on
-   //--- BOTH sides, so the last checkable candidate is (rates_total-2-w)
-   int maxI = rates_total - 2 - w;
-   if(maxI < w) return(0);   // v1.02 FIX - same reasoning as above
-
-   //--- v1.01 FIX #1: exactly the candidates that could NOT have been
-   //--- fully confirmed last call - no extra margin. A closed bar's
-   //--- high/low never changes, so once a candidate has been checked
-   //--- with a full w-bar window on both sides, it never needs
-   //--- re-checking. The old "-2" margin here re-registered the same
-   //--- few newest pivots on every tick with no new bar, which could
-   //--- inflate a touch count by one per tick for hours.
-   int startI = (prev_calculated <= 0) ? w : MathMax(w, prev_calculated - 1 - w);
-   if(startI > maxI) return(rates_total);
-
-   //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
-   datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
-   datetime recentCutoff = (InpRecentProtectDays > 0) ? (time[maxI] - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
-
-   //--- v1.01 FIX #4: read ATR PER BAR, not one current value applied
-   //--- to all of history - only the slice actually needed this call.
-   int atrCount = maxI - startI + 1;
-   double atrBuf[];
-   ArraySetAsSeries(atrBuf, false);
-   if(CopyBuffer(g_atrHandle, 0, startI, atrCount, atrBuf) < atrCount)
-     {
-      //--- v1.01 FIX #3: tell MT5 this call did NOT handle the history
-      //--- (return 0, not rates_total) so it retries properly next
-      //--- tick instead of silently treating the backfill as done.
-      return(0);
-     }
-
-   for(int i = startI; i <= maxI; i++)
-     {
-      if(time[i] < cutoffTime) continue;   // v1.03: outside the lookback window - not eligible at all
-      double minDistance = atrBuf[i - startI] * InpAtrMultiplier;
-      if(minDistance <= 0.0) continue;
-
-      //--- v1.01 minor fix: a flat-top/flat-bottom tie (two bars with the
-      //--- exact same high or low) used to let BOTH register as separate
-      //--- pivots. Ties now resolve to the LATER (more recent) bar only -
-      //--- a tie with an EARLIER neighbor is allowed, but a tie (or
-      //--- worse) against a LATER neighbor disqualifies, so only the
-      //--- rightmost bar in a flat top/bottom ever becomes the pivot.
-      bool isPeak = true, isTrough = true;
-      for(int k = 1; k <= w; k++)
+      //--- v1.01 FIX #2: prev_calculated resetting to 0 (a history
+      //--- reload/gap-fill, NOT necessarily "freshly attached") must wipe
+      //--- the existing level list and chart objects first - otherwise the
+      //--- whole history gets re-scanned on top of what's already there,
+      //--- roughly doubling every touch count.
+      if(prev_calculated <= 0)
         {
-         if(high[i] < high[i - k] || high[i] <= high[i + k]) isPeak = false;
-         if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
-         if(!isPeak && !isTrough) break;
+         ObjectsDeleteAll(0, PFX);
+         ArrayResize(g_levels, 0);
         }
-      if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
-                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
-      else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
-                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+
+      //--- the newest CLOSED bar is rates_total-2 (rates_total-1 is still
+      //--- forming) - a pivot candidate at index i needs w closed bars on
+      //--- BOTH sides, so the last checkable candidate is (rates_total-2-w)
+      int maxI = rates_total - 2 - w;
+      if(maxI < w) return(0);   // v1.02 FIX - same reasoning as above
+
+      //--- v1.01 FIX #1: exactly the candidates that could NOT have been
+      //--- fully confirmed last call - no extra margin. A closed bar's
+      //--- high/low never changes, so once a candidate has been checked
+      //--- with a full w-bar window on both sides, it never needs
+      //--- re-checking. The old "-2" margin here re-registered the same
+      //--- few newest pivots on every tick with no new bar, which could
+      //--- inflate a touch count by one per tick for hours.
+      int startI = (prev_calculated <= 0) ? w : MathMax(w, prev_calculated - 1 - w);
+      if(startI > maxI) return(rates_total);
+
+      //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
+      datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
+      datetime recentCutoff = (InpRecentProtectDays > 0) ? (time[maxI] - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
+
+      //--- v1.01 FIX #4: read ATR PER BAR, not one current value applied
+      //--- to all of history - only the slice actually needed this call.
+      int atrCount = maxI - startI + 1;
+      double atrBuf[];
+      ArraySetAsSeries(atrBuf, false);
+      if(CopyBuffer(g_atrHandle, 0, startI, atrCount, atrBuf) < atrCount)
+        {
+         //--- v1.01 FIX #3: tell MT5 this call did NOT handle the history
+         //--- (return 0, not rates_total) so it retries properly next
+         //--- tick instead of silently treating the backfill as done.
+         return(0);
+        }
+
+      for(int i = startI; i <= maxI; i++)
+        {
+         if(time[i] < cutoffTime) continue;   // v1.03: outside the lookback window - not eligible at all
+         double minDistance = atrBuf[i - startI] * InpAtrMultiplier;
+         if(minDistance <= 0.0) continue;
+
+         //--- v1.01 minor fix: a flat-top/flat-bottom tie (two bars with the
+         //--- exact same high or low) used to let BOTH register as separate
+         //--- pivots. Ties now resolve to the LATER (more recent) bar only -
+         //--- a tie with an EARLIER neighbor is allowed, but a tie (or
+         //--- worse) against a LATER neighbor disqualifies, so only the
+         //--- rightmost bar in a flat top/bottom ever becomes the pivot.
+         bool isPeak = true, isTrough = true;
+         for(int k = 1; k <= w; k++)
+           {
+            if(high[i] < high[i - k] || high[i] <= high[i + k]) isPeak = false;
+            if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
+            if(!isPeak && !isTrough) break;
+           }
+         if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
+                                            InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+         else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
+                                            InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+        }
+
+      //--- v1.02: one-time summary once the initial backfill finishes, so
+      //--- "I attached it and see nothing" has an actual answer in the
+      //--- journal instead of silence either way.
+      if(prev_calculated <= 0)
+        {
+         int visible = 0;
+         for(int k = 0; k < ArraySize(g_levels); k++)
+            if(g_levels[k].touches >= InpMinTouchesToShow) visible++;
+         PrintFormat("Important_SR_Levels: initial scan done - %d bars checked (lookback cutoff: %s), "
+                     "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
+                     maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
+                     ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
+         LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
+        }
      }
 
+   if(InpShowH4Levels)
+      ScanHigherTF(PERIOD_H4, g_levelsH4, PFX_H4, InpH4SupportColor, InpH4ResistanceColor,
+                   g_atrHandleH4, g_lastH4BarTime);
    if(InpShowDailyLevels)
       ScanHigherTF(PERIOD_D1, g_levelsD, PFX_D, InpDailySupportColor, InpDailyResistanceColor,
                    g_atrHandleD, g_lastDailyBarTime);
@@ -869,32 +1030,20 @@ int OnCalculate(const int rates_total,
       ScanRecentHL();
 
    //--- v1.09: cap how many levels per layer are actually drawn
-   ApplyTopNFilter(g_levels,  InpMinTouchesToShow,   InpShowTopN, InpSupportColor,         InpResistanceColor);
-   ApplyTopNFilter(g_levelsD, InpDWMinTouchesToShow, InpShowTopN, InpDailySupportColor,    InpDailyResistanceColor);
-   ApplyTopNFilter(g_levelsW, InpDWMinTouchesToShow, InpShowTopN, InpWeeklySupportColor,   InpWeeklyResistanceColor);
+   ApplyTopNFilter(g_levels,   InpMinTouchesToShow,   InpShowTopN, InpSupportColor,         InpResistanceColor);
+   ApplyTopNFilter(g_levelsH4, InpDWMinTouchesToShow, InpShowTopN, InpH4SupportColor,       InpH4ResistanceColor);
+   ApplyTopNFilter(g_levelsD,  InpDWMinTouchesToShow, InpShowTopN, InpDailySupportColor,    InpDailyResistanceColor);
+   ApplyTopNFilter(g_levelsW,  InpDWMinTouchesToShow, InpShowTopN, InpWeeklySupportColor,   InpWeeklyResistanceColor);
 
    //--- v1.08: refresh every visible label's position to the right edge
    //--- every call, not just when a level is actually touched
    datetime nowTime = TimeCurrent();
-   RefreshRightEdgeLabels(g_levels,  InpMinTouchesToShow,   nowTime);
-   RefreshRightEdgeLabels(g_levelsD, InpDWMinTouchesToShow, nowTime);
-   RefreshRightEdgeLabels(g_levelsW, InpDWMinTouchesToShow, nowTime);
+   RefreshRightEdgeLabels(g_levels,   InpMinTouchesToShow,   nowTime);
+   RefreshRightEdgeLabels(g_levelsH4, InpDWMinTouchesToShow, nowTime);
+   RefreshRightEdgeLabels(g_levelsD,  InpDWMinTouchesToShow, nowTime);
+   RefreshRightEdgeLabels(g_levelsW,  InpDWMinTouchesToShow, nowTime);
    RefreshRecentHLLabels(nowTime);
-
-   //--- v1.02: one-time summary once the initial backfill finishes, so
-   //--- "I attached it and see nothing" has an actual answer in the
-   //--- journal instead of silence either way.
-   if(prev_calculated <= 0)
-     {
-      int visible = 0;
-      for(int k = 0; k < ArraySize(g_levels); k++)
-         if(g_levels[k].touches >= InpMinTouchesToShow) visible++;
-      PrintFormat("Important_SR_Levels: initial scan done - %d bars checked (lookback cutoff: %s), "
-                  "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
-                  maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
-                  ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
-      LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
-     }
+   RefreshRecentOCLabels(nowTime);
 
    return(rates_total);
   }
