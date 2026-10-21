@@ -20,7 +20,23 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.19"
+#property version   "2.20"
+//--- 2.20: Two changes, per direct request. (1) Every overlay's entry-
+//--- arrow buy/sell colour audited for duplicates - clrLime was used by
+//--- FIVE different overlays' buy signal (EMA Cross, Divergence Regular,
+//--- BB, FVG, Liquidity) and clrRed by FOUR different sell signals
+//--- (Divergence Regular, BB, FVG, Liquidity), clrDeepSkyBlue by two
+//--- (Rejection M15 Buy, Divergence Hidden Buy) - every entry-arrow
+//--- colour across all 10 overlay kinds is now distinct (InpDivRegBuyCol,
+//--- InpDivRegSellCol, InpDivHidBuyCol, InpBBBuyCol, InpBBSellCol,
+//--- InpFvgArrowBuyCol/SellCol, InpLiqArrowBuyCol/SellCol all changed -
+//--- SL/TP line colours untouched, those were never the complaint). (2)
+//--- REMOVED every overlay's TP (R:R) line - "remove all the RR lines
+//--- take profit lines, leave the swing stop loss lines". The SL line
+//--- is kept everywhere; the TP distance calculation itself is left in
+//--- place (still used nowhere else, genuinely dead now, but removing it
+//--- outright risked touching risk/SL logic unnecessarily for a change
+//--- that's purely about what gets DRAWN).
 //--- 2.19: NEW FVG (Fair Value Gap) and Liquidity (equal highs/lows)
 //--- zone overlays, per direct request - "the fvg and liquidity blocks
 //--- must also give buy and sell signals when price comes back to those
@@ -1262,11 +1278,11 @@ input int    InpDivMaxPivotGapBars = 60;      // the two swing points being comp
                                                // different market regimes, not a real divergence
 input int    InpDivSwingBars       = 10;      // SL reference = N-bar swing low/high at the trigger bar
 input double InpDivRR              = 2.0;     // R:R convention for the TP reference line - example only
-input color  InpDivRegBuyCol       = clrLime;      // REGULAR bullish divergence (price lower low, stoch
+input color  InpDivRegBuyCol       = clrGoldenrod; // REGULAR bullish divergence (price lower low, stoch
                                                     // higher low) - reversal buy
-input color  InpDivRegSellCol      = clrRed;       // REGULAR bearish divergence (price higher high, stoch
+input color  InpDivRegSellCol      = clrCrimson;    // REGULAR bearish divergence (price higher high, stoch
                                                     // lower high) - reversal sell
-input color  InpDivHidBuyCol       = clrDeepSkyBlue;  // HIDDEN bullish divergence (price higher low, stoch
+input color  InpDivHidBuyCol       = clrViolet;        // HIDDEN bullish divergence (price higher low, stoch
                                                        // lower low, in an uptrend) - continuation buy
 input color  InpDivHidSellCol      = clrOrangeRed;    // HIDDEN bearish divergence (price lower high, stoch
                                                        // higher high, in a downtrend) - continuation sell
@@ -1306,8 +1322,8 @@ input bool   InpBBRequireRejection = false;   // OFF by default (per direct requ
 input double InpBBRejectionWickRatio = 0.35;  // only used when InpBBRequireRejection is on
 input int    InpBBSwingBars        = 10;      // SL reference = N-bar swing low/high at the trigger bar
 input double InpBBRR               = 2.0;     // R:R convention for the TP reference line - example only
-input color  InpBBBuyCol           = clrLime;
-input color  InpBBSellCol          = clrRed;
+input color  InpBBBuyCol           = clrChartreuse;
+input color  InpBBSellCol          = clrTomato;
 input color  InpBBStopCol          = clrRed;
 input color  InpBBTPCol            = C'0,255,0';
 input int    InpBBArrowSize        = 2;
@@ -1334,9 +1350,9 @@ input double InpFvgRR              = 2.0;
 input color  InpFvgBullCol         = C'0,60,0';    // dim/dark fill, NOT a solid bright block - drawn with
                                                     // OBJPROP_BACK=true so candles render on top of it
 input color  InpFvgBearCol         = C'60,0,0';
-input color  InpFvgArrowBuyCol     = clrLime;      // the REJECTION SIGNAL arrow's own colour - bright,
+input color  InpFvgArrowBuyCol     = clrTurquoise; // the REJECTION SIGNAL arrow's own colour - bright,
                                                     // separate from the dim zone fill above
-input color  InpFvgArrowSellCol    = clrRed;
+input color  InpFvgArrowSellCol    = clrDeepPink;
 input color  InpFvgStopCol         = clrRed;
 input color  InpFvgTPCol           = C'0,255,0';
 input int    InpFvgArrowSize       = 2;
@@ -1365,8 +1381,8 @@ input int    InpLiqSwingBars       = 10;
 input double InpLiqRR              = 2.0;
 input color  InpLiqBullCol         = C'0,50,60';   // equal lows (support/buy-side liquidity)
 input color  InpLiqBearCol         = C'60,40,0';   // equal highs (resistance/sell-side liquidity)
-input color  InpLiqArrowBuyCol     = clrLime;
-input color  InpLiqArrowSellCol    = clrRed;
+input color  InpLiqArrowBuyCol     = clrLightSkyBlue;
+input color  InpLiqArrowSellCol    = clrDarkOrange;
 input color  InpLiqStopCol         = clrRed;
 input color  InpLiqTPCol           = C'0,255,0';
 input int    InpLiqArrowSize       = 2;
@@ -2662,8 +2678,9 @@ void ComputeEmaCrossSignals(const bool backfill)
                DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
                DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
                             "EMA-cross SL: recent " + IntegerToString(InpEmaCrossSwingBars) + "-bar swing (reference only - validated exit is the next opposite EMA cross)");
-               DrawSigLevel(lastTp, t, t + (InpEmaCrossLineBars + 2) * perSec, tp, InpEmaCrossTPCol, STYLE_DASH,
-                            "EMA-cross TP: 1:" + DoubleToString(InpEmaCrossRR, 1) + " R:R example (reference only, not the validated exit)");
+               //--- v2.20 FIX: TP line removed per direct request ("remove all
+               //--- the RR lines take profit lines, leave the swing stop loss
+               //--- lines") - SL line above is the one being kept
                PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
                            TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                            DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
@@ -2975,8 +2992,7 @@ void ComputeStochSignals(const bool backfill)
          DrawStochArrow(lastArr, t, entryPrice, isBuy);
          DrawSigLevel(lastSl, t, t + InpStochLineBars * perSec, stop, InpStochStopCol, STYLE_SOLID,
                       "Stoch SL: recent " + IntegerToString(InpStochSwingBars) + "-bar swing (unvalidated)");
-         DrawSigLevel(lastTp, t, t + (InpStochLineBars + 2) * perSec, tp, InpStochTPCol, STYLE_DASH,
-                      "Stoch TP: 1:" + DoubleToString(InpStochRR, 1) + " R:R example (unvalidated)");
+         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
         }
      }
 
@@ -3128,8 +3144,7 @@ void ComputeCandleSignals(const bool backfill)
          DrawCandleArrow(arrNm, t, entryPrice, isBuy);
          DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
                       "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
-         DrawSigLevel(tpNm, t, t + (InpCdlLineBars + 2) * perSec, tp, InpCdlTPCol, STYLE_DASH,
-                      "Engulfing TP: 1:" + DoubleToString(InpCdlRR, 1) + " R:R (fixed target - no opposite-signal exit exists)");
+         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
          if(!backfill && cdlWasNew && InpCdlAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -3319,8 +3334,7 @@ void ComputeRejectSignals2(const bool backfill)
             string tpNm = g_rjx + "tp_" + id;
             DrawSigLevel(slNm, t, t + InpRejLineBars * perSec, stop, InpRejStopCol, STYLE_SOLID,
                          "Rejection SL: recent " + IntegerToString(InpRejSwingBars) + "-bar swing (unvalidated)");
-            DrawSigLevel(tpNm, t, t + (InpRejLineBars + 2) * perSec, tp, InpRejTPCol, STYLE_DASH,
-                         "Rejection TP: 1:" + DoubleToString(InpRejRR, 1) + " R:R example (unvalidated)");
+            //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
            }
 
          PrintFormat("RejectSignal2 LOG: %s %s @ %s  E21=%s E50=%s BBmid=%s (unvalidated)",
@@ -3499,8 +3513,7 @@ void ComputeRejectSignalsM15(const bool backfill)
             string tpNm = g_rjxm + "tp_" + id;
             DrawSigLevel(slNm, t, t + InpRejLineBars * perSec, stop, InpRejStopCol, STYLE_SOLID,
                          "Rejection M15 SL: recent " + IntegerToString(InpRejSwingBars) + "-bar swing (unvalidated)");
-            DrawSigLevel(tpNm, t, t + (InpRejLineBars + 2) * perSec, tp, InpRejTPCol, STYLE_DASH,
-                         "Rejection M15 TP: 1:" + DoubleToString(InpRejRR, 1) + " R:R example (unvalidated)");
+            //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
            }
 
          PrintFormat("RejectSignalM15 LOG: %s %s @ %s  E21=%s E50=%s BBmid=%s (unvalidated, always M15)",
@@ -3658,9 +3671,7 @@ void ComputeDivSignals(const bool backfill)
                         DrawSigLevel(g_div + "sl_" + id, t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
-                        DrawSigLevel(g_div + "tp_" + id, t_i, t_i + (InpDivLineBars + 2) * perSec, tp, InpDivTPCol, STYLE_DASH,
-                                     (regular ? "Regular" : "Hidden") + string(" Div TP: 1:") +
-                                     DoubleToString(InpDivRR, 1) + " R:R example (unvalidated)");
+                        //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3711,9 +3722,7 @@ void ComputeDivSignals(const bool backfill)
                         DrawSigLevel(g_div + "sl_" + id, t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
-                        DrawSigLevel(g_div + "tp_" + id, t_i, t_i + (InpDivLineBars + 2) * perSec, tp, InpDivTPCol, STYLE_DASH,
-                                     (regular ? "Regular" : "Hidden") + string(" Div TP: 1:") +
-                                     DoubleToString(InpDivRR, 1) + " R:R example (unvalidated)");
+                        //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3866,8 +3875,7 @@ void ComputeBBSignals(const bool backfill)
          double tp = c[i] + dir * InpBBRR * risk;
          DrawSigLevel(g_bb + "sl_" + id, t_i, t_i + InpBBLineBars * perSec, swing, InpBBStopCol, STYLE_SOLID,
                       "BB Outer-Band SL: recent " + IntegerToString(InpBBSwingBars) + "-bar swing (unvalidated)");
-         DrawSigLevel(g_bb + "tp_" + id, t_i, t_i + (InpBBLineBars + 2) * perSec, tp, InpBBTPCol, STYLE_DASH,
-                      "BB Outer-Band TP: 1:" + DoubleToString(InpBBRR, 1) + " R:R example (unvalidated)");
+         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
          if(!backfill && wasNew && InpBBAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -4022,8 +4030,7 @@ void ComputeFvgSignals(const bool backfill)
                   double tp = isBuy ? c[i] + InpFvgRR * risk : c[i] - InpFvgRR * risk;
                   DrawSigLevel(g_fvgSig + "sl_" + id, t_i, t_i + InpFvgLineBars * perSec, swing, InpFvgStopCol, STYLE_SOLID,
                                "FVG SL: recent " + IntegerToString(InpFvgSwingBars) + "-bar swing (unvalidated)");
-                  DrawSigLevel(g_fvgSig + "tp_" + id, t_i, t_i + (InpFvgLineBars + 2) * perSec, tp, InpFvgTPCol, STYLE_DASH,
-                               "FVG TP: 1:" + DoubleToString(InpFvgRR, 1) + " R:R example (unvalidated)");
+                  //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
                  }
                if(!backfill && wasNew && InpFvgAlert)
                  {
@@ -4169,8 +4176,7 @@ void ComputeLiquiditySignals(const bool backfill)
                   double tp = isBuy ? c[i] + InpLiqRR * risk : c[i] - InpLiqRR * risk;
                   DrawSigLevel(g_liqSig + "sl_" + id, t_i, t_i + InpLiqLineBars * perSec, swing, InpLiqStopCol, STYLE_SOLID,
                                "Liquidity SL: recent " + IntegerToString(InpLiqSwingBars) + "-bar swing (unvalidated)");
-                  DrawSigLevel(g_liqSig + "tp_" + id, t_i, t_i + (InpLiqLineBars + 2) * perSec, tp, InpLiqTPCol, STYLE_DASH,
-                               "Liquidity TP: 1:" + DoubleToString(InpLiqRR, 1) + " R:R example (unvalidated)");
+                  //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
                  }
                if(!backfill && wasNew && InpLiqAlert)
                  {
