@@ -20,7 +20,31 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.21"
+#property version   "2.22"
+//--- 2.22: Several changes, all per direct request. (1) Every entry-
+//--- arrow's WIDTH reduced from 2 to 1 ("smaller"). (2) Every entry-
+//--- arrow's offset-from-candle increased ("spaced away from candles") -
+//--- e.g. InpEmaCrossArrowOffsetATR 1.0->1.6, InpStochArrowOffsetATR
+//--- 0.5->1.1, the rest (Cdl/Rej/RejM15/Div/BB/Fvg/Liq) 1.3->1.9. (3)
+//--- Every one of the 20 entry-arrow buy/sell colours (10 overlay kinds
+//--- x buy/sell) regenerated algorithmically (even hue spacing - buys
+//--- across the green->violet "cool" arc, sells across the magenta->red
+//--- ->yellow "warm" arc) rather than picked by eye - the previous
+//--- v2.20 pass eliminated exact duplicates but left several pairs that
+//--- were still visually near-identical (e.g. EmaCross Sell vs
+//--- Divergence Hidden Sell, Lime vs Chartreuse) - "i see some arrows
+//--- for different signals are still the same colours". (4) New
+//--- NudgeClearOfMALine() - per "make sure the dont print over of
+//--- indicators, like the moving averages" - pushes a marker clear of
+//--- the live 21/50 EMA value at that bar, same one-directional-only
+//--- convention as the existing NudgeAwayFromLastMarker/
+//--- NudgeClearOfOtherOverlays. Wired into the 6 overlays that already
+//--- compute e21/e50 locally (EmaCross, Engulfing, Rejection, Rejection
+//--- M15, Divergence regular+hidden) - Stoch/BB/FVG/Liquidity don't
+//--- currently compute e21/e50 and were left out of this pass, a known
+//--- gap. The panel-button-unresponsiveness and remaining-lag reports
+//--- are being investigated separately (background Opus review) - not
+//--- addressed in this version.
 //--- 2.21: Opus-reviewed (per direct request, "i dont want anymore
 //--- issues") - found and fixed the ROOT CAUSE of "panel windows are
 //--- missing, the moving averages and vwap are also now not visible,
@@ -1167,13 +1191,13 @@ input double InpEmaCrossRR         = 2.0;     // R:R convention for the TP refer
                                                // example only; the validated exit is the NEXT opposite
                                                // EMA cross, not this target - the TP line is for visual
                                                // reference/context, same as the stochastic overlay's own TP line
-input color  InpEmaCrossBuyCol     = clrLime;
-input color  InpEmaCrossSellCol    = C'255,80,0';
+input color  InpEmaCrossBuyCol     = C'178,255,25';
+input color  InpEmaCrossSellCol    = C'255,12,255';
 input color  InpEmaCrossStopCol    = clrRed;
 input color  InpEmaCrossTPCol      = clrYellow;
-input double InpEmaCrossArrowOffsetATR = 1.0; // own offset so it never sits on top of the stochastic overlay's
+input double InpEmaCrossArrowOffsetATR = 1.6; // own offset so it never sits on top of the stochastic overlay's
 input double InpEmaCrossExitOffsetATR  = 1.2; // own markers (independent overlay, never touches posDir/lastArr above)
-input int    InpEmaCrossArrowSize  = 2;   // v2.08: standardized to match every other overlay's arrow size -
+input int    InpEmaCrossArrowSize  = 1;   // v2.08: standardized to match every other overlay's arrow size -
                                            // per direct request, all entry arrows same shape AND same size,
                                            // colour/label is what tells them apart (at width 1 some arrows
                                            // render small enough to look like a dot rather than a clear arrow)
@@ -1225,13 +1249,13 @@ input bool   InpStochUseInterpCross = true;   // qualify using the INTERPOLATED 
                                                // either bar's raw endpoint value
 input int    InpStochSwingBars     = 10;      // stop-loss reference = N-bar swing low/high at the cross bar
 input double InpStochRR            = 2.0;     // R:R convention for the TP reference line - example only
-input color  InpStochBuyCol        = C'0,150,255';
-input color  InpStochSellCol       = C'255,0,200';
+input color  InpStochBuyCol        = C'93,255,25';
+input color  InpStochSellCol       = C'255,12,201';
 input color  InpStochStopCol       = clrRed;
 input color  InpStochTPCol         = C'0,255,0';
-input int    InpStochArrowSize     = 2;   // v2.08: standardized - was 1 (thin enough to look like a dot)
+input int    InpStochArrowSize     = 1;   // v2.08: standardized - was 1 (thin enough to look like a dot)
 input int    InpStochLineBars      = 8;
-input double InpStochArrowOffsetATR = 0.5;
+input double InpStochArrowOffsetATR = 1.1;
 input bool   InpStochCrossAlert    = false;   // v2.16: default OFF per direct request - push notifications
                                                // now reserved for the MA gap-closing warning and the
                                                // EMA21/50 cross itself only. Chart arrows still show.
@@ -1242,12 +1266,12 @@ input int    InpCdlSwingBars       = 10;      // swing/stop-loss lookback, same 
                                                // "is this bar the swing extreme" qualification
 input double InpCdlRR              = 2.0;     // fixed 1:2 R:R target - this IS the validated exit (plus the
                                                // swing stop), there is no opposite-pattern exit to wait for
-input color  InpCdlBuyCol          = clrAqua;
-input color  InpCdlSellCol         = clrMagenta;
+input color  InpCdlBuyCol          = C'25,255,42';
+input color  InpCdlSellCol         = C'255,12,147';
 input color  InpCdlStopCol         = clrRed;
 input color  InpCdlTPCol           = clrYellow;
-input double InpCdlArrowOffsetATR  = 1.0;
-input int    InpCdlArrowSize       = 2;   // v2.08: standardized - was 1 (thin enough to look like a dot)
+input double InpCdlArrowOffsetATR  = 1.6;
+input int    InpCdlArrowSize       = 1;   // v2.08: standardized - was 1 (thin enough to look like a dot)
 input int    InpCdlLineBars        = 8;
 input bool   InpCdlAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 input bool   InpCdlRequireTrend    = true;    // v2.18 FIX: extra confirmation, per direct request - a
@@ -1283,20 +1307,20 @@ input double InpRejRR              = 2.0;     // R:R convention for the TP refer
 input color  InpRejStopCol         = clrRed;
 input color  InpRejTPCol           = clrYellow;
 input int    InpRejLineBars        = 8;       // stop-line length in bars; the TP line runs 2 bars longer
-input color  InpRejBuyCol          = clrSpringGreen;
-input color  InpRejSellCol         = clrOrchid;
-input int    InpRejArrowSize       = 2;
-input double InpRejArrowOffsetATR  = 1.3;     // own offset, distinct from every other overlay's markers
+input color  InpRejBuyCol          = C'25,255,127';
+input color  InpRejSellCol         = C'255,12,93';
+input int    InpRejArrowSize       = 1;
+input double InpRejArrowOffsetATR  = 1.9;     // own offset, distinct from every other overlay's markers
 input bool   InpRejAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 
 input group "=== Rejection signal - separate M15 overlay (NEW, v2.03, per direct request) - ALWAYS computed on M15 bars regardless of what timeframe the chart itself is on - same 5 conditions, own label/colour so it's never confused with the chart-timeframe Rejection signal above ==="
 input bool   InpShowRejectSignalsM15 = true;  // shows on an M5 chart too - this one always reads M15 data,
                                                // separate from (and in addition to) the overlay above, which
                                                // always reads whatever timeframe the chart itself is on
-input color  InpRejM15BuyCol       = clrDeepSkyBlue;
-input color  InpRejM15SellCol      = clrHotPink;
-input int    InpRejM15ArrowSize    = 2;
-input double InpRejM15ArrowOffsetATR = 1.3;
+input color  InpRejM15BuyCol       = C'25,255,212';
+input color  InpRejM15SellCol      = C'255,12,39';
+input int    InpRejM15ArrowSize    = 1;
+input double InpRejM15ArrowOffsetATR = 1.9;
 input bool   InpRejM15Alert        = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 
 input group "=== Stochastic divergence signal overlay (NEW, v2.17, per direct request) - UNVALIDATED - VISUAL ONLY ==="
@@ -1314,18 +1338,18 @@ input int    InpDivMaxPivotGapBars = 60;      // the two swing points being comp
                                                // different market regimes, not a real divergence
 input int    InpDivSwingBars       = 10;      // SL reference = N-bar swing low/high at the trigger bar
 input double InpDivRR              = 2.0;     // R:R convention for the TP reference line - example only
-input color  InpDivRegBuyCol       = clrGoldenrod; // REGULAR bullish divergence (price lower low, stoch
+input color  InpDivRegBuyCol       = C'25,212,255'; // REGULAR bullish divergence (price lower low, stoch
                                                     // higher low) - reversal buy
-input color  InpDivRegSellCol      = clrCrimson;    // REGULAR bearish divergence (price higher high, stoch
+input color  InpDivRegSellCol      = C'255,39,12';    // REGULAR bearish divergence (price higher high, stoch
                                                     // lower high) - reversal sell
-input color  InpDivHidBuyCol       = clrViolet;        // HIDDEN bullish divergence (price higher low, stoch
+input color  InpDivHidBuyCol       = C'25,127,255';        // HIDDEN bullish divergence (price higher low, stoch
                                                        // lower low, in an uptrend) - continuation buy
-input color  InpDivHidSellCol      = clrOrangeRed;    // HIDDEN bearish divergence (price lower high, stoch
+input color  InpDivHidSellCol      = C'255,93,12';    // HIDDEN bearish divergence (price lower high, stoch
                                                        // higher high, in a downtrend) - continuation sell
 input color  InpDivStopCol         = clrRed;
 input color  InpDivTPCol           = C'0,255,0';
-input int    InpDivArrowSize       = 2;
-input double InpDivArrowOffsetATR  = 1.3;
+input int    InpDivArrowSize       = 1;
+input double InpDivArrowOffsetATR  = 1.9;
 input int    InpDivLineBars        = 8;
 input bool   InpDivAlert           = false;   // default OFF, same convention as every other non-MA overlay
                                                // since v2.16/2.17 - see InpStochCrossAlert's own comment
@@ -1358,12 +1382,12 @@ input bool   InpBBRequireRejection = false;   // OFF by default (per direct requ
 input double InpBBRejectionWickRatio = 0.35;  // only used when InpBBRequireRejection is on
 input int    InpBBSwingBars        = 10;      // SL reference = N-bar swing low/high at the trigger bar
 input double InpBBRR               = 2.0;     // R:R convention for the TP reference line - example only
-input color  InpBBBuyCol           = clrChartreuse;
-input color  InpBBSellCol          = clrTomato;
+input color  InpBBBuyCol           = C'25,42,255';
+input color  InpBBSellCol          = C'255,147,12';
 input color  InpBBStopCol          = clrRed;
 input color  InpBBTPCol            = C'0,255,0';
-input int    InpBBArrowSize        = 2;
-input double InpBBArrowOffsetATR   = 1.3;
+input int    InpBBArrowSize        = 1;
+input double InpBBArrowOffsetATR   = 1.9;
 input int    InpBBLineBars         = 8;
 input bool   InpBBAlert            = false;   // default OFF, same convention as every other non-MA overlay
                                                // since v2.16/2.17 - see InpStochCrossAlert's own comment
@@ -1386,13 +1410,13 @@ input double InpFvgRR              = 2.0;
 input color  InpFvgBullCol         = C'0,60,0';    // dim/dark fill, NOT a solid bright block - drawn with
                                                     // OBJPROP_BACK=true so candles render on top of it
 input color  InpFvgBearCol         = C'60,0,0';
-input color  InpFvgArrowBuyCol     = clrTurquoise; // the REJECTION SIGNAL arrow's own colour - bright,
+input color  InpFvgArrowBuyCol     = C'93,25,255'; // the REJECTION SIGNAL arrow's own colour - bright,
                                                     // separate from the dim zone fill above
-input color  InpFvgArrowSellCol    = clrDeepPink;
+input color  InpFvgArrowSellCol    = C'255,201,12';
 input color  InpFvgStopCol         = clrRed;
 input color  InpFvgTPCol           = C'0,255,0';
-input int    InpFvgArrowSize       = 2;
-input double InpFvgArrowOffsetATR  = 1.3;
+input int    InpFvgArrowSize       = 1;
+input double InpFvgArrowOffsetATR  = 1.9;
 input int    InpFvgLineBars        = 8;
 input bool   InpFvgAlert           = false;   // default OFF, same convention as every other non-MA overlay
 input int    InpFvgCooldownBars    = 8;
@@ -1417,12 +1441,12 @@ input int    InpLiqSwingBars       = 10;
 input double InpLiqRR              = 2.0;
 input color  InpLiqBullCol         = C'0,50,60';   // equal lows (support/buy-side liquidity)
 input color  InpLiqBearCol         = C'60,40,0';   // equal highs (resistance/sell-side liquidity)
-input color  InpLiqArrowBuyCol     = clrLightSkyBlue;
-input color  InpLiqArrowSellCol    = clrDarkOrange;
+input color  InpLiqArrowBuyCol     = C'178,25,255';
+input color  InpLiqArrowSellCol    = C'255,255,12';
 input color  InpLiqStopCol         = clrRed;
 input color  InpLiqTPCol           = C'0,255,0';
-input int    InpLiqArrowSize       = 2;
-input double InpLiqArrowOffsetATR  = 1.3;
+input int    InpLiqArrowSize       = 1;
+input double InpLiqArrowOffsetATR  = 1.9;
 input int    InpLiqLineBars        = 8;
 input bool   InpLiqAlert           = false;
 input int    InpLiqCooldownBars    = 8;
@@ -2262,6 +2286,24 @@ double NudgeAwayFromLastMarker(double candidatePrice, datetime candidateTime, bo
   }
 
 //+------------------------------------------------------------------+
+//| v2.22: per direct request - "make sure the dont print over of      |
+//| indicators, like the moving averages and so on". A marker placed   |
+//| offset from the candle can still land directly ON a live MA line   |
+//| if that MA happens to be passing through the same price at that    |
+//| bar - this pushes it clear of a single MA value, same convention   |
+//| as NudgeAwayFromLastMarker/NudgeClearOfOtherOverlays (only moves   |
+//| further in the direction the marker is already being offset, never |
+//| back toward the candle). maValue == SIG_NA is a no-op (MA not       |
+//| ready yet at this bar).                                            |
+//+------------------------------------------------------------------+
+double NudgeClearOfMALine(double price, const double maValue, const bool pushUp, const double minGap)
+  {
+   if(maValue == SIG_NA || minGap <= 0.0) return price;
+   if(MathAbs(price - maValue) >= minGap) return price;
+   return pushUp ? maValue + minGap : maValue - minGap;
+  }
+
+//+------------------------------------------------------------------+
 //| v2.14: cross-OVERLAY de-overlap. NudgeAwayFromLastMarker() above   |
 //| only ever compares a new marker with the SAME overlay's previous   |
 //| marker - two DIFFERENT overlays firing on the same candle, same    |
@@ -2722,6 +2764,8 @@ void ComputeEmaCrossSignals(const bool backfill)
                double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
                entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
                entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, lastArr);
+               entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
+               entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
                lastMarkerPrice = entryPrice; lastMarkerTime = t;
                bool entryWasNew = (ObjectFind(0, lastArr) < 0);   // v2.15 FIX
                DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
@@ -3188,6 +3232,8 @@ void ComputeCandleSignals(const bool backfill)
          double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, arrNm);
+         entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
+         entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          bool cdlWasNew = (ObjectFind(0, arrNm) < 0);   // v2.15 FIX
          DrawCandleArrow(arrNm, t, entryPrice, isBuy);
@@ -3358,6 +3404,8 @@ void ComputeRejectSignals2(const bool backfill)
          double minGap = InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
+         entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
+         entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          //--- v2.15 FIX: only alert if this marker is genuinely NEW this
          //--- call - DrawRejectArrow2() silently no-ops if the object
@@ -3546,6 +3594,8 @@ void ComputeRejectSignalsM15(const bool backfill)
          double minGap = InpSigMinMarkerGapATR * atr[i];
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
+         entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
+         entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          bool m15WasNew = (ObjectFind(0, nm) < 0);   // v2.15 FIX
          DrawRejectArrowM15(nm, t, entryPrice, isBuy);
@@ -3710,6 +3760,8 @@ void ComputeDivSignals(const bool backfill)
                      double entryPrice = l[i] - offEntry;
                      entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, false, lastMarkerPrice, lastMarkerTime, minGap);
                      entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, false, minGap, nm);
+                     entryPrice = NudgeClearOfMALine(entryPrice, e21[i], false, minGap);
+                     entryPrice = NudgeClearOfMALine(entryPrice, e50[i], false, minGap);
                      lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
                      bool wasNew = (ObjectFind(0, nm) < 0);
                      DrawDivArrow(nm, t_i, entryPrice, true, regular);
@@ -3766,6 +3818,8 @@ void ComputeDivSignals(const bool backfill)
                      double entryPrice = h[i] + offEntry;
                      entryPrice = NudgeAwayFromLastMarker(entryPrice, t_i, true, lastMarkerPrice, lastMarkerTime, minGap);
                      entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, true, minGap, nm);
+                     entryPrice = NudgeClearOfMALine(entryPrice, e21[i], true, minGap);
+                     entryPrice = NudgeClearOfMALine(entryPrice, e50[i], true, minGap);
                      lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
                      bool wasNew = (ObjectFind(0, nm) < 0);
                      DrawDivArrow(nm, t_i, entryPrice, false, regular);
