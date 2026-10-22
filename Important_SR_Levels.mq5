@@ -45,7 +45,41 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.18"
+#property version   "1.19"
+//--- 1.19: Opus audit of v1.18 (new signal/alert logic) found 2 real
+//--- bugs, both fixed here: (1) a newly-created level's 6 new fields
+//--- (shown/side/breakDir/breakTime/proxAlerted/lastProxAlertAt) were
+//--- never initialized - MQL5 only resets string/array struct members
+//--- implicitly, not numbers/bools, and the eviction path reuses a
+//--- slot that just held ANOTHER level's state - so a brand-new level
+//--- could inherit stale break/proximity state and fire a bogus signal
+//--- or silently block a real alert the first time it was ever
+//--- evaluated. Now explicitly zeroed/false on creation. (2)
+//--- CheckLevelSignals reused the STORED levels[k].side as side2
+//--- whenever it was already set, instead of recomputing from close2 -
+//--- but "side" only updates when a level is actually shown/evaluated,
+//--- so a level that flickers out of the nearest-2/2 for a few bars, or
+//--- whose price shifts slightly from an intraday merge, compared
+//--- against a stale bar/stale price and could arm a fake break the
+//--- moment it reappeared - confirmed by simulation. side2 is now
+//--- always recomputed from close2 against the level's CURRENT price,
+//--- removing the stale-state class of bug entirely. Also: the shared
+//--- ATR handle (g_atrHandleSig) is now created whenever EITHER
+//--- InpShowLevelSignals or InpEnableProximityAlert is on (was gated on
+//--- the alert toggle alone, so signals-only setups silently fell back
+//--- to a cruder offset despite the ATR-based comment); added
+//--- InpBreakBackMaxBars/InpLevelSignalMaxAgeDays <= 0 validation
+//--- (would otherwise silently defeat the whole feature with no
+//--- explanation); dropped an unused declared-but-never-used global.
+//--- Design limitations noted by the audit but NOT changed (benign,
+//--- not bugs): choppy price near a level can repeat BreakBack signals
+//--- every couple of bars; Bounce has no rejection-quality filter so it
+//--- can fire every bar in a tight consolidation; overlapping levels
+//--- from different layers at/near the same price can each signal or
+//--- alert separately; a break armed right at an H4/D1/W1 rescan
+//--- boundary is lost (array gets wiped); none of these are real
+//--- signals and strategies being validated here, just raw reactions -
+//--- same as every other overlay already shipped in this project.
 //--- 1.18: Per direct request - buy/sell arrows when price reacts to a
 //--- currently-shown level, plus a proximity alert. Two signal types
 //--- (not just a single rejection candle): BOUNCE (a closed bar's
@@ -606,7 +640,6 @@ int      g_atrHandleSig = INVALID_HANDLE;   // v1.18: dedicated chart-timeframe 
                                              // created when InpShowIntradayLevels is on) so signals/alerts
                                              // work regardless of which level layers are enabled.
 datetime g_lastSigBarTime = 0;              // last chart bar CheckLevelSignals already evaluated
-datetime g_lastSigCleanupMs = 0;            // v1.18: throttle for the signal-arrow age cleanup sweep
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -638,6 +671,23 @@ int OnInit()
       Print("Important_SR_Levels: InpDWMaxLevels must be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
+   //--- v1.19: InpBreakBackMaxBars<=0 would make maxBreakBackSecs<=0, so
+   //--- a BreakBack could never fire (every reclaim looks "too late") -
+   //--- not a crash, but silently defeats the whole feature with no
+   //--- explanation. InpLevelSignalMaxAgeDays<=0 would delete every
+   //--- signal arrow immediately after drawing it, same silent-no-op
+   //--- problem. Both rejected outright instead, consistent with every
+   //--- other "must be >= 1" input in this file.
+   if(InpShowLevelSignals && InpBreakBackMaxBars <= 0)
+     {
+      Print("Important_SR_Levels: InpBreakBackMaxBars must be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   if(InpShowLevelSignals && InpLevelSignalMaxAgeDays <= 0)
+     {
+      Print("Important_SR_Levels: InpLevelSignalMaxAgeDays must be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
    if(InpShowIntradayLevels)
      {
       g_atrHandle = iATR(_Symbol, _Period, InpAtrPeriod);
@@ -647,11 +697,17 @@ int OnInit()
          return(INIT_FAILED);
         }
      }
-   //--- v1.18: dedicated chart-timeframe ATR for the proximity alert -
+   //--- v1.18: dedicated chart-timeframe ATR for signals/proximity -
    //--- created unconditionally (not gated behind InpShowIntradayLevels
-   //--- like g_atrHandle above) since the alert should work regardless
-   //--- of which level layers are on.
-   if(InpEnableProximityAlert)
+   //--- like g_atrHandle above) since both features should work
+   //--- regardless of which level layers are on.
+   //--- v1.19 FIX (Opus-found): used to gate creation on
+   //--- InpEnableProximityAlert alone - with signals on but the
+   //--- proximity alert off, DrawLevelSignal's own ATR read silently
+   //--- found an INVALID_HANDLE and fell back to the cruder
+   //--- 0.25*(high-low) offset, contradicting its own comment that it
+   //--- uses ATR. Gated on either toggle now.
+   if(InpShowLevelSignals || InpEnableProximityAlert)
      {
       g_atrHandleSig = iATR(_Symbol, _Period, InpAtrPeriod);
       if(g_atrHandleSig == INVALID_HANDLE)
@@ -700,7 +756,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.18 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.19 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1087,6 +1143,22 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
    levels[n].touches   = 1;
    levels[n].lineName  = prefix + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
    levels[n].labelName = prefix + "lbl_" + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
+   //--- v1.19 FIX (Opus-found, real bug): number/bool struct fields in a
+   //--- newly-grown array slot are NOT guaranteed zero by MQL5 (only
+   //--- string/dynamic-array members get reset implicitly) - and the
+   //--- eviction path above (levels[weakest]=levels[n-1]; resize down;
+   //--- resize up) hands this brand-new slot memory that just held
+   //--- ANOTHER level's state. Without this, a freshly-created level
+   //--- could inherit a stale side/breakDir/breakTime/lastProxAlertAt
+   //--- from whatever used to occupy this slot, firing a bogus
+   //--- BreakBack signal (or blocking a real proximity alert) the very
+   //--- first time it's ever evaluated.
+   levels[n].shown          = false;
+   levels[n].side           = 0;
+   levels[n].breakDir       = 0;
+   levels[n].breakTime      = 0;
+   levels[n].proxAlerted    = false;
+   levels[n].lastProxAlertAt = 0;
    if(drawInline) RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
   }
 
@@ -1637,7 +1709,24 @@ void CheckLevelSignals(SRLevel &levels[], const string layerTag,
       if(!levels[k].shown) continue;
       double lvl = levels[k].price;
       int side1 = (close1 > lvl) ? 1 : -1;
-      int side2 = (levels[k].side == 0) ? ((close2 > lvl) ? 1 : -1) : levels[k].side;
+      //--- v1.19 FIX (Opus-found, real bug): used to reuse the stored
+      //--- levels[k].side instead of recomputing from close2 whenever
+      //--- side was already initialized - but "side" is only ever
+      //--- updated when this level was SHOWN and evaluated, not every
+      //--- bar. A level that drops out of the nearest-2/2 for several
+      //--- bars (flicker) or whose price shifts slightly from a new
+      //--- merge (intraday layer, RegisterTouchG averages price on
+      //--- merge) leaves "side" referring to a stale bar/stale price -
+      //--- comparing against it could arm a fake break the moment the
+      //--- level reappears or merges, even though price never actually
+      //--- crossed it between two CONSECUTIVE evaluations. Always
+      //--- recomputing from close2 (the actual previous closed bar,
+      //--- against THIS call's current level.price) is exactly what a
+      //--- correctly-updated stored side would already equal in the
+      //--- normal case, and removes the stale-state class of bug
+      //--- entirely - levels[k].side is still recorded below for any
+      //--- future/diagnostic use, just no longer trusted as an input here.
+      int side2 = (close2 > lvl) ? 1 : -1;
       bool touchedRange = (high1 >= lvl && low1 <= lvl);
       bool brokeThisBar = (side1 != side2);
 
