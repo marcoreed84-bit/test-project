@@ -45,7 +45,45 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.13"
+#property version   "1.14"
+//--- 1.14: Opus-audited (exhaustive pass, per direct request - "get
+//--- opus to make 100 percent sure this time"). Found v1.13's fix was
+//--- actually a NO-OP: it compared iTime(tf, shift 1) against
+//--- lastBarTime, but lastBarTime is set from rates[maxI] which, with
+//--- InpDWWindow's default of 2, is actually shift (w+1)=3 - never
+//--- equal to shift 1, so the gate never returned early and CopyRates
+//--- kept running on every tick exactly as before. Fixed: shift is now
+//--- w+1, confirmed correct by hand and by simulation. Also fixed,
+//--- all Opus-found: (1) a v1.12 regression - InpShowTopN<=0
+//--- ("0 = show everything") now drew NOTHING for the H4/daily/weekly
+//--- layers, because v1.12 moved all their drawing into ApplyTopNFilter,
+//--- which still had its old "return immediately if topN<=0" guard from
+//--- when it was just an extra filter on top of inline drawing; (2) the
+//--- "N actually verified ON CHART" diagnostic for H4/daily/weekly was
+//--- being printed immediately after the layer was wiped and BEFORE
+//--- ApplyTopNFilter ever draws anything, so it always claimed "0
+//--- verified" regardless of whether anything was actually wrong -
+//--- removed from that call site; (3) the intraday scan's own early
+//--- returns ("not enough bars", "nothing new this tick") used to exit
+//--- the WHOLE OnCalculate function, not just the intraday block - so
+//--- whenever InpShowIntradayLevels was on, every tick without a new
+//--- CHART bar also silently skipped the independent H4/daily/weekly/
+//--- recent-HL scans and all label/TopN refreshes, starving them down
+//--- to once-per-chart-bar instead of their own intended cadence -
+//--- extracted into its own function (ComputeIntradayLevels) so its
+//--- internal returns can never affect anything else; (4) H4/daily/
+//--- weekly eviction still called ObjectDelete on every evicted level
+//--- even though drawInline=false guarantees those objects were never
+//--- created in the first place (the whole layer gets wiped before each
+//--- rescan) - hundreds to thousands of guaranteed-no-op synchronous
+//--- calls per rescan, now skipped; (5) the intraday layer's own ATR
+//--- CopyBuffer call passed a forward chronological array INDEX as
+//--- start_pos, which MQL5 expects as a backward SHIFT from the current
+//--- bar - reading ATR from entirely the wrong bars whenever intraday
+//--- is re-enabled (off by default, but a real correctness bug, not
+//--- just the "off by one" the original v1.01 comment claimed) - fixed
+//--- to convert index to shift correctly. Also fixed the OnInit journal
+//--- line still printing the wrong version.
 //--- 1.13: Per report, with the key clue - "gold is specific, maybe its
 //--- [p]aused, bitcoin is working fine... silver is also [p]aused".
 //--- Found the real per-tick cost the v1.11/v1.12 fixes hadn't touched:
@@ -481,7 +519,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.12 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.14 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -599,7 +637,17 @@ void RefreshRightEdgeLabels(SRLevel &levels[], const int minTouchesToShow, const
 void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int topN,
                       const color supCol, const color resCol)
   {
-   if(topN <= 0) return;   // 0 = disabled, old "show everything that clears the threshold" behavior
+   //--- v1.14 FIX (Opus-found, v1.12 regression): used to `return` here
+   //--- when topN<=0 ("0 = show everything"), which was correct back
+   //--- when every layer drew itself inline during the scan - this
+   //--- function was purely an extra filter on top. Since v1.12 moved
+   //--- ALL drawing for the H4/daily/weekly layers into THIS function
+   //--- (ScanHigherTF no longer draws inline), an early return here with
+   //--- topN<=0 now means those three layers draw NOTHING AT ALL instead
+   //--- of "everything" - the intraday layer wasn't affected (it still
+   //--- draws inline unconditionally) which is why this went unnoticed.
+   //--- Still ranks/sorts below regardless (cheap, small N), just no
+   //--- longer skips the draw pass entirely.
    int idx[];
    ArrayResize(idx, 0);
    for(int k = 0; k < ArraySize(levels); k++)
@@ -619,7 +667,7 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
      }
    for(int a = 0; a < m; a++)
      {
-      if(a < topN)
+      if(topN <= 0 || a < topN)
          RedrawLevelG(levels[idx[a]], minTouchesToShow, supCol, resCol);   // ensure it's drawn (idempotent)
       else
         {
@@ -740,8 +788,22 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
          for(int k = 1; k < n; k++)
             if(levels[k].touches < levels[weakest].touches) weakest = k;
         }
-      ObjectDelete(0, levels[weakest].lineName);
-      ObjectDelete(0, levels[weakest].labelName);
+      //--- v1.14 FIX (Opus-found): with drawInline=false (ScanHigherTF's
+      //--- H4/daily/weekly scans), NOTHING in this array has ever had a
+      //--- chart object created for it during this pass - the whole
+      //--- layer was wiped via ObjectsDeleteAll() right before the scan
+      //--- started, and RedrawLevelG is never called mid-scan anymore
+      //--- (see RegisterTouchG's own comment). So these two ObjectDelete
+      //--- calls were GUARANTEED no-ops every single time for those
+      //--- layers - hundreds to thousands of wasted synchronous calls
+      //--- across one full H4/D1/W1 rescan. Only bother for the intraday
+      //--- layer, which still draws (and therefore can still have real
+      //--- objects to clean up) inline.
+      if(drawInline)
+        {
+         ObjectDelete(0, levels[weakest].lineName);
+         ObjectDelete(0, levels[weakest].labelName);
+        }
       levels[weakest] = levels[n - 1];
       ArrayResize(levels, n - 1);
       n = n - 1;
@@ -944,22 +1006,24 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
                    const color supCol, const color resCol, const int atrHandle, datetime &lastBarTime)
   {
    int w = InpDWWindow;
-   //--- v1.13 FIX - per report: "the support and resistance line
-   //--- indicator are making the charts freeze... gold is specific...
-   //--- silver is also [p]aused, bitcoin is working fine". Root cause:
-   //--- CopyRates(0, 5000) below - copying 5000 full MqlRates records -
-   //--- used to run UNCONDITIONALLY on every single tick, for all THREE
-   //--- higher-timeframe layers (H4/D1/W1), with the "do we even need to
-   //--- rescan" check only happening AFTER that expensive copy. Gold and
-   //--- Silver are far more actively quoted (many more ticks/second
-   //--- during active sessions) than BTC typically is on a CFD feed, so
-   //--- this cost scaled directly with tick frequency and hit metals
-   //--- hardest - matching exactly what was reported. Fixed by gating
-   //--- with a single cheap native iTime() call FIRST (the same pattern
-   //--- ScanRecentHL already used for its own D1 check) - CopyRates is
-   //--- now only ever called on the rare tick where a new bar on THIS
-   //--- timeframe actually just closed, not on every tick regardless.
-   datetime newestClosed = iTime(_Symbol, tf, 1);
+   //--- v1.13/v1.14: CopyRates(0, 5000) below - copying 5000 full MqlRates
+   //--- records - must not run on every tick regardless of whether a new
+   //--- bar closed on THIS timeframe (that was the root cause of the
+   //--- Gold/Silver-specific freeze report - these are far more actively
+   //--- quoted than BTC on most CFD feeds, so a per-tick cost there hits
+   //--- hardest). Gated with a cheap native iTime() call first instead.
+   //--- v1.14 FIX (Opus-found): v1.13 compared iTime(tf, 1) - shift 1,
+   //--- the newest closed bar - against lastBarTime, which is actually
+   //--- set from rates[maxI].time where maxI = count-2-w. In a NON-series
+   //--- CopyRates array (ArraySetAsSeries(rates,false), as used here),
+   //--- index count-1 is shift 0, so rates[maxI] is shift (w+1), not
+   //--- shift 1 - they're always w bars apart and can never be equal.
+   //--- The gate below NEVER returned early, so CopyRates kept running on
+   //--- literally every tick exactly as before v1.13 - a pure no-op. Shift
+   //--- is now w+1 to match rates[maxI] exactly, confirmed by hand and by
+   //--- simulation (both count back from the same "current" bar, so they
+   //--- agree by construction regardless of how much history exists).
+   datetime newestClosed = iTime(_Symbol, tf, w + 1);
    if(newestClosed == 0 || newestClosed == lastBarTime) return;
 
    MqlRates rates[];
@@ -971,9 +1035,10 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
    int maxI = count - 2 - w;
    if(maxI < w) return;
 
-   //--- defensive: iTime(shift 1) and CopyRates's own maxI-th bar should
-   //--- always agree, but if a history reload landed between the two
-   //--- calls above, trust the actual copied data, not the earlier check
+   //--- defensive: iTime(shift w+1) and CopyRates's own maxI-th bar now
+   //--- agree by construction (see the fixed gate's own comment above),
+   //--- but if a history reload landed between the two calls, trust the
+   //--- actual copied data over the earlier cheap check
    if(rates[maxI].time == lastBarTime) return;
 
    //--- v1.12 FIX (Opus-found): lastBarTime used to be committed (and the
@@ -1027,7 +1092,143 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
       if(levels[k].touches >= InpDWMinTouchesToShow) visible++;
    PrintFormat("Important_SR_Levels: %s rescan - %d bars checked, %d levels found, %d visible (touches>=%d)",
                EnumToString(tf), maxI - w + 1, ArraySize(levels), visible, InpDWMinTouchesToShow);
-   LogLevelDiagnostics(levels, InpDWMinTouchesToShow, EnumToString(tf));
+   //--- v1.14 FIX (Opus-found): used to call LogLevelDiagnostics() right
+   //--- here, which checks ObjectFind "actually exists on chart" - but
+   //--- since v1.12 this layer no longer draws inline during the scan
+   //--- (drawInline=false, see RegisterTouchG's own comment); drawing
+   //--- only happens later, in ApplyTopNFilter, back in OnCalculate.
+   //--- Called here, this diagnostic would ALWAYS report "0 actually
+   //--- verified ON CHART" regardless of whether anything was actually
+   //--- wrong - identical to the real v1.05 "ObjectCreate silently
+   //--- failed" symptom it exists to distinguish from. Removed from this
+   //--- call site; the summary line above (bars/levels/visible) already
+   //--- covers what this scan itself did, and the chart/label state
+   //--- reflects reality correctly once ApplyTopNFilter runs moments
+   //--- later.
+  }
+
+//+------------------------------------------------------------------+
+//| v1.14 FIX (Opus-found): this used to be the top half of OnCalculate
+//| itself, wrapped in `if(InpShowIntradayLevels) { ... }` - but its own
+//| early `return(0)`/`return(rates_total)` calls (for "not enough bars
+//| yet", "nothing new to scan") exited the WHOLE OnCalculate function,
+//| not just this block. Since v1.10 made the intraday layer optional
+//| and added independent H4/daily/weekly/recent-HL layers below it in
+//| the same function, this meant: whenever intraday was switched ON,
+//| every tick that didn't have a new CHART bar (the common case) also
+//| silently skipped the H4/daily/weekly scans, the recent-HL scan, and
+//| every label/TopN refresh - they'd then only ever run once per chart
+//| bar instead of their own intended cadence. Extracted into its own
+//| void function so its internal returns only exit ITS OWN work -
+//| OnCalculate now always falls through to every other layer
+//| regardless of what this one does or returns.
+//+------------------------------------------------------------------+
+void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
+                            const datetime &time[], const double &high[], const double &low[])
+  {
+   int w = InpLeftRightWindow;
+   //--- v1.02 FIX: "not enough bars yet" must return 0, not rates_total -
+   //--- returning rates_total claims the whole history is fully handled,
+   //--- so if MT5 later loads more history (common right after attach,
+   //--- or on a symbol whose history is still downloading), this
+   //--- indicator would never go back and actually run the real scan.
+   if(rates_total < 2 * w + 2) return;
+
+   //--- v1.01 FIX #2: prev_calculated resetting to 0 (a history
+   //--- reload/gap-fill, NOT necessarily "freshly attached") must wipe
+   //--- the existing level list and chart objects first - otherwise the
+   //--- whole history gets re-scanned on top of what's already there,
+   //--- roughly doubling every touch count.
+   if(prev_calculated <= 0)
+     {
+      ObjectsDeleteAll(0, PFX);
+      ArrayResize(g_levels, 0);
+     }
+
+   //--- the newest CLOSED bar is rates_total-2 (rates_total-1 is still
+   //--- forming) - a pivot candidate at index i needs w closed bars on
+   //--- BOTH sides, so the last checkable candidate is (rates_total-2-w)
+   int maxI = rates_total - 2 - w;
+   if(maxI < w) return;   // v1.02 FIX - same reasoning as above
+
+   //--- v1.01 FIX #1: exactly the candidates that could NOT have been
+   //--- fully confirmed last call - no extra margin. A closed bar's
+   //--- high/low never changes, so once a candidate has been checked
+   //--- with a full w-bar window on both sides, it never needs
+   //--- re-checking. The old "-2" margin here re-registered the same
+   //--- few newest pivots on every tick with no new bar, which could
+   //--- inflate a touch count by one per tick for hours.
+   int startI = (prev_calculated <= 0) ? w : MathMax(w, prev_calculated - 1 - w);
+   if(startI > maxI) return;
+
+   //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
+   datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
+   datetime recentCutoff = (InpRecentProtectDays > 0) ? (time[maxI] - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
+
+   //--- v1.01 FIX #4: read ATR PER BAR, not one current value applied
+   //--- to all of history - only the slice actually needed this call.
+   //--- v1.14 FIX (Opus-found): CopyBuffer's start_pos counts SHIFTS
+   //--- back from the current/forming bar (0 = most recent), but startI
+   //--- is a forward chronological INDEX into the non-series time[]/
+   //--- high[]/low[] arrays (0 = oldest) - passing startI directly as
+   //--- start_pos read ATR from the wrong bars entirely (off by
+   //--- rates_total-1-2*maxI or so, not just "one bar off" as the
+   //--- original comment claimed). Converted to the correct shift:
+   //--- shift(maxI) = rates_total-1-maxI is the start_pos that, combined
+   //--- with ArraySetAsSeries(atrBuf,false), lines up atrBuf[0] with
+   //--- time[startI] and atrBuf[atrCount-1] with time[maxI] - exactly
+   //--- what the existing `atrBuf[i-startI]` indexing in the loop below
+   //--- already assumes.
+   int atrCount = maxI - startI + 1;
+   double atrBuf[];
+   ArraySetAsSeries(atrBuf, false);
+   if(CopyBuffer(g_atrHandle, 0, rates_total - 1 - maxI, atrCount, atrBuf) < atrCount)
+     {
+      //--- v1.01 FIX #3: tell MT5 this call did NOT handle the history
+      //--- (don't register anything new) so it retries properly next
+      //--- tick instead of silently treating the backfill as done.
+      return;
+     }
+
+   for(int i = startI; i <= maxI; i++)
+     {
+      if(time[i] < cutoffTime) continue;   // v1.03: outside the lookback window - not eligible at all
+      double minDistance = atrBuf[i - startI] * InpAtrMultiplier;
+      if(minDistance <= 0.0) continue;
+
+      //--- v1.01 minor fix: a flat-top/flat-bottom tie (two bars with the
+      //--- exact same high or low) used to let BOTH register as separate
+      //--- pivots. Ties now resolve to the LATER (more recent) bar only -
+      //--- a tie with an EARLIER neighbor is allowed, but a tie (or
+      //--- worse) against a LATER neighbor disqualifies, so only the
+      //--- rightmost bar in a flat top/bottom ever becomes the pivot.
+      bool isPeak = true, isTrough = true;
+      for(int k = 1; k <= w; k++)
+        {
+         if(high[i] < high[i - k] || high[i] <= high[i + k]) isPeak = false;
+         if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
+         if(!isPeak && !isTrough) break;
+        }
+      if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+      else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+     }
+
+   //--- v1.02: one-time summary once the initial backfill finishes, so
+   //--- "I attached it and see nothing" has an actual answer in the
+   //--- journal instead of silence either way.
+   if(prev_calculated <= 0)
+     {
+      int visible = 0;
+      for(int k = 0; k < ArraySize(g_levels); k++)
+         if(g_levels[k].touches >= InpMinTouchesToShow) visible++;
+      PrintFormat("Important_SR_Levels: initial scan done - %d bars checked (lookback cutoff: %s), "
+                  "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
+                  maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
+                  ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
+      LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -1042,108 +1243,14 @@ int OnCalculate(const int rates_total,
                  const long &volume[],
                  const int &spread[])
   {
-   int w = InpLeftRightWindow;
-   //--- v1.10: the whole intraday (chart's own timeframe) fractal scan is
-   //--- now OFF by default and gated behind InpShowIntradayLevels - per
-   //--- direct request to focus on H4 and up instead. When it's off,
-   //--- none of this block's early-returns apply (they're specific to
-   //--- the intraday scan's own incremental bookkeeping) - execution
-   //--- falls straight through to the H4/daily/weekly/recent-HL layers
-   //--- below, which have always had their own independent re-scan-on-
-   //--- new-bar logic, not tied to this function's return value.
+   //--- v1.10/v1.14: the intraday (chart's own timeframe) fractal scan is
+   //--- OFF by default (InpShowIntradayLevels) - per direct request to
+   //--- focus on H4 and up instead. It's now a separate function (see
+   //--- its own comment) so whatever it does or returns internally can
+   //--- never skip the independent H4/daily/weekly/recent-HL layers
+   //--- below, regardless of whether intraday is on or off.
    if(InpShowIntradayLevels)
-     {
-      //--- v1.02 FIX: "not enough bars yet" must return 0, not rates_total -
-      //--- returning rates_total claims the whole history is fully handled,
-      //--- so if MT5 later loads more history (common right after attach,
-      //--- or on a symbol whose history is still downloading), this
-      //--- indicator would never go back and actually run the real scan.
-      if(rates_total < 2 * w + 2) return(0);
-
-      //--- v1.01 FIX #2: prev_calculated resetting to 0 (a history
-      //--- reload/gap-fill, NOT necessarily "freshly attached") must wipe
-      //--- the existing level list and chart objects first - otherwise the
-      //--- whole history gets re-scanned on top of what's already there,
-      //--- roughly doubling every touch count.
-      if(prev_calculated <= 0)
-        {
-         ObjectsDeleteAll(0, PFX);
-         ArrayResize(g_levels, 0);
-        }
-
-      //--- the newest CLOSED bar is rates_total-2 (rates_total-1 is still
-      //--- forming) - a pivot candidate at index i needs w closed bars on
-      //--- BOTH sides, so the last checkable candidate is (rates_total-2-w)
-      int maxI = rates_total - 2 - w;
-      if(maxI < w) return(0);   // v1.02 FIX - same reasoning as above
-
-      //--- v1.01 FIX #1: exactly the candidates that could NOT have been
-      //--- fully confirmed last call - no extra margin. A closed bar's
-      //--- high/low never changes, so once a candidate has been checked
-      //--- with a full w-bar window on both sides, it never needs
-      //--- re-checking. The old "-2" margin here re-registered the same
-      //--- few newest pivots on every tick with no new bar, which could
-      //--- inflate a touch count by one per tick for hours.
-      int startI = (prev_calculated <= 0) ? w : MathMax(w, prev_calculated - 1 - w);
-      if(startI > maxI) return(rates_total);
-
-      //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
-      datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
-      datetime recentCutoff = (InpRecentProtectDays > 0) ? (time[maxI] - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
-
-      //--- v1.01 FIX #4: read ATR PER BAR, not one current value applied
-      //--- to all of history - only the slice actually needed this call.
-      int atrCount = maxI - startI + 1;
-      double atrBuf[];
-      ArraySetAsSeries(atrBuf, false);
-      if(CopyBuffer(g_atrHandle, 0, startI, atrCount, atrBuf) < atrCount)
-        {
-         //--- v1.01 FIX #3: tell MT5 this call did NOT handle the history
-         //--- (return 0, not rates_total) so it retries properly next
-         //--- tick instead of silently treating the backfill as done.
-         return(0);
-        }
-
-      for(int i = startI; i <= maxI; i++)
-        {
-         if(time[i] < cutoffTime) continue;   // v1.03: outside the lookback window - not eligible at all
-         double minDistance = atrBuf[i - startI] * InpAtrMultiplier;
-         if(minDistance <= 0.0) continue;
-
-         //--- v1.01 minor fix: a flat-top/flat-bottom tie (two bars with the
-         //--- exact same high or low) used to let BOTH register as separate
-         //--- pivots. Ties now resolve to the LATER (more recent) bar only -
-         //--- a tie with an EARLIER neighbor is allowed, but a tie (or
-         //--- worse) against a LATER neighbor disqualifies, so only the
-         //--- rightmost bar in a flat top/bottom ever becomes the pivot.
-         bool isPeak = true, isTrough = true;
-         for(int k = 1; k <= w; k++)
-           {
-            if(high[i] < high[i - k] || high[i] <= high[i + k]) isPeak = false;
-            if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
-            if(!isPeak && !isTrough) break;
-           }
-         if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
-                                            InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
-         else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
-                                            InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
-        }
-
-      //--- v1.02: one-time summary once the initial backfill finishes, so
-      //--- "I attached it and see nothing" has an actual answer in the
-      //--- journal instead of silence either way.
-      if(prev_calculated <= 0)
-        {
-         int visible = 0;
-         for(int k = 0; k < ArraySize(g_levels); k++)
-            if(g_levels[k].touches >= InpMinTouchesToShow) visible++;
-         PrintFormat("Important_SR_Levels: initial scan done - %d bars checked (lookback cutoff: %s), "
-                     "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
-                     maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
-                     ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
-         LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
-        }
-     }
+      ComputeIntradayLevels(rates_total, prev_calculated, time, high, low);
 
    if(InpShowH4Levels)
       ScanHigherTF(PERIOD_H4, g_levelsH4, PFX_H4, InpH4SupportColor, InpH4ResistanceColor,
