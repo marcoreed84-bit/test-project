@@ -31,7 +31,7 @@
 //| too.                                                                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M5
-#property version   "2.25"
+#property version   "2.26"
 //--- 2.25: Locked copy (M5 only) - see header block above. Rebuilt from
 //--- v2.25 (zones always drawn on formation, spent-zone colour) so this copy carries that too.
 //--- 2.24: Per report ("mt5 still hanging... this happened when trying
@@ -1805,6 +1805,8 @@ double GetLot()
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(lot < minLot) lot = minLot;
+   //--- v2.26 FIX (Opus-flagged zero-divide risk) - see main file's comment.
+   if(step <= 0.0) step = 0.01;
    lot = MathRound(lot / step) * step;
    return lot;
   }
@@ -1836,6 +1838,7 @@ void AdjustLot(double delta)
    double lot = GetLot() + delta;
    if(lot < minLot) lot = minLot;
    if(lot > maxLot) lot = maxLot;
+   if(step <= 0.0) step = 0.01;
    lot = MathRound(lot / step) * step;
    int digits = step >= 0.01 ? 2 : (step >= 0.001 ? 3 : 2);
    ObjectSetString(0, PFX + "lotEdit", OBJPROP_TEXT, DoubleToString(lot, digits));
@@ -5163,6 +5166,13 @@ int OnInit()
    //--- own use further down) - as if the panel had frozen.
    g_editFocused = false;
    g_maPeriod = PERIOD_CURRENT;
+
+   //--- v2.26 FIX (Opus-found, see main file's own comment for full
+   //--- detail): build + redraw the panel FIRST so it's on screen before
+   //--- the heavy overlay/MA sync work, then rebuild it again after so
+   //--- it repaints on top of whatever that work just drew.
+   BuildPanel();
+   ChartRedraw(0);
    SyncMAOverlays();
    ResyncRejectSignalsM15();
    BuildPanel();

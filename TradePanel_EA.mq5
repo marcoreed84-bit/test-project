@@ -20,7 +20,26 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.25"
+#property version   "2.26"
+//--- 2.26: Opus investigation of "closed and reopened MT5, tradepanels
+//--- now missing, some taking forever to load". Confirmed cause:
+//--- OnInit built the panel LAST, after SyncMAOverlays()+
+//--- ResyncRejectSignalsM15() - on a fresh attach with every overlay on
+//--- by default, roughly 7,000-9,000 synchronous chart calls
+//--- (ObjectFind/ObjectCreate/ObjectSet, each of which waits for every
+//--- command already queued on that chart - worst exactly at terminal
+//--- startup, competing with history loading and rendering). So the
+//--- panel didn't exist on screen until ALL of that finished - "missing"
+//--- if still mid-backfill when checked, "taking forever" if checked
+//--- later. Fixed: BuildPanel()+ChartRedraw() now run FIRST, then the
+//--- heavy sync work, then BuildPanel() again (MT5 paints in object-
+//--- creation order, not OBJPROP_ZORDER, so the panel needs rebuilding
+//--- after anything new is drawn on top of it). Also added a zero-
+//--- divide guard in GetLot()/AdjustLot() (Opus-flagged, unverified but
+//--- real risk: SYMBOL_VOLUME_STEP could read 0 if called before the
+//--- symbol's info is ready, which GetLot() can be, from BuildPanel(),
+//--- in OnInit) - falls back to 0.01 rather than ever dividing by 0.
+//--- Propagated to both locked copies (TradePanel_EA_M5.mq5/_M15.mq5).
 //--- 2.25: Per report - "i just got a buy signal for a fvg, but there
 //--- was not gap on the chart... i was looking at the chart the whole
 //--- time there was not gap printed there". Found the REAL root cause:
@@ -1816,6 +1835,13 @@ double GetLot()
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(lot < minLot) lot = minLot;
+   //--- v2.26 FIX (Opus-flagged, unverified but a real divide-by-zero
+   //--- risk): this runs from BuildPanel(), called from OnInit - if the
+   //--- symbol's info isn't ready yet that early (possible right after
+   //--- terminal restart), SymbolInfoDouble could return 0 here, and
+   //--- dividing by it would crash the EA outright. Falls back to the
+   //--- broker's minimum lot step (0.01) rather than ever dividing by 0.
+   if(step <= 0.0) step = 0.01;
    lot = MathRound(lot / step) * step;
    return lot;
   }
@@ -1847,6 +1873,8 @@ void AdjustLot(double delta)
    double lot = GetLot() + delta;
    if(lot < minLot) lot = minLot;
    if(lot > maxLot) lot = maxLot;
+   //--- v2.26 FIX: same zero-divide guard as GetLot() above.
+   if(step <= 0.0) step = 0.01;
    lot = MathRound(lot / step) * step;
    int digits = step >= 0.01 ? 2 : (step >= 0.001 ? 3 : 2);
    ObjectSetString(0, PFX + "lotEdit", OBJPROP_TEXT, DoubleToString(lot, digits));
@@ -5162,6 +5190,28 @@ int OnInit()
    //--- own use further down) - as if the panel had frozen.
    g_editFocused = false;
    g_maPeriod = PERIOD_CURRENT;
+
+   //--- v2.26 FIX (Opus-found, per report on "panels missing/slow after
+   //--- MT5 restart"): BuildPanel() used to run LAST here, after
+   //--- SyncMAOverlays()+ResyncRejectSignalsM15() - both of which, on a
+   //--- fresh attach with every overlay on by default, make roughly
+   //--- 7,000-9,000 synchronous chart calls (ObjectFind/ObjectCreate/
+   //--- ObjectSet, each of which waits for every command already queued
+   //--- on that chart to finish first - worst exactly at terminal
+   //--- startup, when every chart's queue is also competing with
+   //--- history loading and rendering). So the panel - the one thing a
+   //--- user actually needs to see and use right away - didn't exist on
+   //--- screen until ALL of that finished, which is exactly the reported
+   //--- symptom: "missing" (still mid-backfill when checked) or "taking
+   //--- forever to load" (same thing, just checked later). Building the
+   //--- panel FIRST and redrawing immediately means it's on screen
+   //--- before any of that heavy work even starts; it's then rebuilt a
+   //--- second time right after, since MT5 paints in object-CREATION
+   //--- order (not OBJPROP_ZORDER - see BuildPanel()'s own comment) and
+   //--- the overlay/MA objects SyncMAOverlays() is about to create would
+   //--- otherwise paint on top of a panel built before them.
+   BuildPanel();
+   ChartRedraw(0);
    SyncMAOverlays();
    ResyncRejectSignalsM15();
    BuildPanel();
