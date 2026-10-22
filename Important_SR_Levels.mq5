@@ -45,7 +45,40 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.11"
+#property version   "1.12"
+//--- 1.12: Opus-reviewed. Confirmed v1.11's per-second throttle is safe
+//--- (no scan/registration work can be skipped by it - verified every
+//--- early-return in the intraday scan and all three ScanHigherTF calls
+//--- happen before the throttle check, and the one-shot diagnostic
+//--- prints all happen before it too), but found a BIGGER, more direct
+//--- freeze cause the throttle didn't touch: ScanHigherTF() drew every
+//--- single level INLINE during the scan itself (RegisterTouchG ->
+//--- RedrawLevelG on every touch) - a full H4/D1/W1 rescan (which
+//--- happens from scratch every time a new bar closes on that
+//--- timeframe, not incrementally) can process thousands of pivots,
+//--- each one doing its own synchronous ObjectFind+7 setters DURING the
+//--- scan - roughly 4000 synchronous chart calls in one blocking
+//--- OnCalculate call at every H4 close. Fixed: RegisterTouchG() gained
+//--- a drawInline parameter (default true, so the intraday layer's
+//--- behaviour is unchanged); ScanHigherTF passes false - the level
+//--- array is still built/merged/evicted exactly the same, drawing is
+//--- simply deferred to ApplyTopNFilter (already called once per
+//--- OnCalculate, already throttled), which only ever needs to draw the
+//--- InpShowTopN survivors per layer instead of every intermediate
+//--- pivot. Also fixed two silent-failure bugs: ScanHigherTF() and
+//--- ScanRecentHL() both used to mark themselves "done" (updating the
+//--- last-bar-time tracker, and in ScanHigherTF's case also wiping
+//--- existing objects) BEFORE confirming the data they needed had
+//--- actually loaded - a transient "not ready yet" failure (routine
+//--- right after attach) left that layer blank with no retry until the
+//--- next bar closed on that timeframe (up to a week for weekly), with
+//--- nothing printed to explain why. Both now validate first, commit
+//--- state only on success, and print on failure. Also added input
+//--- validation for InpDWWindow/InpDWMaxLevels (previously only the
+//--- intraday layer's equivalents were validated - a 0 or negative
+//--- value here could crash the indicator), and fixed the OnInit
+//--- journal line still hardcoding "v1.10" regardless of the actual
+//--- running version.
 //--- 1.11: Per report - "the support and resistance line indicator are
 //--- making the charts freeze". Found it: the TopN filter and every
 //--- label refresh (4 level layers x ObjectFind/ObjectCreate/ObjectSet
@@ -371,6 +404,23 @@ int OnInit()
       Print("Important_SR_Levels: InpMaxLevels must be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
+   //--- v1.12 FIX (Opus-found): the H4/daily/weekly layer's own window/
+   //--- cap inputs were never validated the way the intraday ones above
+   //--- are - InpDWWindow<=0 makes every bar register as a pivot (0) or
+   //--- indexes rates[] with a negative offset and crashes (negative);
+   //--- InpDWMaxLevels<=0 lets RegisterTouchG's eviction logic access
+   //--- levels[0] on an empty array (array-out-of-range, indicator
+   //--- removed).
+   if(InpDWWindow <= 0)
+     {
+      Print("Important_SR_Levels: InpDWWindow must be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   if(InpDWMaxLevels <= 0)
+     {
+      Print("Important_SR_Levels: InpDWMaxLevels must be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
    g_atrHandle = iATR(_Symbol, _Period, InpAtrPeriod);
    if(g_atrHandle == INVALID_HANDLE)
      {
@@ -417,7 +467,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.10 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.12 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -623,8 +673,21 @@ int FindNearbyLevelG(SRLevel &levels[], const double price, const bool isSupport
 void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, const bool isSupport,
                      const double minDistance, const string prefix, const int maxLevels,
                      const int minTouchesToShow, const color supCol, const color resCol,
-                     const datetime recentCutoff)
+                     const datetime recentCutoff, const bool drawInline = true)
   {
+   //--- v1.12 FIX (Opus-found): drawInline=false (used by ScanHigherTF's
+   //--- full-history rescans) skips RedrawLevelG on every single touch -
+   //--- a full H4/D1/W1 rescan can process thousands of pivots, each
+   //--- previously doing its own ObjectFind+7 setters synchronously
+   //--- DURING the scan (~4000 chart calls in one blocking OnCalculate
+   //--- call at every H4 close) - this is the real, bigger freeze cause
+   //--- the v1.11 per-tick throttle didn't touch. The level array is
+   //--- still built/merged/evicted exactly the same either way; only the
+   //--- chart drawing is skipped here, since ApplyTopNFilter (called
+   //--- once per OnCalculate, already throttled) draws the surviving top
+   //--- N for this layer moments later anyway - drawing every single
+   //--- intermediate pivot mid-scan, most of which get evicted or never
+   //--- rank into the top N, was always wasted synchronous work.
    int idx = FindNearbyLevelG(levels, price, isSupport, minDistance);
    if(idx >= 0)
      {
@@ -635,7 +698,7 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
       levels[idx].price = (levels[idx].price * levels[idx].touches + price) / (levels[idx].touches + 1);
       levels[idx].touches++;
       levels[idx].lastTime = t;
-      RedrawLevelG(levels[idx], minTouchesToShow, supCol, resCol);
+      if(drawInline) RedrawLevelG(levels[idx], minTouchesToShow, supCol, resCol);
       return;
      }
 
@@ -678,7 +741,7 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
    levels[n].touches   = 1;
    levels[n].lineName  = prefix + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
    levels[n].labelName = prefix + "lbl_" + (isSupport ? "S_" : "R_") + IntegerToString((long)t);
-   RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
+   if(drawInline) RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
   }
 
 //+------------------------------------------------------------------+
@@ -704,8 +767,12 @@ void ScanRecentHL()
    int n = MathMax(1, InpRecentHLDays);
    datetime d0 = iTime(_Symbol, PERIOD_D1, 0);
    if(d0 == g_lastRecentHLBarTime) return;   // only recompute once per new daily bar
-   g_lastRecentHLBarTime = d0;
 
+   //--- v1.12 FIX (Opus-found): g_lastRecentHLBarTime used to be
+   //--- committed BEFORE the "D1 history ready" check below - a "not
+   //--- ready yet" skip (routine right after attach) left this marked
+   //--- done for the rest of the day, with no retry until the next
+   //--- daily bar. Now only committed once the data is confirmed ready.
    double hi = -DBL_MAX, lo = DBL_MAX;
    for(int i = 1; i <= n; i++)
      {
@@ -713,12 +780,13 @@ void ScanRecentHL()
       double dl = iLow(_Symbol, PERIOD_D1, i);
       if(dh <= 0.0 || dl <= 0.0)
         {
-         Print("Important_SR_Levels: recent-HL skipped - D1 history not ready yet.");
+         Print("Important_SR_Levels: recent-HL skipped - D1 history not ready yet, will retry next tick.");
          return;
         }
       if(dh > hi) hi = dh;
       if(dl < lo) lo = dl;
      }
+   g_lastRecentHLBarTime = d0;
    g_recentHLHi = hi;
    g_recentHLLo = lo;
    //--- v1.10: Open = the OPEN of the OLDEST of the n completed days
@@ -873,18 +941,33 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
 
    //--- throttle: only rescan when a new bar has actually closed on this TF
    if(rates[maxI].time == lastBarTime) return;
-   lastBarTime = rates[maxI].time;
 
-   ObjectsDeleteAll(0, prefix);
-   ArrayResize(levels, 0);
-
+   //--- v1.12 FIX (Opus-found): lastBarTime used to be committed (and the
+   //--- existing objects wiped) BEFORE confirming the ATR CopyBuffer
+   //--- below actually succeeded - a handle that isn't calculated yet
+   //--- (routine right after attach, exactly when this is most likely)
+   //--- made this return with the layer wiped-but-empty AND marked
+   //--- "done", so it wouldn't even retry until the NEXT new bar closes
+   //--- on this timeframe - up to 4h for H4, a day for D1, a week for
+   //--- W1 - with nothing printed to explain the empty layer. Now the
+   //--- ATR copy is validated FIRST, before touching lastBarTime or any
+   //--- existing object/array state, so a transient failure leaves
+   //--- everything untouched and retries on the very next tick instead.
    datetime cutoffTime = (InpDWLookbackDays > 0) ? (rates[maxI].time - (datetime)((long)InpDWLookbackDays * 86400)) : 0;
    datetime recentCutoff = (InpRecentProtectDays > 0) ? (rates[maxI].time - (datetime)((long)InpRecentProtectDays * 86400)) : 0;
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, false);
    int atrCount = maxI - w + 1;
-   if(CopyBuffer(atrHandle, 0, w, atrCount, atrBuf) < atrCount) return;
+   if(CopyBuffer(atrHandle, 0, w, atrCount, atrBuf) < atrCount)
+     {
+      PrintFormat("Important_SR_Levels: %s rescan skipped - ATR not ready yet, will retry next tick.", EnumToString(tf));
+      return;
+     }
+
+   lastBarTime = rates[maxI].time;
+   ObjectsDeleteAll(0, prefix);
+   ArrayResize(levels, 0);
 
    for(int i = w; i <= maxI; i++)
      {
@@ -900,9 +983,9 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
          if(!isPeak && !isTrough) break;
         }
       if(isPeak)         RegisterTouchG(levels, rates[i].time, rates[i].high, false, minDistance, prefix,
-                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol, recentCutoff);
+                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol, recentCutoff, false);
       else if(isTrough)  RegisterTouchG(levels, rates[i].time, rates[i].low,  true,  minDistance, prefix,
-                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol, recentCutoff);
+                                         InpDWMaxLevels, InpDWMinTouchesToShow, supCol, resCol, recentCutoff, false);
      }
 
    int visible = 0;
