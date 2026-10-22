@@ -45,7 +45,17 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.10"
+#property version   "1.11"
+//--- 1.11: Per report - "the support and resistance line indicator are
+//--- making the charts freeze". Found it: the TopN filter and every
+//--- label refresh (4 level layers x ObjectFind/ObjectCreate/ObjectSet
+//--- each) ran UNCONDITIONALLY on every single OnCalculate call - MT5
+//--- calls that on every new TICK, not just every new bar, so on a
+//--- fast-ticking symbol this was dozens of synchronous chart-object
+//--- calls potentially several times a second, forever - same class of
+//--- bug already found/fixed in TradePanel_EA this session. Throttled
+//--- to once per second (GetTickCount64-based) - labels only need to
+//--- track "now" roughly, not tick-exactly.
 //--- 1.10: Per direct request - "maybe just change the support and
 //--- resistance indicator... focus to show the support and resistance
 //--- levels according to the 4 hour timeframe and up, and maybe include
@@ -341,6 +351,7 @@ datetime g_lastH4BarTime     = 0;
 datetime g_lastDailyBarTime  = 0;
 datetime g_lastWeeklyBarTime = 0;
 datetime g_lastRecentHLBarTime = 0;
+ulong    g_lastUiRefreshMs = 0;   // v1.11 FIX - see its own use in OnCalculate
 double   g_recentHLHi = 0.0;
 double   g_recentHLLo = 0.0;
 double   g_recentOpen  = 0.0;
@@ -1028,6 +1039,22 @@ int OnCalculate(const int rates_total,
                    g_atrHandleW, g_lastWeeklyBarTime);
    if(InpShowRecentHL)
       ScanRecentHL();
+
+   //--- v1.11 FIX: everything below this point (TopN filter + every
+   //--- label refresh) used to run UNCONDITIONALLY on every single
+   //--- OnCalculate call - MT5 calls an indicator's OnCalculate on every
+   //--- new TICK, not just every new bar, so on a fast-ticking symbol
+   //--- (reported: "the support and resistance line indicator are
+   //--- making the charts freeze") this meant dozens of synchronous
+   //--- ObjectFind/ObjectCreate/ObjectSet calls across 4 level layers,
+   //--- potentially many times per SECOND, forever - the same class of
+   //--- bug already found and fixed in TradePanel_EA this session.
+   //--- Labels only need to track "now" roughly (they're just moving a
+   //--- text position to the right edge), not tick-exactly, so this is
+   //--- now throttled to once per second - still updates live, just not
+   //--- on every single tick.
+   if(GetTickCount64() - g_lastUiRefreshMs < 1000) return(rates_total);
+   g_lastUiRefreshMs = GetTickCount64();
 
    //--- v1.09: cap how many levels per layer are actually drawn
    ApplyTopNFilter(g_levels,   InpMinTouchesToShow,   InpShowTopN, InpSupportColor,         InpResistanceColor);
