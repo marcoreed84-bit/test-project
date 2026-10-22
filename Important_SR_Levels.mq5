@@ -45,7 +45,39 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.14"
+#property version   "1.15"
+//--- 1.15: Final exhaustive Opus audit of v1.14 (hand-traced + brute-
+//--- force simulated, not just read) confirmed both index fixes correct
+//--- and the default (intraday-off) config genuinely free of tick-scaled
+//--- cost, but found 5 more real items, all fixed here: (1) the v1.14
+//--- extraction of ComputeIntradayLevels into its own function made it
+//--- void, which lost OnCalculate's "0=not handled yet" signal - every
+//--- early return inside it now returned rates_total regardless, so if
+//--- the intraday ATR handle wasn't ready on first attach (routine), the
+//--- backfill was silently and PERMANENTLY skipped forever, not just
+//--- delayed - changed to bool, OnCalculate now returns 0 instead of
+//--- rates_total whenever it reports "didn't finish"; (2) the H4/daily/
+//--- weekly ATR CopyBuffer passed shift w instead of w+1 - each pivot
+//--- was reading the ATR of the bar one newer than itself (confirmed
+//--- off-by-exactly-one by brute-force simulation) - fixed to w+1,
+//--- matching how rates[maxI] (shift w+1) is actually indexed; (3) the
+//--- intraday backfill's two RegisterTouchG calls omitted the
+//--- drawInline argument, defaulting to true - meaning every touch
+//--- across the FULL backfill history still drew synchronously inline,
+//--- the exact blocking pattern already fixed for H4/D1/W1 back in
+//--- v1.12, never applied here - explicit false now defers all of it to
+//--- ApplyTopNFilter like every other layer (Opus's verdict: without
+//--- this the intraday layer, even though off by default, was "not
+//--- production-safe" the moment anyone turned it on); (4) a
+//--- ScanHigherTF rescan landing on a tick where the 1-second UI-refresh
+//--- throttle was still blocking left that layer visually blank for up
+//--- to 1s after the wipe - g_lastUiRefreshMs is now reset to 0
+//--- immediately after a successful rescan so the redraw isn't delayed;
+//--- (5) the intraday ATR handle was being created in OnInit
+//--- unconditionally, even with InpShowIntradayLevels off (its default)
+//--- - one wasted ATR calculated every tick for nothing, inconsistent
+//--- with how the H4/daily/weekly handles are already correctly gated
+//--- behind their own toggles - now gated the same way.
 //--- 1.14: Opus-audited (exhaustive pass, per direct request - "get
 //--- opus to make 100 percent sure this time"). Found v1.13's fix was
 //--- actually a NO-OP: it compared iTime(tf, shift 1) against
@@ -473,11 +505,14 @@ int OnInit()
       Print("Important_SR_Levels: InpDWMaxLevels must be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   g_atrHandle = iATR(_Symbol, _Period, InpAtrPeriod);
-   if(g_atrHandle == INVALID_HANDLE)
+   if(InpShowIntradayLevels)
      {
-      Print("Important_SR_Levels: failed to create ATR handle.");
-      return(INIT_FAILED);
+      g_atrHandle = iATR(_Symbol, _Period, InpAtrPeriod);
+      if(g_atrHandle == INVALID_HANDLE)
+        {
+         Print("Important_SR_Levels: failed to create ATR handle.");
+         return(INIT_FAILED);
+        }
      }
    if(InpShowH4Levels)
      {
@@ -519,7 +554,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.14 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.15 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1057,8 +1092,15 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, false);
+   //--- v1.15 FIX (Opus-found): start_pos counts shifts back from the
+   //--- current/forming bar (0 = most recent). rates[maxI] (the newest
+   //--- pivot candidate) is shift w+1, not shift w - passing w here read
+   //--- each pivot's ATR from the bar one newer than itself. Corrected to
+   //--- w+1 so atrBuf[0] lines up with rates[w] and atrBuf[maxI-w] lines
+   //--- up with rates[maxI], exactly as the atrBuf[i-w] indexing below
+   //--- already assumes.
    int atrCount = maxI - w + 1;
-   if(CopyBuffer(atrHandle, 0, w, atrCount, atrBuf) < atrCount)
+   if(CopyBuffer(atrHandle, 0, w + 1, atrCount, atrBuf) < atrCount)
      {
       PrintFormat("Important_SR_Levels: %s rescan skipped - ATR not ready yet, will retry next tick.", EnumToString(tf));
       return;
@@ -1067,6 +1109,11 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
    lastBarTime = rates[maxI].time;
    ObjectsDeleteAll(0, prefix);
    ArrayResize(levels, 0);
+   //--- v1.15 FIX (Opus-found): without this, a rescan landing on a tick
+   //--- where the 1-second UI-refresh throttle is still blocking left the
+   //--- layer visually blank for up to 1s after a wipe, since the actual
+   //--- redraw (ApplyTopNFilter) only runs once the throttle opens again.
+   g_lastUiRefreshMs = 0;
 
    for(int i = w; i <= maxI; i++)
      {
@@ -1123,7 +1170,19 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
 //| OnCalculate now always falls through to every other layer
 //| regardless of what this one does or returns.
 //+------------------------------------------------------------------+
-void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
+//--- v1.15 FIX (Opus-found): changed from void to bool. The v1.14
+//--- extraction lost OnCalculate's own "0 = not handled yet, retry full
+//--- backfill from scratch" signal - every early return here now returns
+//--- rates_total regardless, so if the ATR handle isn't ready yet on
+//--- first attach (the routine, common case), the intraday backfill was
+//--- silently and PERMANENTLY skipped: prev_calculated becomes
+//--- rates_total on the very next call, startI ends up stuck > maxI
+//--- forever, and the scan never runs. Returns false on every path that
+//--- means "didn't finish handling this history", true otherwise -
+//--- OnCalculate below now returns 0 instead of rates_total when this is
+//--- false, so MT5 retries properly next tick exactly like every other
+//--- "not ready yet" path in this file already does.
+bool ComputeIntradayLevels(const int rates_total, const int prev_calculated,
                             const datetime &time[], const double &high[], const double &low[])
   {
    int w = InpLeftRightWindow;
@@ -1132,7 +1191,7 @@ void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
    //--- so if MT5 later loads more history (common right after attach,
    //--- or on a symbol whose history is still downloading), this
    //--- indicator would never go back and actually run the real scan.
-   if(rates_total < 2 * w + 2) return;
+   if(rates_total < 2 * w + 2) return(false);
 
    //--- v1.01 FIX #2: prev_calculated resetting to 0 (a history
    //--- reload/gap-fill, NOT necessarily "freshly attached") must wipe
@@ -1149,7 +1208,7 @@ void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
    //--- forming) - a pivot candidate at index i needs w closed bars on
    //--- BOTH sides, so the last checkable candidate is (rates_total-2-w)
    int maxI = rates_total - 2 - w;
-   if(maxI < w) return;   // v1.02 FIX - same reasoning as above
+   if(maxI < w) return(false);   // v1.02 FIX - same reasoning as above
 
    //--- v1.01 FIX #1: exactly the candidates that could NOT have been
    //--- fully confirmed last call - no extra margin. A closed bar's
@@ -1159,7 +1218,10 @@ void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
    //--- few newest pivots on every tick with no new bar, which could
    //--- inflate a touch count by one per tick for hours.
    int startI = (prev_calculated <= 0) ? w : MathMax(w, prev_calculated - 1 - w);
-   if(startI > maxI) return;
+   //--- v1.15: this means "nothing new since last call", not "not ready" -
+   //--- genuinely fully handled, so true (not a retry case like the ones
+   //--- above/below).
+   if(startI > maxI) return(true);
 
    //--- v1.03: lookback cutoff - see InpLookbackDays' own comment
    datetime cutoffTime = (InpLookbackDays > 0) ? (time[maxI] - (datetime)((long)InpLookbackDays * 86400)) : 0;
@@ -1187,7 +1249,7 @@ void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
       //--- v1.01 FIX #3: tell MT5 this call did NOT handle the history
       //--- (don't register anything new) so it retries properly next
       //--- tick instead of silently treating the backfill as done.
-      return;
+      return(false);
      }
 
    for(int i = startI; i <= maxI; i++)
@@ -1209,10 +1271,16 @@ void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
          if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
          if(!isPeak && !isTrough) break;
         }
+      //--- v1.15 FIX (Opus-found): these two calls used to omit the 12th
+      //--- argument, defaulting to drawInline=true - meaning every touch
+      //--- across the FULL backfill history drew synchronously inline,
+      //--- the exact same blocking pattern already fixed for H4/D1/W1 in
+      //--- v1.12, never applied here. Explicit false now defers all
+      //--- drawing to ApplyTopNFilter, same as every other layer.
       if(isPeak)         RegisterTouchG(g_levels, time[i], high[i], false, minDistance, PFX, InpMaxLevels,
-                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff, false);
       else if(isTrough)  RegisterTouchG(g_levels, time[i], low[i],  true,  minDistance, PFX, InpMaxLevels,
-                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff);
+                                         InpMinTouchesToShow, InpSupportColor, InpResistanceColor, recentCutoff, false);
      }
 
    //--- v1.02: one-time summary once the initial backfill finishes, so
@@ -1229,6 +1297,7 @@ void ComputeIntradayLevels(const int rates_total, const int prev_calculated,
                   ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
       LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
      }
+   return(true);
   }
 
 //+------------------------------------------------------------------+
@@ -1249,8 +1318,15 @@ int OnCalculate(const int rates_total,
    //--- its own comment) so whatever it does or returns internally can
    //--- never skip the independent H4/daily/weekly/recent-HL layers
    //--- below, regardless of whether intraday is on or off.
+   //--- v1.15 FIX (Opus-found): capture the return so a "not handled yet"
+   //--- result (ATR not ready on fresh attach, the routine case) makes
+   //--- OnCalculate return 0 below instead of rates_total - otherwise
+   //--- the intraday backfill was silently and permanently skipped.
+   //--- InpShowIntradayLevels off (the default) behaves exactly as
+   //--- before: intradayOk stays true, no effect on the return value.
+   bool intradayOk = true;
    if(InpShowIntradayLevels)
-      ComputeIntradayLevels(rates_total, prev_calculated, time, high, low);
+      intradayOk = ComputeIntradayLevels(rates_total, prev_calculated, time, high, low);
 
    if(InpShowH4Levels)
       ScanHigherTF(PERIOD_H4, g_levelsH4, PFX_H4, InpH4SupportColor, InpH4ResistanceColor,
@@ -1277,7 +1353,7 @@ int OnCalculate(const int rates_total,
    //--- text position to the right edge), not tick-exactly, so this is
    //--- now throttled to once per second - still updates live, just not
    //--- on every single tick.
-   if(GetTickCount64() - g_lastUiRefreshMs < 1000) return(rates_total);
+   if(GetTickCount64() - g_lastUiRefreshMs < 1000) return(intradayOk ? rates_total : 0);
    g_lastUiRefreshMs = GetTickCount64();
 
    //--- v1.09: cap how many levels per layer are actually drawn
@@ -1296,5 +1372,5 @@ int OnCalculate(const int rates_total,
    RefreshRecentHLLabels(nowTime);
    RefreshRecentOCLabels(nowTime);
 
-   return(rates_total);
+   return(intradayOk ? rates_total : 0);
   }
