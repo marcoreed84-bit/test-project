@@ -45,7 +45,21 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.12"
+#property version   "1.13"
+//--- 1.13: Per report, with the key clue - "gold is specific, maybe its
+//--- [p]aused, bitcoin is working fine... silver is also [p]aused".
+//--- Found the real per-tick cost the v1.11/v1.12 fixes hadn't touched:
+//--- ScanHigherTF() called CopyRates(0, 5000) - a genuinely expensive
+//--- copy of 5000 full rate records - UNCONDITIONALLY on every single
+//--- tick, for each of the three higher-timeframe layers (H4/D1/W1),
+//--- with the "has a new bar actually closed" check only happening
+//--- AFTER that copy already ran. This cost scales directly with tick
+//--- frequency, and Gold/Silver are far more actively quoted (many more
+//--- ticks/second in active sessions) than BTC typically is on a CFD
+//--- feed - explaining exactly the reported split. Fixed: gated with a
+//--- single cheap iTime() call FIRST, same pattern ScanRecentHL already
+//--- used for its own D1 check - CopyRates now only runs on the rare
+//--- tick where a new H4/D1/W1 bar has actually just closed.
 //--- 1.12: Opus-reviewed. Confirmed v1.11's per-second throttle is safe
 //--- (no scan/registration work can be skipped by it - verified every
 //--- early-return in the intraday scan and all three ScanHigherTF calls
@@ -930,6 +944,24 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
                    const color supCol, const color resCol, const int atrHandle, datetime &lastBarTime)
   {
    int w = InpDWWindow;
+   //--- v1.13 FIX - per report: "the support and resistance line
+   //--- indicator are making the charts freeze... gold is specific...
+   //--- silver is also [p]aused, bitcoin is working fine". Root cause:
+   //--- CopyRates(0, 5000) below - copying 5000 full MqlRates records -
+   //--- used to run UNCONDITIONALLY on every single tick, for all THREE
+   //--- higher-timeframe layers (H4/D1/W1), with the "do we even need to
+   //--- rescan" check only happening AFTER that expensive copy. Gold and
+   //--- Silver are far more actively quoted (many more ticks/second
+   //--- during active sessions) than BTC typically is on a CFD feed, so
+   //--- this cost scaled directly with tick frequency and hit metals
+   //--- hardest - matching exactly what was reported. Fixed by gating
+   //--- with a single cheap native iTime() call FIRST (the same pattern
+   //--- ScanRecentHL already used for its own D1 check) - CopyRates is
+   //--- now only ever called on the rare tick where a new bar on THIS
+   //--- timeframe actually just closed, not on every tick regardless.
+   datetime newestClosed = iTime(_Symbol, tf, 1);
+   if(newestClosed == 0 || newestClosed == lastBarTime) return;
+
    MqlRates rates[];
    ArraySetAsSeries(rates, false);
    int count = CopyRates(_Symbol, tf, 0, 5000, rates);
@@ -939,7 +971,9 @@ void ScanHigherTF(const ENUM_TIMEFRAMES tf, SRLevel &levels[], const string pref
    int maxI = count - 2 - w;
    if(maxI < w) return;
 
-   //--- throttle: only rescan when a new bar has actually closed on this TF
+   //--- defensive: iTime(shift 1) and CopyRates's own maxI-th bar should
+   //--- always agree, but if a history reload landed between the two
+   //--- calls above, trust the actual copied data, not the earlier check
    if(rates[maxI].time == lastBarTime) return;
 
    //--- v1.12 FIX (Opus-found): lastBarTime used to be committed (and the
