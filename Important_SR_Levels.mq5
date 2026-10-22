@@ -45,7 +45,27 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.15"
+#property version   "1.16"
+//--- 1.16: Opus-audited v1.15 (hand-traced + brute-force simulated).
+//--- Fixes 1/2/4/5 confirmed correct, default (intraday-off) config
+//--- confirmed unchanged except the intended ATR-alignment correction
+//--- in fix 2. Fix 3 (drawInline=false for intraday) was found to cause
+//--- a new problem, fixed here: intraday updates INCREMENTALLY (unlike
+//--- ScanHigherTF's full wipe-then-rescan), so a level evicted on a
+//--- later tick almost always DOES have a real chart line/label drawn
+//--- from an earlier tick - skipping its delete purely because
+//--- drawInline was false left ghost lines/labels on the chart forever
+//--- at a stale price. RegisterTouchG's eviction-delete condition is
+//--- now its own thing (objectsMayExist, true only for the intraday
+//--- prefix), independent of drawInline, which still only controls
+//--- whether a MERGED touch redraws immediately. Also removed the
+//--- intraday LogLevelDiagnostics() call (same reasoning as the v1.14
+//--- fix that already removed it for H4/daily/weekly: with
+//--- drawInline=false nothing is drawn yet at that point, so it always
+//--- falsely reported "0 verified"), and reset g_lastUiRefreshMs after
+//--- the intraday backfill wipe too, so that layer can't go blank for
+//--- up to 1s either. All of this only affects InpShowIntradayLevels
+//--- (off by default) - the default config was already correct.
 //--- 1.15: Final exhaustive Opus audit of v1.14 (hand-traced + brute-
 //--- force simulated, not just read) confirmed both index fixes correct
 //--- and the default (intraday-off) config genuinely free of tick-scaled
@@ -554,7 +574,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.15 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.16 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -823,18 +843,30 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
          for(int k = 1; k < n; k++)
             if(levels[k].touches < levels[weakest].touches) weakest = k;
         }
-      //--- v1.14 FIX (Opus-found): with drawInline=false (ScanHigherTF's
-      //--- H4/daily/weekly scans), NOTHING in this array has ever had a
-      //--- chart object created for it during this pass - the whole
-      //--- layer was wiped via ObjectsDeleteAll() right before the scan
-      //--- started, and RedrawLevelG is never called mid-scan anymore
-      //--- (see RegisterTouchG's own comment). So these two ObjectDelete
-      //--- calls were GUARANTEED no-ops every single time for those
-      //--- layers - hundreds to thousands of wasted synchronous calls
-      //--- across one full H4/D1/W1 rescan. Only bother for the intraday
-      //--- layer, which still draws (and therefore can still have real
-      //--- objects to clean up) inline.
-      if(drawInline)
+      //--- v1.14 FIX (Opus-found): with drawInline=false during a
+      //--- ScanHigherTF H4/daily/weekly scan, NOTHING in this array has
+      //--- ever had a chart object created for it during THAT pass - the
+      //--- whole layer was wiped via ObjectsDeleteAll() right before the
+      //--- scan started, and RedrawLevelG is never called mid-scan
+      //--- (see RegisterTouchG's own comment). So deleting there was a
+      //--- guaranteed no-op every time - hundreds to thousands of wasted
+      //--- synchronous calls across one full rescan.
+      //--- v1.16 FIX (Opus-found): v1.15 widened drawInline=false to the
+      //--- INTRADAY layer too (to fix its own freeze risk), but intraday
+      //--- updates INCREMENTALLY, not via a full wipe-then-rescan like
+      //--- ScanHigherTF - a level evicted here on a later tick almost
+      //--- always DOES have a real line/label still on the chart from an
+      //--- earlier tick's ApplyTopNFilter draw, so skipping the delete
+      //--- purely because drawInline is false left ghost lines/labels
+      //--- behind at a stale price forever (until deinit or a reload).
+      //--- The two cases need different conditions, so they're now
+      //--- separate: ScanHigherTF's full-rescan layers never need this
+      //--- delete (always skip it, regardless of drawInline), while
+      //--- intraday needs it whenever this isn't the very first backfill
+      //--- call on a freshly-wiped array (i.e. whenever an object could
+      //--- actually exist from a prior tick's draw).
+      bool objectsMayExist = (prefix == PFX) ? true : false;
+      if(objectsMayExist)
         {
          ObjectDelete(0, levels[weakest].lineName);
          ObjectDelete(0, levels[weakest].labelName);
@@ -1202,6 +1234,10 @@ bool ComputeIntradayLevels(const int rates_total, const int prev_calculated,
      {
       ObjectsDeleteAll(0, PFX);
       ArrayResize(g_levels, 0);
+      //--- v1.16: same reasoning as ScanHigherTF's own g_lastUiRefreshMs
+      //--- reset - without this, a backfill landing on a tick where the
+      //--- throttle is still blocking left this layer blank for up to 1s.
+      g_lastUiRefreshMs = 0;
      }
 
    //--- the newest CLOSED bar is rates_total-2 (rates_total-1 is still
@@ -1295,7 +1331,14 @@ bool ComputeIntradayLevels(const int rates_total, const int prev_calculated,
                   "%d levels found, %d visible (touches>=%d), %d hidden below the touch threshold",
                   maxI - startI + 1, (InpLookbackDays > 0) ? TimeToString(cutoffTime, TIME_DATE) : "none",
                   ArraySize(g_levels), visible, InpMinTouchesToShow, ArraySize(g_levels) - visible);
-      LogLevelDiagnostics(g_levels, InpMinTouchesToShow, "intraday");
+      //--- v1.16 FIX (Opus-found): v1.15 made intraday drawInline=false,
+      //--- so (same reasoning as the v1.14 fix that already removed this
+      //--- call for H4/daily/weekly) nothing has actually been drawn on
+      //--- the chart yet at this point - ApplyTopNFilter does that later,
+      //--- back in OnCalculate. Calling LogLevelDiagnostics here would
+      //--- always report "0 actually verified ON CHART" regardless of
+      //--- whether anything is actually wrong. Removed; the summary line
+      //--- above already covers what this backfill itself found.
      }
    return(true);
   }
