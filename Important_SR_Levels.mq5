@@ -45,7 +45,22 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.16"
+#property version   "1.17"
+//--- 1.17: Per direct request - "show the 2 levels above price and 2
+//--- below, as price breaks a level only show the 2 above/2 below
+//--- again" to simplify the chart further. Replaced ApplyTopNFilter's
+//--- touch-count ranking with a distance-to-current-price ranking
+//--- (new InpShowNearestOnly, default true, and InpNearestCount,
+//--- default 2): of whatever clears InpMinTouchesToShow, only the
+//--- nearest N levels above current price and nearest N below are
+//--- drawn, re-decided every throttled (~1s) refresh - crossing a level
+//--- naturally re-picks both sides with no separate "broke a level"
+//--- handling needed. The old InpShowTopN touch-ranked behavior is
+//--- still there, selectable via InpShowNearestOnly=false. Also, per a
+//--- same-session follow-up question ("high/low are the relevant ones,
+//--- not open/close") - InpShowRecentOC now defaults to false; the
+//--- recent 3-day high/low lines (unchanged, always shown in full, no
+//--- ranking applied to that layer) stay on by default.
 //--- 1.16: Opus-audited v1.15 (hand-traced + brute-force simulated).
 //--- Fixes 1/2/4/5 confirmed correct, default (intraday-off) config
 //--- confirmed unchanged except the intended ATR-alignment correction
@@ -362,6 +377,19 @@ input int      InpMinTouchesToShow = 2;     // Per direct request: a level only 
                                              // touched/respected at least this many times - a single
                                              // untested pivot is noise, not a major level. Set to 1 to show
                                              // every pivot immediately (back to the old behavior).
+input bool     InpShowNearestOnly  = true;  // v1.17: per direct request - "only show 2 levels above and 2
+                                             // below current price, and as price breaks a level, re-pick
+                                             // the nearest 2/2 again". Replaces touch-count ranking with
+                                             // distance-to-current-price ranking: of whatever clears
+                                             // InpMinTouchesToShow, only the InpNearestCount levels whose
+                                             // price is closest ABOVE current price, and the InpNearestCount
+                                             // closest BELOW, are drawn - everything else clears internally
+                                             // but isn't shown, same as the old InpShowTopN cap, just a
+                                             // different (and simpler/fewer-objects) selection rule. Set
+                                             // false to fall back to the old touch-count-ranked InpShowTopN
+                                             // behavior below.
+input int      InpNearestCount     = 2;     // v1.17: how many levels to show on EACH side (above/below) of
+                                             // current price when InpShowNearestOnly is true.
 input int      InpShowTopN         = 6;     // v1.09 FIX: "we need to filter the important ones somehow,
                                              // this is too many" - InpMinTouchesToShow alone could still
                                              // let a dozen+ levels all clear the bar and flood the chart
@@ -450,12 +478,16 @@ input bool     InpShowRecentHL      = true;      // A completely different, much
 input int      InpRecentHLDays      = 3;         // Matches Aurelius's own InpSRDays default
 input color    InpRecentHLColor     = C'120,144,176';  // same dimmed silver Aurelius uses, so a static recent
                                                   // level never competes for attention with the live chart
-input bool     InpShowRecentOC      = true;      // v1.10 NEW - per direct request ("include the 3 days high
+input bool     InpShowRecentOC      = false;     // v1.10 NEW - per direct request ("include the 3 days high
                                                   // and low, open and close") - two more lines: the OPEN of
                                                   // the OLDEST of the InpRecentHLDays completed days, and the
                                                   // CLOSE of the most recent completed day - together with
                                                   // the existing Hi/Lo this reads as a single synthetic
                                                   // N-day OHLC bar
+                                                  // v1.17: defaulted OFF - per direct follow-up, high/low are
+                                                  // the levels price actually reacts to (liquidity/stops),
+                                                  // open/close don't carry the same weight as S/R. The toggle
+                                                  // is kept (not removed) in case you want it back on.
 input color    InpRecentOpenColor   = C'176,144,120';  // dimmed orange-ish, distinct from the Hi/Lo silver
 input color    InpRecentCloseColor  = C'144,176,120';  // dimmed green-ish
 
@@ -574,7 +606,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.16 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.17 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -690,7 +722,8 @@ void RefreshRightEdgeLabels(SRLevel &levels[], const int minTouchesToShow, const
 //| at InpMaxLevels (default 40) so this is cheap even every tick.     |
 //+------------------------------------------------------------------+
 void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int topN,
-                      const color supCol, const color resCol)
+                      const color supCol, const color resCol, const double currentPrice,
+                      const bool nearestOnly, const int nearestCount)
   {
    //--- v1.14 FIX (Opus-found, v1.12 regression): used to `return` here
    //--- when topN<=0 ("0 = show everything"), which was correct back
@@ -713,6 +746,68 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
       idx[sz] = k;
      }
    int m = ArraySize(idx);
+
+   //--- v1.17: per direct request - "only show 2 levels above price and
+   //--- 2 below, and as price breaks a level, re-pick again" - replaces
+   //--- the touch-count ranking below with distance-to-current-price
+   //--- ranking. A level's drawn/not-drawn status is now re-decided
+   //--- every throttled refresh purely from where it sits relative to
+   //--- currentPrice, so crossing a level naturally drops it out of one
+   //--- side's nearest-N and (if it's now on the other side) potentially
+   //--- into the other's - no separate "price broke a level" handling
+   //--- needed, this filter already re-runs every ~1s regardless.
+   if(nearestOnly)
+     {
+      bool show[];
+      ArrayResize(show, m);
+      for(int k = 0; k < m; k++) show[k] = false;
+
+      //--- nearest ABOVE: smallest (price - currentPrice) among price > currentPrice
+      for(int pick = 0; pick < nearestCount; pick++)
+        {
+         int best = -1;
+         double bestDist = DBL_MAX;
+         for(int a = 0; a < m; a++)
+           {
+            if(show[a]) continue;
+            double p = levels[idx[a]].price;
+            if(p <= currentPrice) continue;
+            double d = p - currentPrice;
+            if(d < bestDist) { bestDist = d; best = a; }
+           }
+         if(best < 0) break;
+         show[best] = true;
+        }
+      //--- nearest BELOW: smallest (currentPrice - price) among price < currentPrice
+      for(int pick = 0; pick < nearestCount; pick++)
+        {
+         int best = -1;
+         double bestDist = DBL_MAX;
+         for(int a = 0; a < m; a++)
+           {
+            if(show[a]) continue;
+            double p = levels[idx[a]].price;
+            if(p >= currentPrice) continue;
+            double d = currentPrice - p;
+            if(d < bestDist) { bestDist = d; best = a; }
+           }
+         if(best < 0) break;
+         show[best] = true;
+        }
+
+      for(int a = 0; a < m; a++)
+        {
+         if(show[a])
+            RedrawLevelG(levels[idx[a]], minTouchesToShow, supCol, resCol);
+         else
+           {
+            if(ObjectFind(0, levels[idx[a]].lineName) >= 0)  ObjectDelete(0, levels[idx[a]].lineName);
+            if(ObjectFind(0, levels[idx[a]].labelName) >= 0) ObjectDelete(0, levels[idx[a]].labelName);
+           }
+        }
+      return;
+     }
+
    for(int a = 0; a < m; a++)
      {
       int best = a;
@@ -1400,10 +1495,18 @@ int OnCalculate(const int rates_total,
    g_lastUiRefreshMs = GetTickCount64();
 
    //--- v1.09: cap how many levels per layer are actually drawn
-   ApplyTopNFilter(g_levels,   InpMinTouchesToShow,   InpShowTopN, InpSupportColor,         InpResistanceColor);
-   ApplyTopNFilter(g_levelsH4, InpDWMinTouchesToShow, InpShowTopN, InpH4SupportColor,       InpH4ResistanceColor);
-   ApplyTopNFilter(g_levelsD,  InpDWMinTouchesToShow, InpShowTopN, InpDailySupportColor,    InpDailyResistanceColor);
-   ApplyTopNFilter(g_levelsW,  InpDWMinTouchesToShow, InpShowTopN, InpWeeklySupportColor,   InpWeeklyResistanceColor);
+   //--- v1.17: current price for the nearest-above/nearest-below filter -
+   //--- BID is fine here, this is purely about which lines to show, not
+   //--- a trade-execution price.
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   ApplyTopNFilter(g_levels,   InpMinTouchesToShow,   InpShowTopN, InpSupportColor,         InpResistanceColor,
+                    currentPrice, InpShowNearestOnly, InpNearestCount);
+   ApplyTopNFilter(g_levelsH4, InpDWMinTouchesToShow, InpShowTopN, InpH4SupportColor,       InpH4ResistanceColor,
+                    currentPrice, InpShowNearestOnly, InpNearestCount);
+   ApplyTopNFilter(g_levelsD,  InpDWMinTouchesToShow, InpShowTopN, InpDailySupportColor,    InpDailyResistanceColor,
+                    currentPrice, InpShowNearestOnly, InpNearestCount);
+   ApplyTopNFilter(g_levelsW,  InpDWMinTouchesToShow, InpShowTopN, InpWeeklySupportColor,   InpWeeklyResistanceColor,
+                    currentPrice, InpShowNearestOnly, InpNearestCount);
 
    //--- v1.08: refresh every visible label's position to the right edge
    //--- every call, not just when a level is actually touched
