@@ -45,7 +45,26 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.20"
+#property version   "1.21"
+//--- 1.21: Per direct request - (1) signal arrows now use the same
+//--- OBJ_ARROW_UP/DOWN + ANCHOR_TOP/BOTTOM shape TradePanel_EA.mq5
+//--- uses for every one of its own signal arrows (was OBJ_ARROW_BUY/
+//--- SELL, MT5's own fixed chevron glyphs) - a signal looks the same
+//--- regardless of which of the two programs drew it. (2) Bounce
+//--- redesigned - "the rejection needs to be more specific, also in
+//--- close proximity to the line, but we need to wait for the
+//--- rejection of the 2nd or 3rd candle for a valid rejection": a bar
+//--- whose range comes within InpBounceProximityATR of a level (not
+//--- necessarily a literal touch anymore) arms a pending watch on
+//--- whichever side its close ended up; the signal only fires if the
+//--- 2nd OR 3rd bar AFTER that confirms by closing back on that same
+//--- side and clearly clear of the proximity band again - a held
+//--- rejection, not a single wick. No confirmation by the 3rd bar =
+//--- dropped, no signal. New SRLevel fields (rejPendingSide/
+//--- rejPendingAge) carry this per-level state, explicitly zeroed on
+//--- creation in RegisterTouchG (same lesson as every other per-level
+//--- state field this session - a recycled array slot is not
+//--- guaranteed zero). BreakBack's own construction is unchanged.
 //--- 1.20: Per urgent real report - "the charts are all frozen again"
 //--- (across 6 charts this time, which multiplied the effect) - found
 //--- and fixed 2 real bugs in v1.18/v1.19's new signal/alert feature,
@@ -573,23 +592,34 @@ input color    InpRecentOpenColor   = C'176,144,120';  // dimmed orange-ish, dis
 input color    InpRecentCloseColor  = C'144,176,120';  // dimmed green-ish
 
 input group "=== Level reaction signals (buy/sell arrows) ==="
-input bool     InpShowLevelSignals   = true;   // v1.18: per direct request - arrows when price reacts to a
-                                                // currently-SHOWN level (the nearest 2 above/2 below, per
+input bool     InpShowLevelSignals   = true;   // v1.18/v1.21: per direct request - arrows when price reacts
+                                                // to a currently-SHOWN level (the nearest 2 above/2 below, per
                                                 // v1.17), not just a single rejection candle:
-                                                //  BOUNCE: a closed bar's range touches/crosses the level
-                                                //   but its CLOSE stays on the same side it was already on -
-                                                //   closed back above a level approached from above = BUY,
-                                                //   closed back below one approached from below = SELL.
-                                                //  BREAK+BACK: a closed bar's close genuinely flips to the
-                                                //   other side of the level (a real break, not just a wick),
-                                                //   then a later bar (within InpBreakBackMaxBars) closes
-                                                //   back on the ORIGINAL side - reclaimed below after
+                                                //  BOUNCE (redesigned v1.21 - "the rejection needs to be more
+                                                //   specific, close proximity to the line, but wait for the
+                                                //   rejection of the 2nd or 3rd candle"): a closed bar whose
+                                                //   RANGE comes within InpBounceProximityATR of the level
+                                                //   (doesn't have to literally touch it) arms a pending
+                                                //   watch, on the side its CLOSE ended up. The signal only
+                                                //   fires if the 2nd OR 3rd bar after that (not the approach
+                                                //   bar itself, and not every bar after - just those two
+                                                //   chances) closes back on that SAME side AND clearly clear
+                                                //   of the proximity band again - confirming the rejection,
+                                                //   not just a single wick. No confirmation by the 3rd bar =
+                                                //   no signal, the pending watch is dropped.
+                                                //  BREAK+BACK (unchanged): a closed bar's close genuinely
+                                                //   flips to the other side of the level (a real break, not
+                                                //   just a wick), then a later bar (within InpBreakBackMaxBars)
+                                                //   closes back on the ORIGINAL side - reclaimed below after
                                                 //   breaking above = SELL (failed breakout), reclaimed above
                                                 //   after breaking below = BUY (failed breakdown/reclaim) -
-                                                //   exactly the "break through and back up" case asked for.
-                                                // Evaluated once per new CLOSED bar on the CHART's own
+                                                //   the "break through and back up" case.
+                                                // Both evaluated once per new CLOSED bar on the CHART's own
                                                 // timeframe (not per tick) - a closed bar's high/low/close
-                                                // never change, so this can't repaint.
+                                                // never change, so neither can repaint.
+input double   InpBounceProximityATR = 0.3;    // v1.21: how close a bar's range has to come to a level to
+                                                // count as "close proximity" and arm a Bounce watch - doesn't
+                                                // have to literally touch the level price anymore.
 input int      InpBreakBackMaxBars   = 5;      // how many chart bars a break has to reclaim the other side
                                                 // within, to still count as "break and back" - older than
                                                 // this and the break is just treated as a confirmed move,
@@ -638,6 +668,10 @@ struct SRLevel
    datetime breakTime;   // the closed-bar time the break above was recorded, for the max-bars expiry check
    bool     proxAlerted;    // proximity-alert hysteresis latch - see CheckLevelProximityAlerts' own comment
    datetime lastProxAlertAt; // cooldown timestamp, independent of the hysteresis latch above
+   //--- v1.21: multi-bar Bounce confirmation state - see CheckLevelSignals'
+   //--- own comment. 0 = no pending approach being watched.
+   int      rejPendingSide;
+   int      rejPendingAge;
   };
 
 SRLevel  g_levels[];
@@ -780,7 +814,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.20 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.21 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1183,6 +1217,8 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
    levels[n].breakTime      = 0;
    levels[n].proxAlerted    = false;
    levels[n].lastProxAlertAt = 0;
+   levels[n].rejPendingSide = 0;
+   levels[n].rejPendingAge  = 0;
    if(drawInline) RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
   }
 
@@ -1667,13 +1703,22 @@ void DrawLevelSignal(const bool isBuy, const double levelPrice, const double bar
    string nm = PFX_SIG + layerTag + "_" + IntegerToString((long)barTime) + "_" +
                IntegerToString((long)MathRound(levelPrice * MathPow(10, _Digits)));
    double arrowPrice = isBuy ? (barLow - offset) : (barHigh + offset);
+   //--- v1.21 FIX: per direct request - "the arrows should be the same
+   //--- type of arrow used in tradepanel" - was OBJ_ARROW_BUY/SELL
+   //--- (MT5's own fixed-size chevron glyphs, not independently
+   //--- color/width-styleable the same way). TradePanel_EA.mq5 uses
+   //--- OBJ_ARROW_UP/DOWN + ANCHOR_TOP/BOTTOM for every one of its own
+   //--- signal arrows (DrawEmaCrossArrow, DrawCandleArrow, etc.) - now
+   //--- matched exactly so a signal looks the same regardless of which
+   //--- of the two programs drew it.
    if(ObjectFind(0, nm) < 0)
      {
-      if(!ObjectCreate(0, nm, isBuy ? OBJ_ARROW_BUY : OBJ_ARROW_SELL, 0, barTime, arrowPrice))
+      if(!ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, barTime, arrowPrice))
         {
          PrintFormat("Important_SR_Levels: ObjectCreate FAILED for signal %s - error %d", nm, GetLastError());
          return;
         }
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
       ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
      }
@@ -1724,7 +1769,8 @@ void CleanupOldLevelSignals()
 //+------------------------------------------------------------------+
 void CheckLevelSignals(SRLevel &levels[], const string layerTag,
                         const double close1, const double close2,
-                        const double high1, const double low1, const datetime t1)
+                        const double high1, const double low1, const datetime t1,
+                        const double atrVal)
   {
    if(!InpShowLevelSignals) return;
    long maxBreakBackSecs = (long)InpBreakBackMaxBars * (long)PeriodSeconds();
@@ -1732,6 +1778,14 @@ void CheckLevelSignals(SRLevel &levels[], const string layerTag,
      {
       if(!levels[k].shown) continue;
       double lvl = levels[k].price;
+      //--- v1.21: "close proximity" distance for the Bounce redesign -
+      //--- same fallback chain DrawLevelSignal already uses elsewhere in
+      //--- this file, so it still works on the rare bar where the ATR
+      //--- handle isn't ready.
+      double proximityDist = (atrVal > 0.0) ? InpBounceProximityATR * atrVal
+                                             : (high1 - low1) * InpBounceProximityATR;
+      if(proximityDist <= 0.0) proximityDist = lvl * 0.0005;
+
       int side1 = (close1 > lvl) ? 1 : -1;
       //--- v1.19 FIX (Opus-found, real bug): used to reuse the stored
       //--- levels[k].side instead of recomputing from close2 whenever
@@ -1751,7 +1805,6 @@ void CheckLevelSignals(SRLevel &levels[], const string layerTag,
       //--- entirely - levels[k].side is still recorded below for any
       //--- future/diagnostic use, just no longer trusted as an input here.
       int side2 = (close2 > lvl) ? 1 : -1;
-      bool touchedRange = (high1 >= lvl && low1 <= lvl);
       bool brokeThisBar = (side1 != side2);
 
       if(brokeThisBar)
@@ -1771,12 +1824,64 @@ void CheckLevelSignals(SRLevel &levels[], const string layerTag,
             levels[k].breakDir = side1;
             levels[k].breakTime = t1;
            }
+         //--- v1.21: a genuine break through the level is BreakBack's own
+         //--- territory, not a Bounce approach - drop any pending Bounce
+         //--- watch rather than let it linger and confirm on a break bar.
+         levels[k].rejPendingSide = 0;
         }
-      else if(touchedRange)
+      else
         {
-         //--- the bar's range reached the level but its close didn't flip -
-         //--- a rejection/bounce, signal in the direction price stayed
-         DrawLevelSignal(side1 > 0, lvl, high1, low1, t1, layerTag, "Bounce");
+         //--- v1.21 REDESIGN (per direct request - "the rejection needs
+         //--- to be more specific, also in close proximity to the line,
+         //--- but we need to wait for the rejection of the 2nd or 3rd
+         //--- candle for a valid rejection"): a single wick touching the
+         //--- level and closing away used to fire Bounce immediately -
+         //--- now that only ARMS a pending watch; the signal itself only
+         //--- fires once a LATER bar (the 2nd or 3rd one after the
+         //--- approach, not the approach bar itself) confirms by closing
+         //--- back on the same side AND clear of the proximity band
+         //--- again - a real, held rejection, not a single-bar wick.
+         if(levels[k].rejPendingSide != 0)
+           {
+            levels[k].rejPendingAge++;
+            bool sideMatches = (side1 == levels[k].rejPendingSide);
+            bool clearedAway = (MathAbs(close1 - lvl) > proximityDist);
+            if(levels[k].rejPendingAge == 1 || levels[k].rejPendingAge == 2)
+              {
+               if(sideMatches && clearedAway)
+                 {
+                  DrawLevelSignal(levels[k].rejPendingSide > 0, lvl, high1, low1, t1, layerTag, "Bounce");
+                  levels[k].rejPendingSide = 0;
+                 }
+               else if(levels[k].rejPendingAge == 2)
+                 {
+                  //--- 2nd candle didn't confirm and this (the 3rd) didn't
+                  //--- either - give up, no signal for this approach
+                  levels[k].rejPendingSide = 0;
+                 }
+               //--- else: 2nd candle didn't confirm yet, one more chance
+               //--- (the 3rd) still coming - keep watching
+              }
+            else
+              {
+               //--- already past the 3rd candle with no resolution
+               //--- (shouldn't normally happen given the two branches
+               //--- above, but a defensive catch-all) - stop watching
+               levels[k].rejPendingSide = 0;
+              }
+           }
+         //--- arm a NEW watch only if nothing is already pending on this
+         //--- level and this bar's range actually came within the
+         //--- proximity band of it - "close proximity to the line"
+         if(levels[k].rejPendingSide == 0)
+           {
+            bool nearLevel = (low1 - proximityDist <= lvl && lvl <= high1 + proximityDist);
+            if(nearLevel)
+              {
+               levels[k].rejPendingSide = side1;
+               levels[k].rejPendingAge = 0;
+              }
+           }
         }
 
       //--- a pending break that never got reclaimed within the window is
@@ -1937,10 +2042,21 @@ int OnCalculate(const int rates_total,
       if(InpShowLevelSignals && t1 != g_lastSigBarTime)
         {
          double close1 = close[i1], close2 = close[i2], high1 = high[i1], low1 = low[i1];
-         CheckLevelSignals(g_levels,   "Intraday", close1, close2, high1, low1, t1);
-         CheckLevelSignals(g_levelsH4, "H4",       close1, close2, high1, low1, t1);
-         CheckLevelSignals(g_levelsD,  "Daily",    close1, close2, high1, low1, t1);
-         CheckLevelSignals(g_levelsW,  "Weekly",   close1, close2, high1, low1, t1);
+         //--- v1.21: fetched ONCE per new bar and passed in, rather than
+         //--- each of the up to 64 (4 layers x up to 16 shown levels)
+         //--- per-level checks re-reading it - same shift-1 CopyBuffer
+         //--- pattern DrawLevelSignal/CheckLevelProximityAlerts already use.
+         double sigAtr = 0.0;
+         if(g_atrHandleSig != INVALID_HANDLE)
+           {
+            double sigAtrBuf[];
+            ArraySetAsSeries(sigAtrBuf, true);
+            if(CopyBuffer(g_atrHandleSig, 0, 1, 1, sigAtrBuf) == 1) sigAtr = sigAtrBuf[0];
+           }
+         CheckLevelSignals(g_levels,   "Intraday", close1, close2, high1, low1, t1, sigAtr);
+         CheckLevelSignals(g_levelsH4, "H4",       close1, close2, high1, low1, t1, sigAtr);
+         CheckLevelSignals(g_levelsD,  "Daily",    close1, close2, high1, low1, t1, sigAtr);
+         CheckLevelSignals(g_levelsW,  "Weekly",   close1, close2, high1, low1, t1, sigAtr);
          //--- v1.20 FIX (real bug, confirmed the likely other cause of
          //--- the freeze report): this used to call CleanupOldLevelSignals
          //--- every single new chart bar - but that function scans
