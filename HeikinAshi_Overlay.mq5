@@ -50,9 +50,19 @@
 //|  Also: the hide is re-checked twice a second by a timer (not only  |
 //|  on new ticks), so another EA on the same chart (e.g. TradePanel   |
 //|  re-applying its theme) can't bring the real candles back for long.|
+//|  1.02 - FIX (real bug, per report - "still doesn't show HA candles |
+//|   instead of regular"): v1.01 hid the wick/outline by setting      |
+//|   CHART_COLOR_CHART_UP/CHART_COLOR_CHART_DOWN - but those two      |
+//|   properties only affect the BARS chart display mode ("color of    |
+//|   the up/down bar"), not Candles mode, which this indicator forces |
+//|   via CHART_MODE. They did nothing. The actual wick/shadow color    |
+//|   property in Candles mode is CHART_COLOR_CHART_LINE (it also       |
+//|   doubles as the Line-chart-type's own line color) - never touched |
+//|   until now, which is exactly why the real candles' wicks kept      |
+//|   showing through the HA candles the whole time.                    |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 5
 #property indicator_plots   1
@@ -74,8 +84,7 @@ double BufColor[];
 long  g_origCandleBull = -1;
 long  g_origCandleBear = -1;
 long  g_origChartMode  = -1;
-long  g_origChartUp    = -1;
-long  g_origChartDown  = -1;
+long  g_origChartLine  = -1;
 long  g_origForeground = -1;
 bool  g_savedOriginal   = false;
 
@@ -100,8 +109,7 @@ void HideRealCandles()
       g_origCandleBull = ChartGetInteger(0, CHART_COLOR_CANDLE_BULL);
       g_origCandleBear = ChartGetInteger(0, CHART_COLOR_CANDLE_BEAR);
       g_origChartMode  = ChartGetInteger(0, CHART_MODE);
-      g_origChartUp    = ChartGetInteger(0, CHART_COLOR_CHART_UP);
-      g_origChartDown  = ChartGetInteger(0, CHART_COLOR_CHART_DOWN);
+      g_origChartLine  = ChartGetInteger(0, CHART_COLOR_CHART_LINE);
       g_origForeground = ChartGetInteger(0, CHART_FOREGROUND);
       g_savedOriginal  = true;
      }
@@ -111,8 +119,18 @@ void HideRealCandles()
    if(SetIfDiff(CHART_FOREGROUND, 0)) changed = true;            // price chart must be BEHIND indicator plots
    if(SetIfDiff(CHART_COLOR_CANDLE_BULL, bg)) changed = true;    // bodies
    if(SetIfDiff(CHART_COLOR_CANDLE_BEAR, bg)) changed = true;
-   if(SetIfDiff(CHART_COLOR_CHART_UP,    bg)) changed = true;    // outlines + wicks
-   if(SetIfDiff(CHART_COLOR_CHART_DOWN,  bg)) changed = true;
+   //--- v1.02 FIX (real bug - "still doesn't show HA candles instead of
+   //--- regular"): v1.01 set CHART_COLOR_CHART_UP/CHART_COLOR_CHART_DOWN
+   //--- to hide the wick/outline - but those two properties only affect
+   //--- the BARS chart display mode ("color of the up/down bar"), not
+   //--- Candles mode, which this indicator forces via CHART_MODE above.
+   //--- They did nothing here. The actual wick/shadow color property in
+   //--- BOTH Bars and Candles mode is CHART_COLOR_CHART_LINE (it also
+   //--- doubles as the Line-chart-type's own line color, hence the
+   //--- name) - that's the one that actually needed hiding, and was
+   //--- never touched, which is exactly why the real candles' wicks
+   //--- kept showing through the HA candles the whole time.
+   if(SetIfDiff(CHART_COLOR_CHART_LINE, bg)) changed = true;     // outlines + wicks
    if(changed) ChartRedraw(0);
   }
 
@@ -122,8 +140,7 @@ void RestoreRealCandles()
    if(!g_savedOriginal) return;
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, (color)g_origCandleBull);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, (color)g_origCandleBear);
-   ChartSetInteger(0, CHART_COLOR_CHART_UP,    (color)g_origChartUp);
-   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  (color)g_origChartDown);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE,  (color)g_origChartLine);
    ChartSetInteger(0, CHART_FOREGROUND, g_origForeground != 0);
    ChartSetInteger(0, CHART_MODE, (int)g_origChartMode);
    ChartRedraw(0);
