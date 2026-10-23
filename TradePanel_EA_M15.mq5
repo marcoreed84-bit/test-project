@@ -31,7 +31,7 @@
 //| too.                                                                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M15
-#property version   "2.27"
+#property version   "2.28"
 //--- 2.25: Locked copy (M15 only) - see header block above. Rebuilt from
 //--- v2.25 (zones always drawn on formation, spent-zone colour) so this copy carries that too.
 //--- 2.24: Per report ("mt5 still hanging... this happened when trying
@@ -1227,6 +1227,8 @@ input int    InpSigMarkerLookbackBars = 5;    // only markers within this many b
                                                // alone even if coincidentally close in price
 input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder - leave
                                                      // blank to disable the sound (push notification still fires)
+input int    InpMaxSlLines          = 3;      // v2.28: see main file's own comment - shared pool across every
+                                               // signal overlay combined. TP lines re-added, capped at 1.
 
 input group "=== EMA21/50 Crossover signal overlay - the ONLY construction tonight that showed a real, validated edge (Gold longs, hold-to-next-cross, %PF=1.031) - VISUAL ONLY, never places/modifies/closes anything ==="
 input bool   InpShowEmaCrossSignals = true;   // per direct request - entry on EMA21/50 cross, held until
@@ -1512,6 +1514,10 @@ bool     g_maBackfillPending = false;
 ulong    g_maPendingSinceMs  = 0;
 bool     g_maInitialDrawDone = false;     // v2.11: true once the one-shot immediate attempt below has run
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
+
+//--- v2.28: see main file's own comment
+string g_slFifo[];
+string g_tpFifo[];
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
 //--- own namespace, fully independent of the manual panel. Validated construction: entry on a fresh EMA21/50 cross,
@@ -2293,6 +2299,19 @@ void DrawSigLevel(const string nm, const datetime t1, const datetime t2, const d
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip + " " + DoubleToString(price, _Digits));
   }
 
+void TrimLevelFifo(string &fifo[], const string newName, const int maxKeep)
+  {
+   int n = ArraySize(fifo);
+   ArrayResize(fifo, n + 1);
+   fifo[n] = newName;
+   while(ArraySize(fifo) > maxKeep)
+     {
+      if(ObjectFind(0, fifo[0]) >= 0) ObjectDelete(0, fifo[0]);
+      for(int i = 0; i < ArraySize(fifo) - 1; i++) fifo[i] = fifo[i + 1];
+      ArrayResize(fifo, ArraySize(fifo) - 1);
+     }
+  }
+
 //+------------------------------------------------------------------+
 //| 1.40: general anti-collision for ANY two signal markers (entry     |
 //| arrow or exit dot, any combination), not just the old special case |
@@ -2812,9 +2831,11 @@ void ComputeEmaCrossSignals(const bool backfill)
                DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
                DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
                             "EMA-cross SL: recent " + IntegerToString(InpEmaCrossSwingBars) + "-bar swing (reference only - validated exit is the next opposite EMA cross)");
-               //--- v2.20 FIX: TP line removed per direct request ("remove all
-               //--- the RR lines take profit lines, leave the swing stop loss
-               //--- lines") - SL line above is the one being kept
+               TrimLevelFifo(g_slFifo, lastSl, InpMaxSlLines);
+               //--- v2.28: TP line re-added - see main file's own comment
+               DrawSigLevel(lastTp, t, t + InpEmaCrossLineBars * perSec, tp, InpEmaCrossTPCol, STYLE_SOLID,
+                            "EMA-cross TP reference (R:R=" + DoubleToString(InpEmaCrossRR, 1) + ", example only)");
+               TrimLevelFifo(g_tpFifo, lastTp, 1);
                PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
                            TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                            DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
@@ -3137,7 +3158,11 @@ void ComputeStochSignals(const bool backfill)
          DrawStochArrow(lastArr, t, entryPrice, isBuy);
          DrawSigLevel(lastSl, t, t + InpStochLineBars * perSec, stop, InpStochStopCol, STYLE_SOLID,
                       "Stoch SL: recent " + IntegerToString(InpStochSwingBars) + "-bar swing (unvalidated)");
-         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
+         TrimLevelFifo(g_slFifo, lastSl, InpMaxSlLines);
+         //--- v2.28: TP line re-added - see main file's own comment
+         DrawSigLevel(lastTp, t, t + InpStochLineBars * perSec, tp, InpStochTPCol, STYLE_SOLID,
+                      "Stoch TP reference (R:R=" + DoubleToString(InpStochRR, 1) + ", unvalidated, example only)");
+         TrimLevelFifo(g_tpFifo, lastTp, 1);
         }
      }
 
@@ -3302,7 +3327,11 @@ void ComputeCandleSignals(const bool backfill)
          DrawCandleArrow(arrNm, t, entryPrice, isBuy);
          DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
                       "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
-         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
+         TrimLevelFifo(g_slFifo, slNm, InpMaxSlLines);
+         //--- v2.28: TP line re-added - see main file's own comment
+         DrawSigLevel(tpNm, t, t + InpCdlLineBars * perSec, tp, InpCdlTPCol, STYLE_SOLID,
+                      "Engulfing TP reference (R:R=" + DoubleToString(InpCdlRR, 1) + ")");
+         TrimLevelFifo(g_tpFifo, tpNm, 1);
          if(!backfill && cdlWasNew && InpCdlAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -3473,6 +3502,12 @@ void ComputeDivSignals(const bool backfill)
                         DrawSigLevel(nm + "_sl", t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
+                        TrimLevelFifo(g_slFifo, nm + "_sl", InpMaxSlLines);
+                        //--- v2.28: TP line re-added - see main file's own comment
+                        DrawSigLevel(nm + "_tp", t_i, t_i + InpDivLineBars * perSec, tp, InpDivTPCol, STYLE_SOLID,
+                                     (regular ? "Regular" : "Hidden") + " Div TP reference (R:R=" +
+                                     DoubleToString(InpDivRR, 1) + ", unvalidated)");
+                        TrimLevelFifo(g_tpFifo, nm + "_tp", 1);
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3531,6 +3566,12 @@ void ComputeDivSignals(const bool backfill)
                         DrawSigLevel(nm + "_sl", t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
+                        TrimLevelFifo(g_slFifo, nm + "_sl", InpMaxSlLines);
+                        //--- v2.28: TP line re-added - see main file's own comment
+                        DrawSigLevel(nm + "_tp", t_i, t_i + InpDivLineBars * perSec, tp, InpDivTPCol, STYLE_SOLID,
+                                     (regular ? "Regular" : "Hidden") + " Div TP reference (R:R=" +
+                                     DoubleToString(InpDivRR, 1) + ", unvalidated)");
+                        TrimLevelFifo(g_tpFifo, nm + "_tp", 1);
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3687,7 +3728,11 @@ void ComputeBBSignals(const bool backfill)
          double tp = c[i] + dir * InpBBRR * risk;
          DrawSigLevel(g_bb + "sl_" + id, t_i, t_i + InpBBLineBars * perSec, swing, InpBBStopCol, STYLE_SOLID,
                       "BB Outer-Band SL: recent " + IntegerToString(InpBBSwingBars) + "-bar swing (unvalidated)");
-         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
+         TrimLevelFifo(g_slFifo, g_bb + "sl_" + id, InpMaxSlLines);
+         //--- v2.28: TP line re-added - see main file's own comment
+         DrawSigLevel(g_bb + "tp_" + id, t_i, t_i + InpBBLineBars * perSec, tp, InpBBTPCol, STYLE_SOLID,
+                      "BB Outer-Band TP reference (R:R=" + DoubleToString(InpBBRR, 1) + ", unvalidated)");
+         TrimLevelFifo(g_tpFifo, g_bb + "tp_" + id, 1);
          if(!backfill && wasNew && InpBBAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -3917,6 +3962,12 @@ void ComputeFvgSignals(const bool backfill)
                     {
                      DrawSigLevel(g_fvgSig + "sl_" + id, t_i, t_i + InpFvgLineBars * perSec, swing, InpFvgStopCol, STYLE_SOLID,
                                   "FVG SL: recent " + IntegerToString(InpFvgSwingBars) + "-bar swing (unvalidated)");
+                     TrimLevelFifo(g_slFifo, g_fvgSig + "sl_" + id, InpMaxSlLines);
+                     //--- v2.28: TP line re-added - see main file's own comment
+                     double tp = isBuy ? c[i] + InpFvgRR * risk : c[i] - InpFvgRR * risk;
+                     DrawSigLevel(g_fvgSig + "tp_" + id, t_i, t_i + InpFvgLineBars * perSec, tp, InpFvgTPCol, STYLE_SOLID,
+                                  "FVG TP reference (R:R=" + DoubleToString(InpFvgRR, 1) + ", unvalidated)");
+                     TrimLevelFifo(g_tpFifo, g_fvgSig + "tp_" + id, 1);
                     }
                   if(!backfill && wasNew && InpFvgAlert)
                     {
@@ -4112,6 +4163,12 @@ void ComputeLiquiditySignals(const bool backfill)
                     {
                      DrawSigLevel(g_liqSig + "sl_" + id, t_i, t_i + InpLiqLineBars * perSec, swing, InpLiqStopCol, STYLE_SOLID,
                                   "Liquidity SL: recent " + IntegerToString(InpLiqSwingBars) + "-bar swing (unvalidated)");
+                     TrimLevelFifo(g_slFifo, g_liqSig + "sl_" + id, InpMaxSlLines);
+                     //--- v2.28: TP line re-added - see main file's own comment
+                     double tp = isBuy ? c[i] + InpLiqRR * risk : c[i] - InpLiqRR * risk;
+                     DrawSigLevel(g_liqSig + "tp_" + id, t_i, t_i + InpLiqLineBars * perSec, tp, InpLiqTPCol, STYLE_SOLID,
+                                  "Liquidity TP reference (R:R=" + DoubleToString(InpLiqRR, 1) + ", unvalidated)");
+                     TrimLevelFifo(g_tpFifo, g_liqSig + "tp_" + id, 1);
                     }
                   if(!backfill && wasNew && InpLiqAlert)
                     {

@@ -20,7 +20,21 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.27"
+#property version   "2.28"
+//--- 2.28: Per direct request: (1) SL lines capped to the last
+//--- InpMaxSlLines (default 3) IN TOTAL, across every signal overlay
+//--- combined (EMA cross, Stoch, Candle, Divergence x2, BB, FVG,
+//--- Liquidity all share ONE pool, confirmed explicitly - not one each)
+//--- - drawing a new SL line anywhere deletes the single oldest
+//--- survivor once over the cap, via the new shared g_slFifo[] array
+//--- and TrimLevelFifo() helper. (2) TP/RR reference lines RE-ADDED
+//--- (removed in v2.20) but capped at 1 in the exact same shared-pool
+//--- way (g_tpFifo[]) - only the single most recent signal of ANY type
+//--- on the whole chart ever shows a TP line; every overlay's own
+//--- InpXxxRR/InpXxxTPCol inputs already existed unused since v2.20,
+//--- now wired back up. FVG/Liquidity never had a `tp` price computed
+//--- at all (their RR inputs were unused even before v2.20) - added
+//--- fresh using their existing InpFvgRR/InpLiqRR inputs.
 //--- 2.27: Per direct request, three changes:
 //--- (1) InpShowMAs defaulted true -> false - the hand-drawn MA21/50/
 //--- 200 trend-line overlay no longer draws by default (manually add
@@ -1309,6 +1323,15 @@ input int    InpSigMarkerLookbackBars = 5;    // only markers within this many b
                                                // alone even if coincidentally close in price
 input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder - leave
                                                      // blank to disable the sound (push notification still fires)
+input int    InpMaxSlLines          = 3;      // v2.28: per direct request - only the last N SL lines stay
+                                               // on the chart IN TOTAL, across every signal type combined
+                                               // (EMA cross, Stoch, Candle, Divergence, BB, FVG, Liquidity all
+                                               // share ONE pool, not one each) - drawing a new one anywhere
+                                               // deletes the single oldest survivor once over this count,
+                                               // regardless of which overlay drew it. The TP/RR reference line
+                                               // (re-added in v2.28, was removed in v2.20) shares the same
+                                               // "in total" rule but is always capped at 1 - only the single
+                                               // most recent signal of ANY type on the whole chart ever shows one.
 
 input group "=== EMA21/50 Crossover signal overlay - the ONLY construction tonight that showed a real, validated edge (Gold longs, hold-to-next-cross, %PF=1.031) - VISUAL ONLY, never places/modifies/closes anything ==="
 input bool   InpShowEmaCrossSignals = true;   // per direct request - entry on EMA21/50 cross, held until
@@ -1594,6 +1617,12 @@ bool     g_maBackfillPending = false;
 ulong    g_maPendingSinceMs  = 0;
 bool     g_maInitialDrawDone = false;     // v2.11: true once the one-shot immediate attempt below has run
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
+
+//--- v2.28: ONE shared pool each for SL lines (InpMaxSlLines) and TP
+//--- lines (always capped at 1) across EVERY signal overlay combined -
+//--- see TrimLevelFifo's own comment and InpMaxSlLines' own comment.
+string g_slFifo[];
+string g_tpFifo[];
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
 //--- own namespace, fully independent of the manual panel. Validated construction: entry on a fresh EMA21/50 cross,
@@ -2397,6 +2426,30 @@ void DrawSigLevel(const string nm, const datetime t1, const datetime t2, const d
   }
 
 //+------------------------------------------------------------------+
+//| v2.28: per direct request - "limit this to the last 3 signals on   |
+//| the chart, with every new signal remove the last one" for SL lines |
+//| (maxKeep=3), and "the RR/TP levels only show on the current signal |
+//| given" for TP lines (maxKeep=1, called straight after re-adding    |
+//| the TP line draw that v2.20 had removed). One shared FIFO per      |
+//| overlay TYPE (not one combined pool across all 7 - a noisy overlay |
+//| would otherwise evict a meaningful one from a different overlay    |
+//| within seconds). fifo[0] is always the OLDEST - appends at the end,|
+//| deletes+drops from the front once over maxKeep.                   |
+//+------------------------------------------------------------------+
+void TrimLevelFifo(string &fifo[], const string newName, const int maxKeep)
+  {
+   int n = ArraySize(fifo);
+   ArrayResize(fifo, n + 1);
+   fifo[n] = newName;
+   while(ArraySize(fifo) > maxKeep)
+     {
+      if(ObjectFind(0, fifo[0]) >= 0) ObjectDelete(0, fifo[0]);
+      for(int i = 0; i < ArraySize(fifo) - 1; i++) fifo[i] = fifo[i + 1];
+      ArrayResize(fifo, ArraySize(fifo) - 1);
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| 1.40: general anti-collision for ANY two signal markers (entry     |
 //| arrow or exit dot, any combination), not just the old special case |
 //| of an entry+exit landing on the exact same bar. A tight/compressed |
@@ -2918,9 +2971,16 @@ void ComputeEmaCrossSignals(const bool backfill)
                DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
                DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
                             "EMA-cross SL: recent " + IntegerToString(InpEmaCrossSwingBars) + "-bar swing (reference only - validated exit is the next opposite EMA cross)");
-               //--- v2.20 FIX: TP line removed per direct request ("remove all
-               //--- the RR lines take profit lines, leave the swing stop loss
-               //--- lines") - SL line above is the one being kept
+               TrimLevelFifo(g_slFifo, lastSl, InpMaxSlLines);
+               //--- v2.28: TP line re-added (was removed in v2.20) per
+               //--- direct request - "add a tp line to the current signal
+               //--- given" - shares the single chart-wide TP pool (always
+               //--- capped at 1), so re-adding it here automatically
+               //--- deletes whatever the PREVIOUS signal's TP was, from
+               //--- ANY overlay.
+               DrawSigLevel(lastTp, t, t + InpEmaCrossLineBars * perSec, tp, InpEmaCrossTPCol, STYLE_SOLID,
+                            "EMA-cross TP reference (R:R=" + DoubleToString(InpEmaCrossRR, 1) + ", example only)");
+               TrimLevelFifo(g_tpFifo, lastTp, 1);
                PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
                            TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
                            DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
@@ -3243,7 +3303,11 @@ void ComputeStochSignals(const bool backfill)
          DrawStochArrow(lastArr, t, entryPrice, isBuy);
          DrawSigLevel(lastSl, t, t + InpStochLineBars * perSec, stop, InpStochStopCol, STYLE_SOLID,
                       "Stoch SL: recent " + IntegerToString(InpStochSwingBars) + "-bar swing (unvalidated)");
-         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
+         TrimLevelFifo(g_slFifo, lastSl, InpMaxSlLines);
+         //--- v2.28: TP line re-added - see EmaCross's own comment
+         DrawSigLevel(lastTp, t, t + InpStochLineBars * perSec, tp, InpStochTPCol, STYLE_SOLID,
+                      "Stoch TP reference (R:R=" + DoubleToString(InpStochRR, 1) + ", unvalidated, example only)");
+         TrimLevelFifo(g_tpFifo, lastTp, 1);
         }
      }
 
@@ -3408,7 +3472,11 @@ void ComputeCandleSignals(const bool backfill)
          DrawCandleArrow(arrNm, t, entryPrice, isBuy);
          DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
                       "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
-         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
+         TrimLevelFifo(g_slFifo, slNm, InpMaxSlLines);
+         //--- v2.28: TP line re-added - see EmaCross's own comment
+         DrawSigLevel(tpNm, t, t + InpCdlLineBars * perSec, tp, InpCdlTPCol, STYLE_SOLID,
+                      "Engulfing TP reference (R:R=" + DoubleToString(InpCdlRR, 1) + ")");
+         TrimLevelFifo(g_tpFifo, tpNm, 1);
          if(!backfill && cdlWasNew && InpCdlAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -3581,6 +3649,12 @@ void ComputeDivSignals(const bool backfill)
                         DrawSigLevel(nm + "_sl", t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
+                        TrimLevelFifo(g_slFifo, nm + "_sl", InpMaxSlLines);
+                        //--- v2.28: TP line re-added - see EmaCross's own comment
+                        DrawSigLevel(nm + "_tp", t_i, t_i + InpDivLineBars * perSec, tp, InpDivTPCol, STYLE_SOLID,
+                                     (regular ? "Regular" : "Hidden") + " Div TP reference (R:R=" +
+                                     DoubleToString(InpDivRR, 1) + ", unvalidated)");
+                        TrimLevelFifo(g_tpFifo, nm + "_tp", 1);
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3639,6 +3713,12 @@ void ComputeDivSignals(const bool backfill)
                         DrawSigLevel(nm + "_sl", t_i, t_i + InpDivLineBars * perSec, swing, InpDivStopCol, STYLE_SOLID,
                                      (regular ? "Regular" : "Hidden") + string(" Div SL: recent ") +
                                      IntegerToString(InpDivSwingBars) + "-bar swing (unvalidated)");
+                        TrimLevelFifo(g_slFifo, nm + "_sl", InpMaxSlLines);
+                        //--- v2.28: TP line re-added - see EmaCross's own comment
+                        DrawSigLevel(nm + "_tp", t_i, t_i + InpDivLineBars * perSec, tp, InpDivTPCol, STYLE_SOLID,
+                                     (regular ? "Regular" : "Hidden") + " Div TP reference (R:R=" +
+                                     DoubleToString(InpDivRR, 1) + ", unvalidated)");
+                        TrimLevelFifo(g_tpFifo, nm + "_tp", 1);
                        }
                      if(!backfill && wasNew && InpDivAlert)
                        {
@@ -3795,7 +3875,11 @@ void ComputeBBSignals(const bool backfill)
          double tp = c[i] + dir * InpBBRR * risk;
          DrawSigLevel(g_bb + "sl_" + id, t_i, t_i + InpBBLineBars * perSec, swing, InpBBStopCol, STYLE_SOLID,
                       "BB Outer-Band SL: recent " + IntegerToString(InpBBSwingBars) + "-bar swing (unvalidated)");
-         //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
+         TrimLevelFifo(g_slFifo, g_bb + "sl_" + id, InpMaxSlLines);
+         //--- v2.28: TP line re-added - see EmaCross's own comment
+         DrawSigLevel(g_bb + "tp_" + id, t_i, t_i + InpBBLineBars * perSec, tp, InpBBTPCol, STYLE_SOLID,
+                      "BB Outer-Band TP reference (R:R=" + DoubleToString(InpBBRR, 1) + ", unvalidated)");
+         TrimLevelFifo(g_tpFifo, g_bb + "tp_" + id, 1);
          if(!backfill && wasNew && InpBBAlert)
            {
             string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
@@ -4025,6 +4109,14 @@ void ComputeFvgSignals(const bool backfill)
                     {
                      DrawSigLevel(g_fvgSig + "sl_" + id, t_i, t_i + InpFvgLineBars * perSec, swing, InpFvgStopCol, STYLE_SOLID,
                                   "FVG SL: recent " + IntegerToString(InpFvgSwingBars) + "-bar swing (unvalidated)");
+                     TrimLevelFifo(g_slFifo, g_fvgSig + "sl_" + id, InpMaxSlLines);
+                     //--- v2.28: TP line re-added - see EmaCross's own comment. This
+                     //--- overlay never had a `tp` variable (InpFvgRR existed as an
+                     //--- input but was never used in any price calc) - computed fresh.
+                     double tp = isBuy ? c[i] + InpFvgRR * risk : c[i] - InpFvgRR * risk;
+                     DrawSigLevel(g_fvgSig + "tp_" + id, t_i, t_i + InpFvgLineBars * perSec, tp, InpFvgTPCol, STYLE_SOLID,
+                                  "FVG TP reference (R:R=" + DoubleToString(InpFvgRR, 1) + ", unvalidated)");
+                     TrimLevelFifo(g_tpFifo, g_fvgSig + "tp_" + id, 1);
                     }
                   if(!backfill && wasNew && InpFvgAlert)
                     {
@@ -4220,6 +4312,13 @@ void ComputeLiquiditySignals(const bool backfill)
                     {
                      DrawSigLevel(g_liqSig + "sl_" + id, t_i, t_i + InpLiqLineBars * perSec, swing, InpLiqStopCol, STYLE_SOLID,
                                   "Liquidity SL: recent " + IntegerToString(InpLiqSwingBars) + "-bar swing (unvalidated)");
+                     TrimLevelFifo(g_slFifo, g_liqSig + "sl_" + id, InpMaxSlLines);
+                     //--- v2.28: TP line re-added - see EmaCross's own comment. Same as
+                     //--- FVG, this overlay never had a `tp` variable - computed fresh.
+                     double tp = isBuy ? c[i] + InpLiqRR * risk : c[i] - InpLiqRR * risk;
+                     DrawSigLevel(g_liqSig + "tp_" + id, t_i, t_i + InpLiqLineBars * perSec, tp, InpLiqTPCol, STYLE_SOLID,
+                                  "Liquidity TP reference (R:R=" + DoubleToString(InpLiqRR, 1) + ", unvalidated)");
+                     TrimLevelFifo(g_tpFifo, g_liqSig + "tp_" + id, 1);
                     }
                   if(!backfill && wasNew && InpLiqAlert)
                     {
