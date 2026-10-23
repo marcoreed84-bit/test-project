@@ -31,7 +31,7 @@
 //| too.                                                                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M5
-#property version   "2.26"
+#property version   "2.27"
 //--- 2.25: Locked copy (M5 only) - see header block above. Rebuilt from
 //--- v2.25 (zones always drawn on formation, spent-zone colour) so this copy carries that too.
 //--- 2.24: Per report ("mt5 still hanging... this happened when trying
@@ -1146,7 +1146,7 @@ input color  InpBuyColor           = C'30,120,60';
 input color  InpSellColor          = C'150,40,40';
 
 input group "=== Moving averages (hand-drawn in the project's own colours, same idiom as Aurelius_EA.mq5) ==="
-input bool          InpShowMAs     = true;
+input bool          InpShowMAs     = false;  // v2.27: see main file's own comment
 input ENUM_MA_METHOD InpMAMethod   = MODE_EMA;    // MODE_EMA = exponential, MODE_SMA = simple
 input int            InpMA21      = 21;
 input int            InpMA50      = 50;
@@ -1218,11 +1218,8 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
                                                // trade signal of any kind - this panel has no strategy)
 
 input group "=== Shared signal-marker settings (used by the EMA21/50 crossover overlay's markers/alerts) ==="
-input int    InpSigDrawDays         = 7;      // only signals from the last N CALENDAR DAYS are
-                                               // drawn/logged/kept on the chart - converted to a bar count
-                                               // internally per the chart's own timeframe (so "7" means the
-                                               // same real time on M5 or M15, unlike a raw bar count), and
-                                               // purged continuously every new bar (not just once a day)
+input int    InpSigDrawDays         = 2;      // v2.27: see main file's own comment - now genuinely
+                                               // calendar-day aligned (today + yesterday)
 input double InpSigMinMarkerGapATR = 1.0;     // minimum price gap (in ATR) kept between ANY two signal
                                                // markers that land close together in time
 input int    InpSigMarkerLookbackBars = 5;    // only markers within this many bars of each other are
@@ -1342,46 +1339,6 @@ input double InpCdlMinMADistATR    = 0.5;     // v2.18 FIX: the engulfing candle
                                                // this many ATR away from BOTH the 21 and 50EMA - filters out
                                                // the "too close to a moving average" case described (that MA
                                                // is right there acting as support/resistance). 0 = disabled
-
-input group "=== Rejection signal overlay (NEW, v2.02, per direct request) - UNVALIDATED (not yet back-tested) - VISUAL ONLY - works on whatever timeframe the chart/panel is attached to (M5, M15, or any other) ==="
-input bool   InpShowRejectSignals2 = true;    // trend (21 vs 50) + price reaches/rejects/breaks the 50 +
-                                               // breaks back through the 21 + closes beyond the Bollinger
-                                               // mid-band + a same-direction stochastic cross nearby - all
-                                               // five conditions must agree. Named InpShowRejectSignals2 to
-                                               // stay distinct from the old InpShowRejectSignals (the
-                                               // removed EMA21-touch marker from v1.x - different construction)
-input int    InpRejLookbackBars    = 20;      // how many bars back price must have reached/rejected/broken
-                                               // the 50 before the 21-break trigger counts
-input double InpRejTouchATR        = 0.3;     // how close to (or beyond) the 50 counts as "reached it" (x ATR)
-input int    InpRejBBPeriod        = 20;      // Bollinger mid-band period (own settings, SMA, standard)
-input double InpRejBBDev           = 2.0;     // Bollinger deviations (only the mid-band/SMA is used here,
-                                               // the deviation doesn't affect the mid-band itself but is
-                                               // kept as a visible/standard BB input for familiarity)
-input int    InpRejStochWindow     = 5;       // a stochastic %K/%D cross in the SAME direction must have
-                                               // happened within this many bars of the trigger bar (uses
-                                               // the Stochastic overlay's own K/slowing/D/method/price
-                                               // settings above, recomputed independently)
-input int    InpRejSwingBars       = 10;      // SL reference = N-bar swing low/high at the trigger bar,
-                                               // same idiom as every other overlay's stop line
-input double InpRejRR              = 2.0;     // R:R convention for the TP reference line - example only
-input color  InpRejStopCol         = clrRed;
-input color  InpRejTPCol           = clrYellow;
-input int    InpRejLineBars        = 8;       // stop-line length in bars; the TP line runs 2 bars longer
-input color  InpRejBuyCol          = C'25,255,127';
-input color  InpRejSellCol         = C'255,12,93';
-input int    InpRejArrowSize       = 1;
-input double InpRejArrowOffsetATR  = 1.9;     // own offset, distinct from every other overlay's markers
-input bool   InpRejAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
-
-input group "=== Rejection signal - separate M15 overlay (NEW, v2.03, per direct request) - ALWAYS computed on M15 bars regardless of what timeframe the chart itself is on - same 5 conditions, own label/colour so it's never confused with the chart-timeframe Rejection signal above ==="
-input bool   InpShowRejectSignalsM15 = true;  // shows on an M5 chart too - this one always reads M15 data,
-                                               // separate from (and in addition to) the overlay above, which
-                                               // always reads whatever timeframe the chart itself is on
-input color  InpRejM15BuyCol       = C'25,255,212';
-input color  InpRejM15SellCol      = C'255,12,39';
-input int    InpRejM15ArrowSize    = 1;
-input double InpRejM15ArrowOffsetATR = 1.9;
-input bool   InpRejM15Alert        = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 
 input group "=== Stochastic divergence signal overlay (NEW, v2.17, per direct request) - UNVALIDATED - VISUAL ONLY ==="
 input bool   InpShowDivSignals     = true;    // REGULAR divergence (price makes a new high/low that the
@@ -1596,23 +1553,6 @@ ENUM_TIMEFRAMES g_cdlPeriod = PERIOD_CURRENT;
 datetime g_cdlLastProcessedBar = 0;
 double   g_cdlLastMarkerPrice = 0.0;
 datetime g_cdlLastMarkerTime  = 0;
-
-//--- v2.02: Rejection overlay (NEW) - own namespace
-string   g_rjx = "TPRJX_";
-ENUM_TIMEFRAMES g_rjxPeriod = PERIOD_CURRENT;
-int      g_rjxLastDir = 0;
-datetime g_rjxLastProcessedBar = 0;
-double   g_rjxLastMarkerPrice = 0.0;
-datetime g_rjxLastMarkerTime  = 0;
-
-//--- v2.03: Rejection overlay, M15-ALWAYS variant - own namespace, no
-//--- period field needed (it never switches - always reads PERIOD_M15
-//--- regardless of what the chart itself is on)
-string   g_rjxm = "TPRJXM_";
-int      g_rjxmLastDir = 0;
-datetime g_rjxmLastProcessedBar = 0;
-double   g_rjxmLastMarkerPrice = 0.0;
-datetime g_rjxmLastMarkerTime  = 0;
 
 //--- v2.17: stochastic divergence overlay (NEW) - own namespace. Tracks
 //--- the single most recent CONFIRMED swing low and swing high (price +
@@ -2207,17 +2147,20 @@ void HousekeepOldObjects()
    int maxHist = InpMAHistoryBars;
    if(InpShowVWAP && InpMAHistoryBars < InpVwapHistoryBars) maxHist = InpVwapHistoryBars;
    datetime segCutoff = tB - (datetime)((long)maxHist * PeriodSeconds(PERIOD_CURRENT));
-   datetime sigCutoff = tB - (datetime)((long)InpSigDrawDays * 86400);
-   datetime tM15 = iTime(_Symbol, PERIOD_M15, 1);
-   datetime m15Cutoff = (tM15 == 0) ? 0 : tM15 - (datetime)((long)InpSigDrawDays * 86400);
+   //--- v2.27 FIX: calendar-day aligned (see main file's own comment) -
+   //--- cutoff = midnight of (InpSigDrawDays-1) days ago.
+   MqlDateTime mdt;
+   TimeToStruct(TimeCurrent(), mdt);
+   mdt.hour = 0; mdt.min = 0; mdt.sec = 0;
+   datetime todayStart = StructToTime(mdt);
+   datetime sigCutoff = todayStart - (datetime)((long)(InpSigDrawDays - 1) * 86400);
    for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
      {
       string nm = ObjectName(0, i, 0, -1);
       datetime cutoff = 0;
-      if(StringFind(nm, g_pm) == 0)        cutoff = segCutoff;
-      else if(StringFind(nm, g_rjxm) == 0) cutoff = m15Cutoff;
+      if(StringFind(nm, g_pm) == 0) cutoff = segCutoff;
       else if(StringFind(nm, g_emax) == 0 || StringFind(nm, g_sig) == 0 || StringFind(nm, g_cdl) == 0
-              || StringFind(nm, g_rjx) == 0 || StringFind(nm, g_div) == 0 || StringFind(nm, g_bb) == 0
+              || StringFind(nm, g_div) == 0 || StringFind(nm, g_bb) == 0
               || StringFind(nm, g_fvgSig) == 0 || StringFind(nm, g_liqSig) == 0)
          cutoff = sigCutoff;
       else continue;   // panel widgets, other programs' / the user's own objects - never touched
@@ -2422,19 +2365,17 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    //--- actually match anything, so Divergence arrows were silently
    //--- exempt from this de-overlap check the whole time. All four real
    //--- name patterns now included.
-   string names[12];
+   string names[10];
    names[0] = g_emax + "arr_"  + id;
    names[1] = g_emax + "exit_" + id;
    names[2] = g_emax + "weak_" + id;
    names[3] = g_sig  + "arr_"  + id;
    names[4] = g_cdl  + "arr_"  + id;
-   names[5] = g_rjx  + "arr_"  + id;
-   names[6] = g_rjxm + "arr_"  + id;
-   names[7] = g_div  + "reg_buy_"  + id;
-   names[8] = g_div  + "hid_buy_"  + id;
-   names[9] = g_div  + "reg_sell_" + id;
-   names[10] = g_div + "hid_sell_" + id;
-   names[11] = g_bb  + "arr_"  + id;
+   names[5] = g_div  + "reg_buy_"  + id;
+   names[6] = g_div  + "hid_buy_"  + id;
+   names[7] = g_div  + "reg_sell_" + id;
+   names[8] = g_div  + "hid_sell_" + id;
+   names[9] = g_bb   + "arr_"  + id;
    //--- v2.19: FVG/Liquidity arrow names include a zone-index suffix
    //--- (g_fvgSig + "arr_" + id + "_" + zoneIndex), so an exact-name
    //--- lookup here can't work the way it does for the other overlays -
@@ -3385,413 +3326,6 @@ void ResyncCandleSignals()
    if(InpShowCandleSignals) ComputeCandleSignals(true);
   }
 
-//+------------------------------------------------------------------+
-//| v2.02: NEW "Rejection" overlay, per direct request/screenshot: in a |
-//| downtrend (21EMA below 50EMA), price rallies up toward the 50EMA   |
-//| (gets near it, rejects it, or breaks above and comes back) - the    |
-//| sell signal only fires once price (a) breaks back BELOW the 21EMA, |
-//| (b) closes below the Bollinger mid-band, AND (c) a stochastic       |
-//| %K/%D cross in the same (down) direction happened within           |
-//| InpRejStochWindow bars. Mirror conditions for an uptrend/buy.       |
-//| UNVALIDATED - this exact construction has not been back-tested;    |
-//| it is coded exactly as described, flagged clearly as unvalidated.  |
-//+------------------------------------------------------------------+
-void DrawRejectArrow2(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   //--- v2.06: same OBJ_ARROW_UP/DOWN shape as every other overlay (was a
-   //--- Wingdings flag icon) - per direct request, "the arrows for all
-   //--- signals must be the same all just different labels and colours"
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejBuyCol : InpRejSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpRejArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Rejection Buy (unvalidated)" : "Rejection Sell (unvalidated)");
-  }
-
-void ComputeRejectSignals2(const bool backfill)
-  {
-   int minBars = MathMax(InpRejBBPeriod, InpStochKPeriod + InpStochSlowing + InpStochDPeriod) + InpRejLookbackBars + 10;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   //--- v2.24 FIX: this overlay (pre-existing before this session) was
-   //--- always uncapped on backfill like every overlay here except FVG/
-   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
-   //--- its own this was apparently tolerable, but stacked together with
-   //--- four new overlays all doing their own full/capped scans in the
-   //--- same OnInit() call, the combined synchronous cost was still
-   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
-   //--- the same way as the others - the signal/trend state this overlay
-   //--- needs only requires a bounded recent window, not the entire
-   //--- chart history, to warm up correctly.
-   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-
-   double e21[], e50[];
-   SigEMA(c, n, InpMA21, e21);
-   SigEMA(c, n, InpMA50, e50);
-   double atr[];
-   SigATR(h, l, c, n, 14, atr);
-
-   //--- Bollinger mid-band = plain SMA(InpRejBBPeriod) of close
-   double bbMid[];
-   ArrayResize(bbMid, n); ArrayInitialize(bbMid, SIG_NA);
-   for(int i = InpRejBBPeriod - 1; i < n; i++)
-     {
-      double s = 0.0;
-      for(int j = i - InpRejBBPeriod + 1; j <= i; j++) s += c[j];
-      bbMid[i] = s / InpRejBBPeriod;
-     }
-
-   //--- own stochastic, same settings as the Stochastic overlay above,
-   //--- recomputed independently so this overlay never depends on
-   //--- whether that one is even switched on
-   double k[], d[];
-   SigClassicStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, k, d, InpStochMethod, InpStochPriceMode);
-   bool stCrossUp[], stCrossDown[];
-   ArrayResize(stCrossUp, n); ArrayResize(stCrossDown, n);
-   ArrayInitialize(stCrossUp, false); ArrayInitialize(stCrossDown, false);
-   for(int i = 1; i < n; i++)
-     {
-      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
-      stCrossUp[i]   = k[i - 1] <= d[i - 1] && k[i] > d[i];
-      stCrossDown[i] = k[i - 1] >= d[i - 1] && k[i] < d[i];
-     }
-
-   int perSec = PeriodSeconds(PERIOD_CURRENT);
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_rjxLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-
-   int lastDir = backfill ? 0 : g_rjxLastDir;
-   double lastMarkerPrice = backfill ? 0.0 : g_rjxLastMarkerPrice;
-   datetime lastMarkerTime = backfill ? 0 : g_rjxLastMarkerTime;
-
-   for(int i = from; i < n; i++)
-     {
-      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e21[i - 1] == SIG_NA || bbMid[i] == SIG_NA || atr[i] == SIG_NA) continue;
-      bool draw = (i >= drawFrom);
-
-      bool bearTrend = e21[i] < e50[i];
-      bool bullTrend = e21[i] > e50[i];
-      double tol = InpRejTouchATR * atr[i];
-
-      int dir = 0;
-
-      //--- SELL: downtrend, price reached/rejected/broke the 50 recently,
-      //--- THEN broke back below the 21 this bar, THEN closes below BB-mid,
-      //--- AND a stoch down-cross happened within the confirm window
-      if(bearTrend && c[i - 1] >= e21[i - 1] && c[i] < e21[i] && c[i] < bbMid[i])
-        {
-         bool reached50 = false;
-         for(int j = MathMax(0, i - InpRejLookbackBars); j < i; j++)
-            if(h[j] >= e50[j] - tol) { reached50 = true; break; }
-         bool stochConfirm = false;
-         for(int j = MathMax(0, i - InpRejStochWindow); j <= i; j++)
-            if(stCrossDown[j]) { stochConfirm = true; break; }
-         if(reached50 && stochConfirm) dir = -1;
-        }
-      //--- BUY: mirror - uptrend, price reached/rejected/broke the 50 from
-      //--- below recently, THEN broke back above the 21, closes above
-      //--- BB-mid, stoch up-cross within the window
-      else if(bullTrend && c[i - 1] <= e21[i - 1] && c[i] > e21[i] && c[i] > bbMid[i])
-        {
-         bool reached50 = false;
-         for(int j = MathMax(0, i - InpRejLookbackBars); j < i; j++)
-            if(l[j] <= e50[j] + tol) { reached50 = true; break; }
-         bool stochConfirm = false;
-         for(int j = MathMax(0, i - InpRejStochWindow); j <= i; j++)
-            if(stCrossUp[j]) { stochConfirm = true; break; }
-         if(reached50 && stochConfirm) dir = 1;
-        }
-      if(dir == 0) continue;
-      if(dir == lastDir) continue;   // same-direction repeat - don't re-fire until the opposite side happens
-      lastDir = dir;
-
-      if(draw)
-        {
-         bool isBuy = dir > 0;
-         double offEntry = InpRejArrowOffsetATR * atr[i];
-         datetime t = r[i].time;
-         string id = IntegerToString((long)t);
-         string nm = g_rjx + "arr_" + id;
-         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-         double minGap = InpSigMinMarkerGapATR * atr[i];
-         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
-         entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
-         entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
-         lastMarkerPrice = entryPrice; lastMarkerTime = t;
-         //--- v2.15 FIX: only alert if this marker is genuinely NEW this
-         //--- call - DrawRejectArrow2() silently no-ops if the object
-         //--- already exists (ObjectFind guard), but the alert below used
-         //--- to fire regardless, so if this bar ever gets reprocessed
-         //--- (a resync, a reinit) the SAME signal re-alerts every time
-         //--- even though nothing new ever appears on the chart -
-         //--- reported as "the same rejection signal over and over".
-         bool wasNew = (ObjectFind(0, nm) < 0);
-         DrawRejectArrow2(nm, t, entryPrice, isBuy);
-
-         //--- SL (swing high/low) + TP (R:R) lines, same idiom as every
-         //--- other overlay in this file
-         double swing = (dir > 0) ? l[i] : h[i];
-         for(int j = i - InpRejSwingBars + 1; j < i; j++)
-            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-         double risk = dir * (c[i] - swing);
-         if(risk > 0.0)
-           {
-            double stop = swing;
-            double tp   = c[i] + dir * InpRejRR * risk;
-            string slNm = g_rjx + "sl_" + id;
-            string tpNm = g_rjx + "tp_" + id;
-            DrawSigLevel(slNm, t, t + InpRejLineBars * perSec, stop, InpRejStopCol, STYLE_SOLID,
-                         "Rejection SL: recent " + IntegerToString(InpRejSwingBars) + "-bar swing (unvalidated)");
-            //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
-           }
-
-         PrintFormat("RejectSignal2 LOG: %s %s @ %s  E21=%s E50=%s BBmid=%s (unvalidated)",
-                     TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                     DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
-                     DoubleToString(e50[i], _Digits), DoubleToString(bbMid[i], _Digits));
-         if(!backfill && wasNew && InpRejAlert)
-           {
-            string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-            FireSigAlert(StringFormat("%s %s: Rejection %s PRINTED (21/50 trend + 50EMA reject + 21EMA break + "
-                                       "BB-mid close + stoch confirm) - UNVALIDATED, chart overlay only",
-                                       _Symbol, tf, isBuy ? "BUY" : "SELL"));
-           }
-        }
-     }
-
-   g_rjxLastDir = lastDir;
-   g_rjxLastProcessedBar = r[n - 1].time;
-   g_rjxLastMarkerPrice = lastMarkerPrice; g_rjxLastMarkerTime = lastMarkerTime;
-  }
-
-void ResyncRejectSignals2()
-  {
-   ObjectsDeleteAll(0, g_rjx);
-   g_rjxPeriod = (ENUM_TIMEFRAMES)_Period;
-   g_rjxLastDir = 0;
-   g_rjxLastProcessedBar = 0;
-   g_rjxLastMarkerPrice = 0.0; g_rjxLastMarkerTime = 0;
-   if(InpShowRejectSignals2) ComputeRejectSignals2(true);
-  }
-
-//+------------------------------------------------------------------+
-//| v2.03: M15-ALWAYS variant of the Rejection overlay, per direct      |
-//| request - "this setup could happen on the 15min as well, maybe      |
-//| labelled different and different colour signals". Identical 5-      |
-//| condition logic to ComputeRejectSignals2() above, but reads          |
-//| PERIOD_M15 bars directly (CopyRates with an explicit timeframe,     |
-//| not PERIOD_CURRENT) so it keeps showing M15 setups even when the    |
-//| chart/panel itself is attached to M5 or any other timeframe - a     |
-//| separate, independent signal from the chart-timeframe one above,    |
-//| not a mirror of it. Own namespace (g_rjxm), own colours             |
-//| (InpRejM15BuyCol/SellCol), own tooltip ("Rejection M15 Buy/Sell")   |
-//| so the two overlays are never visually confused when both are on    |
-//| an M5 chart at the same time. UNVALIDATED, same as the overlay above.|
-//+------------------------------------------------------------------+
-void DrawRejectArrowM15(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   //--- v2.06: same OBJ_ARROW_UP/DOWN shape as every other overlay
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpRejM15BuyCol : InpRejM15SellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpRejM15ArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Rejection M15 Buy (unvalidated)" : "Rejection M15 Sell (unvalidated)");
-  }
-
-void ComputeRejectSignalsM15(const bool backfill)
-  {
-   int minBars = MathMax(InpRejBBPeriod, InpStochKPeriod + InpStochSlowing + InpStochDPeriod) + InpRejLookbackBars + 10;
-   int available = Bars(_Symbol, PERIOD_M15) - 1;
-   //--- v2.24 FIX: this overlay (pre-existing before this session) was
-   //--- always uncapped on backfill like every overlay here except FVG/
-   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
-   //--- its own this was apparently tolerable, but stacked together with
-   //--- four new overlays all doing their own full/capped scans in the
-   //--- same OnInit() call, the combined synchronous cost was still
-   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
-   //--- the same way as the others - the signal/trend state this overlay
-   //--- needs only requires a bounded recent window, not the entire
-   //--- chart history, to warm up correctly. NOTE: this overlay always
-   //--- reads PERIOD_M15 (see CopyRates below), so the cap uses M15's own
-   //--- bar duration, not the chart's - the other 4 copies of this exact
-   //--- comment block use PERIOD_CURRENT correctly, this one is the only
-   //--- PERIOD_M15 exception.
-   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_M15));
-   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_M15, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-
-   double e21[], e50[];
-   SigEMA(c, n, InpMA21, e21);
-   SigEMA(c, n, InpMA50, e50);
-   double atr[];
-   SigATR(h, l, c, n, 14, atr);
-
-   double bbMid[];
-   ArrayResize(bbMid, n); ArrayInitialize(bbMid, SIG_NA);
-   for(int i = InpRejBBPeriod - 1; i < n; i++)
-     {
-      double s = 0.0;
-      for(int j = i - InpRejBBPeriod + 1; j <= i; j++) s += c[j];
-      bbMid[i] = s / InpRejBBPeriod;
-     }
-
-   double k[], d[];
-   SigClassicStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, k, d, InpStochMethod, InpStochPriceMode);
-   bool stCrossUp[], stCrossDown[];
-   ArrayResize(stCrossUp, n); ArrayResize(stCrossDown, n);
-   ArrayInitialize(stCrossUp, false); ArrayInitialize(stCrossDown, false);
-   for(int i = 1; i < n; i++)
-     {
-      if(k[i] == SIG_NA || d[i] == SIG_NA || k[i - 1] == SIG_NA || d[i - 1] == SIG_NA) continue;
-      stCrossUp[i]   = k[i - 1] <= d[i - 1] && k[i] > d[i];
-      stCrossDown[i] = k[i - 1] >= d[i - 1] && k[i] < d[i];
-     }
-
-   int perSec = PeriodSeconds(PERIOD_M15);
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_rjxmLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_M15));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-
-   int lastDir = backfill ? 0 : g_rjxmLastDir;
-   double lastMarkerPrice = backfill ? 0.0 : g_rjxmLastMarkerPrice;
-   datetime lastMarkerTime = backfill ? 0 : g_rjxmLastMarkerTime;
-
-   for(int i = from; i < n; i++)
-     {
-      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e21[i - 1] == SIG_NA || bbMid[i] == SIG_NA || atr[i] == SIG_NA) continue;
-      bool draw = (i >= drawFrom);
-
-      bool bearTrend = e21[i] < e50[i];
-      bool bullTrend = e21[i] > e50[i];
-      double tol = InpRejTouchATR * atr[i];
-
-      int dir = 0;
-      if(bearTrend && c[i - 1] >= e21[i - 1] && c[i] < e21[i] && c[i] < bbMid[i])
-        {
-         bool reached50 = false;
-         for(int j = MathMax(0, i - InpRejLookbackBars); j < i; j++)
-            if(h[j] >= e50[j] - tol) { reached50 = true; break; }
-         bool stochConfirm = false;
-         for(int j = MathMax(0, i - InpRejStochWindow); j <= i; j++)
-            if(stCrossDown[j]) { stochConfirm = true; break; }
-         if(reached50 && stochConfirm) dir = -1;
-        }
-      else if(bullTrend && c[i - 1] <= e21[i - 1] && c[i] > e21[i] && c[i] > bbMid[i])
-        {
-         bool reached50 = false;
-         for(int j = MathMax(0, i - InpRejLookbackBars); j < i; j++)
-            if(l[j] <= e50[j] + tol) { reached50 = true; break; }
-         bool stochConfirm = false;
-         for(int j = MathMax(0, i - InpRejStochWindow); j <= i; j++)
-            if(stCrossUp[j]) { stochConfirm = true; break; }
-         if(reached50 && stochConfirm) dir = 1;
-        }
-      if(dir == 0) continue;
-      if(dir == lastDir) continue;
-      lastDir = dir;
-
-      if(draw)
-        {
-         bool isBuy = dir > 0;
-         double offEntry = InpRejM15ArrowOffsetATR * atr[i];
-         datetime t = r[i].time;
-         string id = IntegerToString((long)t);
-         string nm = g_rjxm + "arr_" + id;
-         double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-         double minGap = InpSigMinMarkerGapATR * atr[i];
-         entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-         entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, nm);
-         entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
-         entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
-         lastMarkerPrice = entryPrice; lastMarkerTime = t;
-         bool m15WasNew = (ObjectFind(0, nm) < 0);   // v2.15 FIX
-         DrawRejectArrowM15(nm, t, entryPrice, isBuy);
-
-         double swing = (dir > 0) ? l[i] : h[i];
-         for(int j = i - InpRejSwingBars + 1; j < i; j++)
-            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-         double risk = dir * (c[i] - swing);
-         if(risk > 0.0)
-           {
-            double stop = swing;
-            double tp   = c[i] + dir * InpRejRR * risk;
-            string slNm = g_rjxm + "sl_" + id;
-            string tpNm = g_rjxm + "tp_" + id;
-            DrawSigLevel(slNm, t, t + InpRejLineBars * perSec, stop, InpRejStopCol, STYLE_SOLID,
-                         "Rejection M15 SL: recent " + IntegerToString(InpRejSwingBars) + "-bar swing (unvalidated)");
-            //--- v2.20 FIX: TP line removed per direct request - see EmaCross's own comment
-           }
-
-         PrintFormat("RejectSignalM15 LOG: %s %s @ %s  E21=%s E50=%s BBmid=%s (unvalidated, always M15)",
-                     TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                     DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
-                     DoubleToString(e50[i], _Digits), DoubleToString(bbMid[i], _Digits));
-         if(!backfill && m15WasNew && InpRejM15Alert)
-           {
-            FireSigAlert(StringFormat("%s M15: Rejection M15 %s PRINTED (21/50 trend + 50EMA reject + 21EMA break + "
-                                       "BB-mid close + stoch confirm, always M15 regardless of chart timeframe) - "
-                                       "UNVALIDATED, chart overlay only", _Symbol, isBuy ? "BUY" : "SELL"));
-           }
-        }
-     }
-
-   g_rjxmLastDir = lastDir;
-   g_rjxmLastProcessedBar = r[n - 1].time;
-   g_rjxmLastMarkerPrice = lastMarkerPrice; g_rjxmLastMarkerTime = lastMarkerTime;
-  }
-
-void ResyncRejectSignalsM15()
-  {
-   ObjectsDeleteAll(0, g_rjxm);
-   g_rjxmLastDir = 0;
-   g_rjxmLastProcessedBar = 0;
-   g_rjxmLastMarkerPrice = 0.0; g_rjxmLastMarkerTime = 0;
-   if(InpShowRejectSignalsM15) ComputeRejectSignalsM15(true);
-  }
-
-
-//+------------------------------------------------------------------+
 void DrawDivArrow(const string nm, const datetime t, const double price, const bool isBuy, const bool regular)
   {
    if(ObjectFind(0, nm) >= 0) return;
@@ -4770,12 +4304,11 @@ bool SyncMAOverlays()
       g_maInitialDrawDone = false;   // v2.11: step 2 below draws once immediately, then once more
                                       // when ready/hard-capped - nothing in between, so no blinking
       g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-      //--- the 5 overlays that read the chart's own timeframe (Rejection
-      //--- M15 always reads M15, so it doesn't need this)
+      //--- v2.27: the overlays that read the chart's own timeframe
+      //--- (Rejection / Rejection M15 removed entirely per direct request)
       ResyncEmaCrossSignals();
       ResyncStochSignals();
       ResyncCandleSignals();
-      ResyncRejectSignals2();
       ResyncDivSignals();
       ResyncBBSignals();
       ResyncFvgSignals();
@@ -5174,7 +4707,6 @@ int OnInit()
    BuildPanel();
    ChartRedraw(0);
    SyncMAOverlays();
-   ResyncRejectSignalsM15();
    BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -5193,8 +4725,8 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_emax);
    ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_cdl);
-   ObjectsDeleteAll(0, g_rjx);
-   ObjectsDeleteAll(0, g_rjxm);
+   ObjectsDeleteAll(0, "TPRJX_");
+   ObjectsDeleteAll(0, "TPRJXM_");
    ObjectsDeleteAll(0, g_div);
    ObjectsDeleteAll(0, g_bb);
    ObjectsDeleteAll(0, g_fvg);
@@ -5264,12 +4796,10 @@ void CheckNewBar()
    if(InpShowEmaCrossSignals)  ComputeEmaCrossSignals(false);
    if(InpShowStochSignals)     ComputeStochSignals(false);
    if(InpShowCandleSignals)    ComputeCandleSignals(false);
-   if(InpShowRejectSignals2)   ComputeRejectSignals2(false);
    if(InpShowDivSignals)       ComputeDivSignals(false);
    if(InpShowBBSignals)        ComputeBBSignals(false);
    if(InpShowFVG)              ComputeFvgSignals(false);
    if(InpShowLiquidity)        ComputeLiquiditySignals(false);
-   if(InpShowRejectSignalsM15) ComputeRejectSignalsM15(false);
    CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
    //--- bar object out from under an in-progress drag is asking for
