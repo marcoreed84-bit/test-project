@@ -3974,6 +3974,26 @@ void SetupM15Bias()
    g_m15BiasHandle21  = iMA(_Symbol, PERIOD_M15, 21,  0, MODE_EMA, PRICE_CLOSE);
    g_m15BiasHandle50  = iMA(_Symbol, PERIOD_M15, 50,  0, MODE_EMA, PRICE_CLOSE);
    g_m15BiasHandle200 = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
+   //--- bounded wait for the 200-EMA handle (the slowest to warm up - needs
+   //--- 200 M15 bars = ~50h of history) to actually have calculated values,
+   //--- same reasoning as this file's own MAHandleReady()/MAHistoryReady()
+   //--- for the M1 MA overlay: a handle existing (not INVALID_HANDLE) does
+   //--- NOT mean CopyBuffer will succeed yet. Without this, the OnInit
+   //--- backfill that runs immediately after this call (SyncMAOverlays())
+   //--- would see every bias check fail open anyway, just via "0 bars
+   //--- calculated" instead of "invalid handle" - same end bug. Capped at
+   //--- 3s so a slow/offline feed can never hang OnInit - if it times out,
+   //--- the backfill simply fails open as already documented, and live
+   //--- bars going forward will filter correctly once the data catches up.
+   ulong waitStart = GetTickCount64();
+   while(GetTickCount64() - waitStart < 3000)
+     {
+      int bc21 = BarsCalculated(g_m15BiasHandle21);
+      int bc50 = BarsCalculated(g_m15BiasHandle50);
+      int bc200 = BarsCalculated(g_m15BiasHandle200);
+      if(bc21 > 1 && bc50 > 1 && bc200 > 1) break;
+      Sleep(100);
+     }
   }
 
 void ReleaseM15BiasHandles()
@@ -4521,8 +4541,18 @@ int OnInit()
    //--- otherwise paint on top of a panel built before them.
    BuildPanel();
    ChartRedraw(0);
-   SyncMAOverlays();
+   //--- BUG FIX: SetupM15Bias() MUST run before SyncMAOverlays() - on this
+   //--- first OnInit call, SyncMAOverlays() itself triggers the entire
+   //--- initial Stoch/Div/BB BACKFILL (via ResyncStochSignals() etc.),
+   //--- which calls M15BiasOK() for every historical signal. Called in the
+   //--- wrong order, every one of those backfilled signals saw
+   //--- g_m15BiasHandle21/50/200 still INVALID_HANDLE and fell through the
+   //--- fail-open path - meaning the ENTIRE backfill (everything visible
+   //--- right after attach, since InpSigMaxAgeHours is small) ignored the
+   //--- bias filter completely, which is exactly the "still shows all buy
+   //--- and sell signals" bug reported after enabling InpUseM15Bias.
    SetupM15Bias();
+   SyncMAOverlays();
    //--- v2.30 FIX (Opus-found, real regression since v2.26): this
    //--- second BuildPanel() call never reset g_nCtrls/g_ctrls[] first -
    //--- every control got registered a SECOND time in g_ctrls[], so
