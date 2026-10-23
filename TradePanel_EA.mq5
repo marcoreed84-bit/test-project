@@ -20,7 +20,32 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.28"
+#property version   "2.29"
+//--- 2.29: Two real bugs found investigating a direct report ("i dont
+//--- see the dots printing on the chart when the gap between the
+//--- moving averages are closing, they were always there" - journal
+//--- confirmed the condition WAS firing, just nothing visible):
+//--- (1) DrawEmaWeakenMarker's OBJPROP_ARROWCODE was 108, a value never
+//--- used or verified anywhere else in this file's history - almost
+//--- certainly a transcription slip for 117, the project's own long-
+//--- verified diamond glyph (continuously confirmed working since
+//--- v1.30's midline overlay and v1.48's RejectMarker, both 117) - 108
+//--- maps to a different, effectively blank Wingdings glyph. Fixed to
+//--- 117. (2) Secondary, cosmetic-only: the weaken marker's two nudge
+//--- calls passed pushUp=!wasLong, inverted - wkPrice sits ABOVE price
+//--- on a long run, so a collision needs to push further UP (wasLong),
+//--- not down; only engages on an actual collision, so never fully hid
+//--- the marker on its own. Fixed to wasLong.
+//--- Also fixed, found BY THE SAME investigation, NOT related to the
+//--- report but a real crash bug waiting to trigger on next compile:
+//--- v2.27 shrank NudgeClearOfOtherOverlays' names[] from 12 to 10
+//--- entries (dropping the two removed Rejection-overlay entries) but
+//--- left the loop bound and the others[] buffer at the OLD size 12 -
+//--- reading names[10]/names[11] out of range would have raised a
+//--- critical MQL5 "array out of range" error on EVERY call to this
+//--- shared function (every overlay) the moment v2.27/2.28 was
+//--- compiled and attached. Caught before anyone ran it live - both
+//--- now correctly sized to 10.
 //--- 2.28: Per direct request: (1) SL lines capped to the last
 //--- InpMaxSlLines (default 3) IN TOTAL, across every signal overlay
 //--- combined (EMA cross, Stoch, Candle, Divergence x2, BB, FVG,
@@ -2541,9 +2566,18 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    //--- intentionally NOT added to this de-overlap check; their own
    //--- NudgeAwayFromLastMarker call (against each other, within the
    //--- same overlay) still applies
-   double others[12];
+   //--- v2.29 FIX (real bug, found while investigating an unrelated
+   //--- report): v2.27 shrank names[] from 12 to 10 entries (the two
+   //--- removed Rejection-overlay entries) but left both this loop
+   //--- bound and the others[] buffer at the OLD size 12 - reading
+   //--- names[10]/names[11] out of range raises a critical MQL5 "array
+   //--- out of range" runtime error on EVERY call to this shared
+   //--- function, i.e. every overlay, the moment this got compiled and
+   //--- attached. Caught before anyone ran v2.27/2.28 live. Both now
+   //--- match names[]'s real size.
+   double others[10];
    int m = 0;
-   for(int j = 0; j < 12; j++)
+   for(int j = 0; j < 10; j++)
      {
       if(names[j] == selfName || ObjectFind(0, names[j]) < 0) continue;
       others[m] = ObjectGetDouble(0, names[j], OBJPROP_PRICE, 0);
@@ -2612,9 +2646,21 @@ void DrawEmaWeakenMarker(const string nm, const datetime t, const double price, 
   {
    if(ObjectFind(0, nm) >= 0) return;
    ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 108);   // warning-ish diamond-dot shape, distinct from
-                                                        // the entry triangle (OBJ_ARROW_UP/DOWN) and
-                                                        // exit filled circle (code 159)
+   //--- v2.29 FIX (real bug, per report - "i don't see the dots...
+   //--- they were always there", journal confirmed the condition WAS
+   //--- firing): was ARROWCODE 108, a value never used or verified
+   //--- anywhere else in this file's history - almost certainly a
+   //--- transcription slip for 117, the project's own long-verified
+   //--- diamond glyph, in continuous confirmed-working use since v1.30
+   //--- (the midline overlay's own diamond, and v1.48's RejectMarker,
+   //--- both 117) - 108 maps to a different, effectively blank/
+   //--- near-invisible Wingdings glyph, which exactly matches "logs
+   //--- fire, nothing visible" with no error anywhere (ObjectCreate
+   //--- succeeds either way - it has no concept of "that glyph is
+   //--- blank").
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);   // diamond-dot shape, distinct from the entry
+                                                        // triangle (OBJ_ARROW_UP/DOWN) and exit filled
+                                                        // circle (code 159)
    ObjectSetInteger(0, nm, OBJPROP_COLOR, InpEmaWeakenCol);
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaWeakenSize);
@@ -3022,8 +3068,21 @@ void ComputeEmaCrossSignals(const bool backfill)
                   string wkId = g_emax + "weak_" + IntegerToString((long)t);
                   double wkPrice = wasLong ? h[i] + offWeaken : l[i] - offWeaken;
                   double minGapWk = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-                  wkPrice = NudgeAwayFromLastMarker(wkPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
-                  wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, !wasLong, minGapWk, wkId);
+                  //--- v2.29 FIX (real bug, found alongside the ARROWCODE
+                  //--- one): wkPrice sits ABOVE price on a long run (h[i]
+                  //--- + offset) and below on a short, so on a collision
+                  //--- it needs to push FURTHER in that same direction -
+                  //--- pushUp should be wasLong, not !wasLong (that
+                  //--- inversion is correct for the ENTRY arrow, which is
+                  //--- placed on the OPPOSITE side of price from its own
+                  //--- direction - copied here without adjusting for this
+                  //--- marker's own placement). Only engages when a
+                  //--- collision is actually detected, so this never fully
+                  //--- hid the marker (the ARROWCODE bug above did) - just
+                  //--- mispositioned it to the wrong side on the rare
+                  //--- occasions a collision fired.
+                  wkPrice = NudgeAwayFromLastMarker(wkPrice, t, wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
+                  wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, wasLong, minGapWk, wkId);
                   lastMarkerPrice = wkPrice; lastMarkerTime = t;
                   bool weakWasNew = (ObjectFind(0, wkId) < 0);   // v2.15 FIX
                   DrawEmaWeakenMarker(wkId, t, wkPrice, wasLong);

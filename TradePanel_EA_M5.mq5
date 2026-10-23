@@ -31,7 +31,7 @@
 //| too.                                                                |
 //+------------------------------------------------------------------+
 #define EXPECTED_PERIOD PERIOD_M5
-#property version   "2.28"
+#property version   "2.29"
 //--- 2.25: Locked copy (M5 only) - see header block above. Rebuilt from
 //--- v2.25 (zones always drawn on formation, spent-zone colour) so this copy carries that too.
 //--- 2.24: Per report ("mt5 still hanging... this happened when trying
@@ -2401,9 +2401,11 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    //--- intentionally NOT added to this de-overlap check; their own
    //--- NudgeAwayFromLastMarker call (against each other, within the
    //--- same overlay) still applies
-   double others[12];
+   //--- v2.29 FIX: see main file's own comment - names[] was shrunk to
+   //--- 10 in v2.27 but this loop/buffer stayed at the old size 12.
+   double others[10];
    int m = 0;
-   for(int j = 0; j < 12; j++)
+   for(int j = 0; j < 10; j++)
      {
       if(names[j] == selfName || ObjectFind(0, names[j]) < 0) continue;
       others[m] = ObjectGetDouble(0, names[j], OBJPROP_PRICE, 0);
@@ -2472,9 +2474,12 @@ void DrawEmaWeakenMarker(const string nm, const datetime t, const double price, 
   {
    if(ObjectFind(0, nm) >= 0) return;
    ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 108);   // warning-ish diamond-dot shape, distinct from
-                                                        // the entry triangle (OBJ_ARROW_UP/DOWN) and
-                                                        // exit filled circle (code 159)
+   //--- v2.29 FIX: see main file's own comment - was 108, almost
+   //--- certainly a transcription slip for 117, the project's own
+   //--- long-verified diamond glyph.
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);   // diamond-dot shape, distinct from the entry
+                                                        // triangle (OBJ_ARROW_UP/DOWN) and exit filled
+                                                        // circle (code 159)
    ObjectSetInteger(0, nm, OBJPROP_COLOR, InpEmaWeakenCol);
    ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaWeakenSize);
@@ -2877,8 +2882,10 @@ void ComputeEmaCrossSignals(const bool backfill)
                   string wkId = g_emax + "weak_" + IntegerToString((long)t);
                   double wkPrice = wasLong ? h[i] + offWeaken : l[i] - offWeaken;
                   double minGapWk = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-                  wkPrice = NudgeAwayFromLastMarker(wkPrice, t, !wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
-                  wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, !wasLong, minGapWk, wkId);
+                  //--- v2.29 FIX: see main file's own comment - pushUp
+                  //--- should be wasLong, not !wasLong.
+                  wkPrice = NudgeAwayFromLastMarker(wkPrice, t, wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
+                  wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, wasLong, minGapWk, wkId);
                   lastMarkerPrice = wkPrice; lastMarkerTime = t;
                   bool weakWasNew = (ObjectFind(0, wkId) < 0);   // v2.15 FIX
                   DrawEmaWeakenMarker(wkId, t, wkPrice, wasLong);
