@@ -1604,11 +1604,40 @@ input bool   InpBBAlert            = false;   // default OFF, same convention as
                                                // since v2.16/2.17 - see InpStochCrossAlert's own comment
 input int    InpBBCooldownBars     = 8;       // same per-direction-cooldown idea as InpDivCooldownBars
 
+input group "=== M15 trend bias (NEW, 1m TradePanel only, per direct request) - optional gate on Stoch/Div/BB signals - UNVALIDATED ==="
+input bool   InpUseM15Bias         = false;   // off by default - untested, see chat for context before enabling live
+enum ENUM_M15_BIAS_MODE
+  {
+   M15_BIAS_EMA50   = 50,    // single MA: 50 EMA (M1 close vs this EMA)
+   M15_BIAS_EMA200  = 200,   // single MA: 200 EMA (M1 close vs this EMA)
+   M15_BIAS_STACKED = 999    // stacked alignment: 21 EMA / 50 EMA / 200 EMA all in order
+  };
+input ENUM_M15_BIAS_MODE InpM15BiasMode = M15_BIAS_EMA50;
+                                               // single-MA modes: BUY requires M1 close ABOVE the chosen
+                                               // M15 EMA, SELL requires close BELOW it.
+                                               // STACKED mode: BUY requires M15 21EMA > 50EMA > 200EMA
+                                               // (fully stacked bullish), SELL requires 21EMA < 50EMA <
+                                               // 200EMA (fully stacked bearish) - M1 close isn't compared
+                                               // to anything in this mode, only the three M15 EMAs' own
+                                               // order.
+                                               // Applies to Stoch cross-in-zone, Divergence (reg+hidden)
+                                               // and BB outer-band rejection only; EmaCross/Candle
+                                               // overlays are untouched. Read from the LAST FULLY CLOSED
+                                               // M15 bar only (never the one still forming) - the same
+                                               // non-lookahead convention this project standardized on
+                                               // after an earlier H4-filter bug leaked up to 4h of future
+                                               // price into entries.
+
 CTrade trade;
 int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
 int g_atrHandleCross = INVALID_HANDLE;
+//--- M15 bias handles (InpUseM15Bias) - separate from g_maHandle21/50/200 above, which are
+//--- built on PERIOD_CURRENT (M1, this file is locked to it). These are always PERIOD_M15
+//--- regardless of chart timeframe, and only need setting up ONCE in OnInit (this file never
+//--- switches timeframe, so unlike SetupMAs()/SyncMAOverlays() there is no resync case to handle).
+int g_m15BiasHandle21 = INVALID_HANDLE, g_m15BiasHandle50 = INVALID_HANDLE, g_m15BiasHandle200 = INVALID_HANDLE;
 bool     g_crossAlerted = false;     // true while the current approach has already fired its one
                                       // alert - cleared once the gap widens back out or the cross
                                       // actually happens, so the NEXT approach can alert again
@@ -3252,6 +3281,7 @@ void ComputeStochSignals(const bool backfill)
       if(crossUp && zoneTestVal < InpStochZoneLow) dir = 1;
       else if(crossDown && zoneTestVal > InpStochZoneHigh) dir = -1;
       if(dir == 0) continue;
+      if(!M15BiasOK(dir, r[i].time, c[i])) continue;
 
       double swing = (dir > 0) ? l[i] : h[i];
       for(int j = i - InpStochSwingBars + 1; j < i; j++)
@@ -3602,7 +3632,7 @@ void ComputeDivSignals(const bool backfill)
             int dir = 0; bool regular = false;
             if(l[i] < lowP && k[i] > lowK) { dir = 1; regular = true; }
             else if(l[i] > lowP && k[i] < lowK && e21[i] > e50[i]) { dir = 1; regular = false; }
-            if(dir != 0)
+            if(dir != 0 && M15BiasOK(dir, t_i, c[i]))
               {
                datetime lastAt = regular ? g_divLastRegBuyAt : g_divLastHidBuyAt;
                if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpDivCooldownBars * perSec)
@@ -3670,7 +3700,7 @@ void ComputeDivSignals(const bool backfill)
             int dir = 0; bool regular = false;
             if(h[i] > highP && k[i] < highK) { dir = -1; regular = true; }
             else if(h[i] < highP && k[i] > highK && e21[i] < e50[i]) { dir = -1; regular = false; }
-            if(dir != 0)
+            if(dir != 0 && M15BiasOK(dir, t_i, c[i]))
               {
                datetime lastAt = regular ? g_divLastRegSellAt : g_divLastHidSellAt;
                if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpDivCooldownBars * perSec)
@@ -3825,6 +3855,7 @@ void ComputeBBSignals(const bool backfill)
          else if(c[j] < bbLower[j] && c[i] >= bbLower[i]) { dir = 1; }
         }
       if(dir == 0) continue;
+      if(!M15BiasOK(dir, t_i, c[i])) continue;
 
       if(InpBBRequireRejection)
         {
@@ -3927,6 +3958,74 @@ void ReleaseMAHandles()
    if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
    g_maHandle21 = INVALID_HANDLE; g_maHandle50 = INVALID_HANDLE;
    g_maHandle200 = INVALID_HANDLE; g_atrHandleCross = INVALID_HANDLE;
+  }
+
+//+------------------------------------------------------------------+
+//| M15 trend bias (InpUseM15Bias) - setup/release/check. Called once  |
+//| from OnInit/OnDeinit (this file is locked to M1, so there is no    |
+//| chart-timeframe-switch case to resync for, unlike SetupMAs()).     |
+//| All three M15 EMAs (21/50/200) are always created when the bias is |
+//| on, regardless of InpM15BiasMode, since STACKED mode needs all     |
+//| three and the extra two handles cost nothing when unused.          |
+//+------------------------------------------------------------------+
+void SetupM15Bias()
+  {
+   if(!InpUseM15Bias) return;
+   g_m15BiasHandle21  = iMA(_Symbol, PERIOD_M15, 21,  0, MODE_EMA, PRICE_CLOSE);
+   g_m15BiasHandle50  = iMA(_Symbol, PERIOD_M15, 50,  0, MODE_EMA, PRICE_CLOSE);
+   g_m15BiasHandle200 = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
+  }
+
+void ReleaseM15BiasHandles()
+  {
+   if(g_m15BiasHandle21  != INVALID_HANDLE) IndicatorRelease(g_m15BiasHandle21);
+   if(g_m15BiasHandle50  != INVALID_HANDLE) IndicatorRelease(g_m15BiasHandle50);
+   if(g_m15BiasHandle200 != INVALID_HANDLE) IndicatorRelease(g_m15BiasHandle200);
+   g_m15BiasHandle21 = INVALID_HANDLE; g_m15BiasHandle50 = INVALID_HANDLE; g_m15BiasHandle200 = INVALID_HANDLE;
+  }
+
+//+------------------------------------------------------------------+
+//| Reads one M15 EMA value as of the LAST FULLY CLOSED M15 bar at or  |
+//| before M1 time t - never the M15 bar still forming at time t. Same |
+//| non-lookahead convention this project standardized on after an    |
+//| earlier H4-filter bug leaked up to 4h of future price into         |
+//| entries (always step one bar further back than the naive lookup).  |
+//| Returns SIG_NA on any failure (handle not ready, no history yet).  |
+//+------------------------------------------------------------------+
+double M15BiasEMAValue(const int handle, const datetime t)
+  {
+   if(handle == INVALID_HANDLE) return(SIG_NA);
+   int shift = iBarShift(_Symbol, PERIOD_M15, t, false);
+   if(shift < 0) return(SIG_NA);
+   shift += 1;   // one bar further back than the bar covering t - that one may still be forming
+   double buf[];
+   if(CopyBuffer(handle, 0, shift, 1, buf) != 1) return(SIG_NA);
+   return(buf[0]);
+  }
+
+//+------------------------------------------------------------------+
+//| Gate for Stoch/Div/BB signals. Fails OPEN (returns true, signal    |
+//| not blocked) if the bias is off, or if the M15 data isn't ready    |
+//| yet (e.g. right after attach) - a missing filter should never      |
+//| silently suppress every signal.                                    |
+//+------------------------------------------------------------------+
+bool M15BiasOK(const int dir, const datetime t, const double m1Close)
+  {
+   if(!InpUseM15Bias || dir == 0) return(true);
+   if(InpM15BiasMode == M15_BIAS_STACKED)
+     {
+      double e21  = M15BiasEMAValue(g_m15BiasHandle21,  t);
+      double e50  = M15BiasEMAValue(g_m15BiasHandle50,  t);
+      double e200 = M15BiasEMAValue(g_m15BiasHandle200, t);
+      if(e21 == SIG_NA || e50 == SIG_NA || e200 == SIG_NA) return(true);
+      if(dir > 0) return(e21 > e50 && e50 > e200);    // fully stacked bullish: 21 > 50 > 200
+      return(e21 < e50 && e50 < e200);                // fully stacked bearish: 21 < 50 < 200
+     }
+   int handle = (InpM15BiasMode == M15_BIAS_EMA200) ? g_m15BiasHandle200 : g_m15BiasHandle50;
+   double ema = M15BiasEMAValue(handle, t);
+   if(ema == SIG_NA || ema <= 0.0) return(true);
+   if(dir > 0) return(m1Close > ema);
+   return(m1Close < ema);
   }
 
 //+------------------------------------------------------------------+
@@ -4423,6 +4522,7 @@ int OnInit()
    BuildPanel();
    ChartRedraw(0);
    SyncMAOverlays();
+   SetupM15Bias();
    //--- v2.30 FIX (Opus-found, real regression since v2.26): this
    //--- second BuildPanel() call never reset g_nCtrls/g_ctrls[] first -
    //--- every control got registered a SECOND time in g_ctrls[], so
@@ -4465,6 +4565,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_div);
    ObjectsDeleteAll(0, g_bb);
    ReleaseMAHandles();
+   ReleaseM15BiasHandles();
    g_maPeriod = PERIOD_CURRENT;      // globals survive a reinit - "nothing built" now
    g_maBackfillPending = false;
    g_maInitialDrawDone = false;
