@@ -45,7 +45,22 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.21"
+#property version   "1.22"
+//--- 1.22: Final Opus audit of today's changes confirmed v1.20's two
+//--- freeze fixes are present and correct, the ATR index fixes hand-
+//--- trace correctly, and the v1.21 struct-field init is correct. Two
+//--- doc-comment corrections made as a result (no functional change):
+//--- (1) the Bounce confirmation window's own comment said "the 2nd OR
+//--- 3rd bar AFTER" the approach, which (literally read) is off by one
+//--- from what the code actually checks (the 1ST or 2ND bar after the
+//--- approach = candle 2 or candle 3, counting the approach itself as
+//--- candle 1) - reworded for precision, code unchanged (confirmed
+//--- correct against the original request by tracing it). (2) noted:
+//--- every H4/D1/W1 rescan wipes that layer's level array, so a
+//--- proximity-alert latch resets with it - a level can re-alert every
+//--- rescan (up to every 4h on H4) bypassing InpProximityAlertCooldownMin.
+//--- Minor (alert-frequency annoyance, not a freeze or crash) - not
+//--- fixed here, flagged for a future pass if it becomes a real issue.
 //--- 1.21: Per direct request - (1) signal arrows now use the same
 //--- OBJ_ARROW_UP/DOWN + ANCHOR_TOP/BOTTOM shape TradePanel_EA.mq5
 //--- uses for every one of its own signal arrows (was OBJ_ARROW_BUY/
@@ -56,11 +71,12 @@
 //--- rejection of the 2nd or 3rd candle for a valid rejection": a bar
 //--- whose range comes within InpBounceProximityATR of a level (not
 //--- necessarily a literal touch anymore) arms a pending watch on
-//--- whichever side its close ended up; the signal only fires if the
-//--- 2nd OR 3rd bar AFTER that confirms by closing back on that same
-//--- side and clearly clear of the proximity band again - a held
-//--- rejection, not a single wick. No confirmation by the 3rd bar =
-//--- dropped, no signal. New SRLevel fields (rejPendingSide/
+//--- whichever side its close ended up; counting the approach bar
+//--- itself as candle 1, the signal only fires if candle 2 OR candle 3
+//--- confirms by closing back on that same side and clearly clear of
+//--- the proximity band again - a held rejection, not a single wick.
+//--- No confirmation by candle 3 = dropped, no signal. New SRLevel
+//--- fields (rejPendingSide/
 //--- rejPendingAge) carry this per-level state, explicitly zeroed on
 //--- creation in RegisterTouchG (same lesson as every other per-level
 //--- state field this session - a recycled array slot is not
@@ -600,13 +616,15 @@ input bool     InpShowLevelSignals   = true;   // v1.18/v1.21: per direct reques
                                                 //   rejection of the 2nd or 3rd candle"): a closed bar whose
                                                 //   RANGE comes within InpBounceProximityATR of the level
                                                 //   (doesn't have to literally touch it) arms a pending
-                                                //   watch, on the side its CLOSE ended up. The signal only
-                                                //   fires if the 2nd OR 3rd bar after that (not the approach
-                                                //   bar itself, and not every bar after - just those two
-                                                //   chances) closes back on that SAME side AND clearly clear
-                                                //   of the proximity band again - confirming the rejection,
-                                                //   not just a single wick. No confirmation by the 3rd bar =
-                                                //   no signal, the pending watch is dropped.
+                                                //   watch, on the side its CLOSE ended up. Counting the
+                                                //   approach bar itself as candle 1, the signal only fires if
+                                                //   candle 2 OR candle 3 (the 1st or 2nd bar AFTER the
+                                                //   approach - not the approach bar itself, and not every bar
+                                                //   after, just those two chances) closes back on that SAME
+                                                //   side AND clearly clear of the proximity band again -
+                                                //   confirming the rejection, not just a single wick. No
+                                                //   confirmation by candle 3 = no signal, the pending watch
+                                                //   is dropped.
                                                 //  BREAK+BACK (unchanged): a closed bar's close genuinely
                                                 //   flips to the other side of the level (a real break, not
                                                 //   just a wick), then a later bar (within InpBreakBackMaxBars)
@@ -814,7 +832,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.21 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.22 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1837,10 +1855,12 @@ void CheckLevelSignals(SRLevel &levels[], const string layerTag,
          //--- candle for a valid rejection"): a single wick touching the
          //--- level and closing away used to fire Bounce immediately -
          //--- now that only ARMS a pending watch; the signal itself only
-         //--- fires once a LATER bar (the 2nd or 3rd one after the
-         //--- approach, not the approach bar itself) confirms by closing
-         //--- back on the same side AND clear of the proximity band
-         //--- again - a real, held rejection, not a single-bar wick.
+         //--- fires once a LATER bar (counting the approach bar as
+         //--- candle 1, this is candle 2 or candle 3 - i.e. the 1st or
+         //--- 2nd bar AFTER the approach, not the approach bar itself)
+         //--- confirms by closing back on the same side AND clear of
+         //--- the proximity band again - a real, held rejection, not a
+         //--- single-bar wick.
          if(levels[k].rejPendingSide != 0)
            {
             levels[k].rejPendingAge++;
