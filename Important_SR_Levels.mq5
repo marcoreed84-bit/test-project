@@ -45,7 +45,30 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.19"
+#property version   "1.20"
+//--- 1.20: Per urgent real report - "the charts are all frozen again"
+//--- (across 6 charts this time, which multiplied the effect) - found
+//--- and fixed 2 real bugs in v1.18/v1.19's new signal/alert feature,
+//--- NOT independently caught by the prior reviews because both are
+//--- about WHAT the new code calls, not whether its own math is
+//--- correct (which is what got checked):
+//--- (1) CheckLevelProximityAlerts called Alert(), which pops a
+//--- BLOCKING modal dialog. Right after a fresh attach/recompile,
+//--- every level's alert latch starts un-fired - if several of the up
+//--- to ~16 shown levels across all 4 layers happened to sit within
+//--- the threshold of current price at once (easy in a tight range),
+//--- they ALL fired Alert() in the SAME call, stacking multiple
+//--- blocking popups - exactly what "frozen" looks like from outside,
+//--- and worse across multiple charts since each fires independently.
+//--- Replaced with PlaySound() (audible, non-blocking) - SendNotification
+//--- (push) and Print (journal) already covered the non-blocking half.
+//--- (2) CleanupOldLevelSignals ran every single new chart bar but
+//--- scanned ObjectsTotal(0,0,-1) - EVERY object on the WHOLE chart,
+//--- not just this indicator's own, including TradePanel_EA's
+//--- thousands of objects if it's on the same chart. Now throttled to
+//--- once per calendar day (arrows only need cleaning up once every
+//--- InpLevelSignalMaxAgeDays/7 days anyway), cutting this cost by
+//--- ~96x-288x with no visible difference.
 //--- 1.19: Opus audit of v1.18 (new signal/alert logic) found 2 real
 //--- bugs, both fixed here: (1) a newly-created level's 6 new fields
 //--- (shown/side/breakDir/breakTime/proxAlerted/lastProxAlertAt) were
@@ -640,6 +663,7 @@ int      g_atrHandleSig = INVALID_HANDLE;   // v1.18: dedicated chart-timeframe 
                                              // created when InpShowIntradayLevels is on) so signals/alerts
                                              // work regardless of which level layers are enabled.
 datetime g_lastSigBarTime = 0;              // last chart bar CheckLevelSignals already evaluated
+datetime g_lastSigCleanupDay = 0;           // v1.20: last calendar day CleanupOldLevelSignals ran
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -756,7 +780,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.19 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.20 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1796,8 +1820,19 @@ void CheckLevelProximityAlerts(SRLevel &levels[], const double currentPrice, con
                                     _Symbol, layerLabel, DoubleToString(currentPrice, _Digits), dir,
                                     DoubleToString(levels[k].price, _Digits),
                                     StringFormat("%.2f ATR away", dist / atrBuf[0]));
+         //--- v1.20 FIX (real bug, caused an actual freeze report):
+         //--- Alert() pops a BLOCKING modal dialog. Right after a fresh
+         //--- attach/recompile, every level's latch starts un-fired - if
+         //--- several of the up to ~16 shown levels across all 4 layers
+         //--- happened to sit within the threshold of current price at
+         //--- once (easy in a tight range), they ALL fired Alert() in
+         //--- the SAME call, stacking multiple blocking popups - which
+         //--- is exactly what "the chart is frozen" looks like from the
+         //--- outside. PlaySound() gives an audible cue without
+         //--- blocking anything; SendNotification (push) + Print
+         //--- (journal) already cover the "tell me" part non-blocking.
          SendNotification(msg);
-         Alert(msg);
+         PlaySound("alert.wav");
          Print("Important_SR_Levels ProximityAlert: ", msg);
          levels[k].proxAlerted = true;
          levels[k].lastProxAlertAt = TimeCurrent();
@@ -1906,7 +1941,24 @@ int OnCalculate(const int rates_total,
          CheckLevelSignals(g_levelsH4, "H4",       close1, close2, high1, low1, t1);
          CheckLevelSignals(g_levelsD,  "Daily",    close1, close2, high1, low1, t1);
          CheckLevelSignals(g_levelsW,  "Weekly",   close1, close2, high1, low1, t1);
-         CleanupOldLevelSignals();
+         //--- v1.20 FIX (real bug, confirmed the likely other cause of
+         //--- the freeze report): this used to call CleanupOldLevelSignals
+         //--- every single new chart bar - but that function scans
+         //--- ObjectsTotal(0,0,-1), which is EVERY object on the WHOLE
+         //--- chart, not just this indicator's own - including
+         //--- TradePanel_EA's thousands of MA/VWAP/signal objects if it's
+         //--- on the same chart. On M5 that's a multi-thousand-object
+         //--- synchronous ObjectName() walk every 5 minutes; across 6
+         //--- charts, 6x that. Arrows only need cleaning up once every
+         //--- InpLevelSignalMaxAgeDays (7 by default) anyway, so once a
+         //--- calendar day is plenty - cuts this cost by roughly 96x
+         //--- (M15) to 288x (M5) with zero visible difference.
+         datetime today = (datetime)((long)(t1 / 86400) * 86400);
+         if(today != g_lastSigCleanupDay)
+           {
+            CleanupOldLevelSignals();
+            g_lastSigCleanupDay = today;
+           }
          g_lastSigBarTime = t1;
         }
       if(InpEnableProximityAlert)
