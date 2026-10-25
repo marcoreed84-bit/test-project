@@ -20,7 +20,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.34"
+#property version   "2.35"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -4608,6 +4608,25 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          g_editFocused = false;
       return;
      }
+   //--- v2.34 FIX (real root cause of "arrows project through the panel",
+   //--- confirmed present on the actual last version given, not a stale
+   //--- build): CHARTEVENT_OBJECT_ENDEDIT only fires when Enter is pressed
+   //--- IN the edit box - MT5 has no separate "focus lost" event for edit
+   //--- objects. Click into lotEdit/slEdit/etc, then click a BUTTON or the
+   //--- blank chart instead of pressing Enter (completely normal manual-
+   //--- trading usage), and the old code never cleared g_editFocused -
+   //--- RebuildPanel()'s paint-order reclaim (gated on !AnyEditFocused())
+   //--- then stayed suppressed PERMANENTLY, not "one bar's delay" as the
+   //--- original comment assumed, so every signal arrow drawn from then
+   //--- on kept painting over the panel with nothing ever reclaiming it.
+   //--- CHARTEVENT_CLICK (blank chart, no object under the cursor) needs
+   //--- its own clear here since it never reaches CHARTEVENT_OBJECT_CLICK
+   //--- below.
+   if(id == CHARTEVENT_CLICK)
+     {
+      g_editFocused = false;
+      return;
+     }
    //--- v2.09: CHARTEVENT_CHART_CHANGE fires for FAR more than a timeframe
    //--- switch - every scroll, zoom, resize, autoscroll shift on a new bar,
    //--- price-scale refit as ticks move the range, and programmatic chart
@@ -4626,6 +4645,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
      }
    if(id != CHARTEVENT_OBJECT_CLICK) return;
 
+   //--- v2.34 FIX: clicking any OTHER panel object (a button, the title
+   //--- bar) while an edit box was previously focused - without pressing
+   //--- Enter in it first - is the other half of the fix above. Clear
+   //--- unconditionally here, then the check right below re-sets it true
+   //--- only if THIS click actually landed on an edit box.
+   g_editFocused = false;
    if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit" || sparam == PFX + "delayEdit"
       || sparam == PFX + "slEdit" || sparam == PFX + "tpEdit")
       g_editFocused = true;
