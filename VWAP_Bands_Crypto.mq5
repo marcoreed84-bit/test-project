@@ -30,68 +30,101 @@
 //|  you've confirmed this broker's BTC feed actually reports real   |
 //|  traded volume, not just tick/quote count.                       |
 //|                                                                   |
-//|  Deviation bands (+-1SD, +-2SD) computed the standard             |
+//|  Deviation bands (+-1SD, +-2SD, +-3SD) computed the standard      |
 //|  volume-weighted way: variance = sum(v*tp^2)/sum(v) - vwap^2,    |
 //|  same formula most platforms' own VWAP-band indicators use.      |
-//|  Each band level is independently toggleable (InpShowSD1/SD2),   |
-//|  with light/shallow shading between VWAP and SD1, and between    |
-//|  SD1 and SD2 on each side (InpShowShading) - THREE separate      |
-//|  shaded regions (inner, outer-upper, outer-lower), each its own  |
-//|  DRAW_FILLING plot pair, since one fill plot can only shade ONE  |
-//|  region per bar. Fill plots are declared BEFORE the line plots   |
-//|  so MT5 draws them first/behind - otherwise the shading would    |
-//|  paint over and hide the VWAP/SD lines instead of sitting under  |
-//|  them.                                                            |
+//|  Each band level is independently toggleable (InpShowSD1/2/3),   |
+//|  with light/shallow shading between VWAP and SD1, SD1 and SD2,   |
+//|  and SD2 and SD3 on each side (InpShowShading) - FIVE separate   |
+//|  shaded regions (inner, outer1-upper, outer1-lower, outer2-upper,|
+//|  outer2-lower), each its own DRAW_FILLING plot pair, since one   |
+//|  fill plot can only shade ONE region per bar. Fill plots are     |
+//|  declared BEFORE the line plots so MT5 draws them first/behind - |
+//|  otherwise the shading would paint over and hide the VWAP/SD     |
+//|  lines instead of sitting under them.                            |
+//|                                                                   |
+//|  NOTE (per direct request, 2026-10-25): a touch-and-reject signal|
+//|  at this 3SD band was tested as a TradePanel construction (same  |
+//|  2R/10-bar-swing TP/SL rigor as every other signal this project  |
+//|  tests) and FAILED - OOS PF 0.803, win% 28.2 (needs >33.3% to    |
+//|  break even at 2R), p=0.992 against a random-timing null using   |
+//|  the identical TP/SL (worse than the already-failed 2SD version, |
+//|  OOS PF 0.895) - worse than random timing. NOT implemented as a  |
+//|  signal anywhere - this indicator's 3SD band is a visual         |
+//|  reference only, same as every other level here. (Tested on      |
+//|  GOLD M5 data - no BTC-specific test has been run, same           |
+//|  limitation as every other construction in this project that     |
+//|  hasn't had BTC data to test against.)                            |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.00"
+#property version   "1.10"
 #property indicator_chart_window
-#property indicator_buffers 11
-#property indicator_plots   8
+#property indicator_buffers 17
+#property indicator_plots   12
 
 //--- fills FIRST (drawn behind the lines)
 #property indicator_label1  "Inner band fill"
 #property indicator_type1   DRAW_FILLING
 #property indicator_color1  C'30,45,70'
 
-#property indicator_label2  "Outer band fill (upper)"
+#property indicator_label2  "Outer1 band fill (upper, 1SD-2SD)"
 #property indicator_type2   DRAW_FILLING
 #property indicator_color2  C'45,35,25'
 
-#property indicator_label3  "Outer band fill (lower)"
+#property indicator_label3  "Outer1 band fill (lower, 1SD-2SD)"
 #property indicator_type3   DRAW_FILLING
 #property indicator_color3  C'45,35,25'
 
+#property indicator_label4  "Outer2 band fill (upper, 2SD-3SD)"
+#property indicator_type4   DRAW_FILLING
+#property indicator_color4  C'55,25,20'
+
+#property indicator_label5  "Outer2 band fill (lower, 2SD-3SD)"
+#property indicator_type5   DRAW_FILLING
+#property indicator_color5  C'55,25,20'
+
 //--- lines AFTER (drawn on top, stay visible over the shading)
-#property indicator_label4  "VWAP"
-#property indicator_type4   DRAW_LINE
-#property indicator_color4  clrYellow
-#property indicator_width4  2
-#property indicator_style4  STYLE_SOLID
-
-#property indicator_label5  "VWAP +1SD"
-#property indicator_type5   DRAW_LINE
-#property indicator_color5  clrDodgerBlue
-#property indicator_width5  1
-#property indicator_style5  STYLE_DOT
-
-#property indicator_label6  "VWAP -1SD"
+#property indicator_label6  "VWAP"
 #property indicator_type6   DRAW_LINE
-#property indicator_color6  clrDodgerBlue
-#property indicator_width6  1
-#property indicator_style6  STYLE_DOT
+#property indicator_color6  clrYellow
+#property indicator_width6  2
+#property indicator_style6  STYLE_SOLID
 
-#property indicator_label7  "VWAP +2SD"
+#property indicator_label7  "VWAP +1SD"
 #property indicator_type7   DRAW_LINE
-#property indicator_color7  clrOrange
+#property indicator_color7  clrDodgerBlue
 #property indicator_width7  1
 #property indicator_style7  STYLE_DOT
 
-#property indicator_label8  "VWAP -2SD"
+#property indicator_label8  "VWAP -1SD"
 #property indicator_type8   DRAW_LINE
-#property indicator_color8  clrOrange
+#property indicator_color8  clrDodgerBlue
 #property indicator_width8  1
 #property indicator_style8  STYLE_DOT
+
+#property indicator_label9  "VWAP +2SD"
+#property indicator_type9   DRAW_LINE
+#property indicator_color9  clrOrange
+#property indicator_width9  1
+#property indicator_style9  STYLE_DOT
+
+#property indicator_label10 "VWAP -2SD"
+#property indicator_type10  DRAW_LINE
+#property indicator_color10 clrOrange
+#property indicator_width10 1
+#property indicator_style10 STYLE_DOT
+
+#property indicator_label11 "VWAP +3SD"
+#property indicator_type11  DRAW_LINE
+#property indicator_color11 clrRed
+#property indicator_width11 1
+#property indicator_style11 STYLE_DASH
+
+#property indicator_label12 "VWAP -3SD"
+#property indicator_type12  DRAW_LINE
+#property indicator_color12 clrRed
+#property indicator_width12 1
+#property indicator_style12 STYLE_DASH
 
 input group "=== VWAP settings ==="
 input int    InpDaysToShow      = 5;        // how many calendar days of independently-anchored
@@ -102,36 +135,49 @@ input bool   InpUseRealVolume   = false;    // GOLD/SILVER real_volume is 0 on t
 input group "=== Deviation bands - each independently toggleable ==="
 input bool   InpShowSD1         = true;     // +-1 standard deviation lines
 input bool   InpShowSD2         = true;     // +-2 standard deviation lines
-input bool   InpShowShading     = true;     // shallow shading - inner (VWAP<->SD1) and outer
-                                             // (SD1<->SD2) regions, each only shown if the SD
-                                             // level(s) it needs are themselves switched on
-input bool   InpShadeInnerOnly  = false;    // true: skip the outer (SD1<->SD2) shading, keep
-                                             // only the inner VWAP<->SD1 band shaded
-input bool   InpShadeOuterOnly  = false;    // true: skip the inner (VWAP<->SD1) shading, keep
-                                             // only the SD1<->SD2 bands shaded (lighter-looking)
+input bool   InpShowSD3         = true;     // +-3 standard deviation lines - extreme moves, per
+                                             // direct request ("in extreme cases price bounces off
+                                             // near the 3rd deviation band") - visual reference only,
+                                             // the equivalent signal construction was tested and
+                                             // failed (see file header note)
+input bool   InpShowShading     = true;     // shallow shading - inner (VWAP<->SD1), outer1
+                                             // (SD1<->SD2) and outer2 (SD2<->SD3) regions, each only
+                                             // shown if the SD level(s) it needs are themselves on
+input bool   InpShadeInnerOnly  = false;    // true: skip BOTH outer (SD1<->SD2, SD2<->SD3) shaded
+                                             // regions, keep only the inner VWAP<->SD1 band shaded
+input bool   InpShadeOuterOnly  = false;    // true: skip the inner (VWAP<->SD1) shading, keep the
+                                             // outer band(s) shaded (lighter-looking around VWAP)
 
-//--- fill buffers (indices 0-5, matching plots 1-3 above, 2 buffers each)
+//--- fill buffers (indices 0-9, matching plots 1-5 above, 2 buffers each)
 double g_fillInnerUp[], g_fillInnerDn[];
 double g_fillOuterUpHi[], g_fillOuterUpLo[];
 double g_fillOuterDnHi[], g_fillOuterDnLo[];
-//--- line buffers (indices 6-10, matching plots 4-8 above)
-double g_vwap[], g_u1[], g_l1[], g_u2[], g_l2[];
+double g_fillOuter2UpHi[], g_fillOuter2UpLo[];
+double g_fillOuter2DnHi[], g_fillOuter2DnLo[];
+//--- line buffers (indices 10-16, matching plots 6-12 above)
+double g_vwap[], g_u1[], g_l1[], g_u2[], g_l2[], g_u3[], g_l3[];
 
 int OnInit()
   {
-   SetIndexBuffer(0,  g_fillInnerUp,   INDICATOR_DATA);
-   SetIndexBuffer(1,  g_fillInnerDn,   INDICATOR_DATA);
-   SetIndexBuffer(2,  g_fillOuterUpHi, INDICATOR_DATA);
-   SetIndexBuffer(3,  g_fillOuterUpLo, INDICATOR_DATA);
-   SetIndexBuffer(4,  g_fillOuterDnHi, INDICATOR_DATA);
-   SetIndexBuffer(5,  g_fillOuterDnLo, INDICATOR_DATA);
-   SetIndexBuffer(6,  g_vwap,          INDICATOR_DATA);
-   SetIndexBuffer(7,  g_u1,            INDICATOR_DATA);
-   SetIndexBuffer(8,  g_l1,            INDICATOR_DATA);
-   SetIndexBuffer(9,  g_u2,            INDICATOR_DATA);
-   SetIndexBuffer(10, g_l2,            INDICATOR_DATA);
+   SetIndexBuffer(0,  g_fillInnerUp,    INDICATOR_DATA);
+   SetIndexBuffer(1,  g_fillInnerDn,    INDICATOR_DATA);
+   SetIndexBuffer(2,  g_fillOuterUpHi,  INDICATOR_DATA);
+   SetIndexBuffer(3,  g_fillOuterUpLo,  INDICATOR_DATA);
+   SetIndexBuffer(4,  g_fillOuterDnHi,  INDICATOR_DATA);
+   SetIndexBuffer(5,  g_fillOuterDnLo,  INDICATOR_DATA);
+   SetIndexBuffer(6,  g_fillOuter2UpHi, INDICATOR_DATA);
+   SetIndexBuffer(7,  g_fillOuter2UpLo, INDICATOR_DATA);
+   SetIndexBuffer(8,  g_fillOuter2DnHi, INDICATOR_DATA);
+   SetIndexBuffer(9,  g_fillOuter2DnLo, INDICATOR_DATA);
+   SetIndexBuffer(10, g_vwap,           INDICATOR_DATA);
+   SetIndexBuffer(11, g_u1,             INDICATOR_DATA);
+   SetIndexBuffer(12, g_l1,             INDICATOR_DATA);
+   SetIndexBuffer(13, g_u2,             INDICATOR_DATA);
+   SetIndexBuffer(14, g_l2,             INDICATOR_DATA);
+   SetIndexBuffer(15, g_u3,             INDICATOR_DATA);
+   SetIndexBuffer(16, g_l3,             INDICATOR_DATA);
 
-   PlotIndexSetString(3, PLOT_LABEL, "VWAP");
+   PlotIndexSetString(5, PLOT_LABEL, "VWAP");
    IndicatorSetString(INDICATOR_SHORTNAME, "VWAP Bands (Crypto, " + IntegerToString(InpDaysToShow) + "d)");
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
    return(INIT_SUCCEEDED);
@@ -189,10 +235,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       if(sumV <= 0.0)
         {
          g_vwap[i] = EMPTY_VALUE; g_u1[i] = EMPTY_VALUE; g_l1[i] = EMPTY_VALUE;
-         g_u2[i] = EMPTY_VALUE; g_l2[i] = EMPTY_VALUE;
+         g_u2[i] = EMPTY_VALUE; g_l2[i] = EMPTY_VALUE; g_u3[i] = EMPTY_VALUE; g_l3[i] = EMPTY_VALUE;
          g_fillInnerUp[i] = EMPTY_VALUE; g_fillInnerDn[i] = EMPTY_VALUE;
          g_fillOuterUpHi[i] = EMPTY_VALUE; g_fillOuterUpLo[i] = EMPTY_VALUE;
          g_fillOuterDnHi[i] = EMPTY_VALUE; g_fillOuterDnLo[i] = EMPTY_VALUE;
+         g_fillOuter2UpHi[i] = EMPTY_VALUE; g_fillOuter2UpLo[i] = EMPTY_VALUE;
+         g_fillOuter2DnHi[i] = EMPTY_VALUE; g_fillOuter2DnLo[i] = EMPTY_VALUE;
          continue;
         }
 
@@ -202,22 +250,30 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       double sd = MathSqrt(variance);
       double up1 = vwap + sd,       dn1 = vwap - sd;
       double up2 = vwap + 2.0 * sd, dn2 = vwap - 2.0 * sd;
+      double up3 = vwap + 3.0 * sd, dn3 = vwap - 3.0 * sd;
 
       g_vwap[i] = vwap;
       g_u1[i] = InpShowSD1 ? up1 : EMPTY_VALUE;
       g_l1[i] = InpShowSD1 ? dn1 : EMPTY_VALUE;
       g_u2[i] = InpShowSD2 ? up2 : EMPTY_VALUE;
       g_l2[i] = InpShowSD2 ? dn2 : EMPTY_VALUE;
+      g_u3[i] = InpShowSD3 ? up3 : EMPTY_VALUE;
+      g_l3[i] = InpShowSD3 ? dn3 : EMPTY_VALUE;
 
-      bool doInner = InpShowShading && !InpShadeOuterOnly && InpShowSD1;
-      bool doOuter = InpShowShading && !InpShadeInnerOnly && InpShowSD1 && InpShowSD2;
+      bool doInner  = InpShowShading && !InpShadeOuterOnly && InpShowSD1;
+      bool doOuter1 = InpShowShading && !InpShadeInnerOnly && InpShowSD1 && InpShowSD2;
+      bool doOuter2 = InpShowShading && !InpShadeInnerOnly && InpShowSD2 && InpShowSD3;
 
       g_fillInnerUp[i] = doInner ? up1 : EMPTY_VALUE;
       g_fillInnerDn[i] = doInner ? dn1 : EMPTY_VALUE;
-      g_fillOuterUpHi[i] = doOuter ? up2 : EMPTY_VALUE;
-      g_fillOuterUpLo[i] = doOuter ? up1 : EMPTY_VALUE;
-      g_fillOuterDnHi[i] = doOuter ? dn1 : EMPTY_VALUE;
-      g_fillOuterDnLo[i] = doOuter ? dn2 : EMPTY_VALUE;
+      g_fillOuterUpHi[i] = doOuter1 ? up2 : EMPTY_VALUE;
+      g_fillOuterUpLo[i] = doOuter1 ? up1 : EMPTY_VALUE;
+      g_fillOuterDnHi[i] = doOuter1 ? dn1 : EMPTY_VALUE;
+      g_fillOuterDnLo[i] = doOuter1 ? dn2 : EMPTY_VALUE;
+      g_fillOuter2UpHi[i] = doOuter2 ? up3 : EMPTY_VALUE;
+      g_fillOuter2UpLo[i] = doOuter2 ? up2 : EMPTY_VALUE;
+      g_fillOuter2DnHi[i] = doOuter2 ? dn2 : EMPTY_VALUE;
+      g_fillOuter2DnLo[i] = doOuter2 ? dn3 : EMPTY_VALUE;
      }
 
    return(rates_total);
