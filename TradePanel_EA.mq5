@@ -20,7 +20,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.35"
+#property version   "2.36"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -2689,19 +2689,30 @@ void SigClassicStoch(const double &h[], const double &l[], const double &c[], co
 //| have background fill in the middle", i.e. hollow/outlined, not     |
 //| solid). Apex touches the anchor price/time (same spot the old      |
 //| glyph's tip sat at); base extends away from price - buy: apex on   |
-//| top, base below; sell: apex on bottom, base above. Height scales   |
-//| with ATR (so it stays a sensible size across GOLD/SILVER/BTCUSD's  |
-//| very different price scales), half-width scales with the chart's   |
-//| own bar period (so it stays readable across M5/M15/H1/etc.) - both |
-//| also scale with sizeMult (the signal's own InpXArrowSize input,    |
-//| kept for this purpose even though it no longer maps to             |
-//| OBJPROP_WIDTH/font size, which OBJ_TRIANGLE has no equivalent of).  |
-//| NOTE: unlike the old font-glyph arrow, this shape's on-screen pixel|
-//| size will visibly change as you zoom in/out, since its 3 corners   |
-//| are fixed price/time coordinates, not a fixed font point size -    |
-//| an inherent OBJ_TRIANGLE trade-off, not a bug. UNTESTED - no MQL5  |
-//| compiler is available in this environment; verify it compiles and  |
-//| actually renders solid in a real MT5 terminal before trusting it.  |
+//| top, base below; sell: apex on bottom, base above.                 |
+//| v2.36 FIX (real bug, not the inherent trade-off the old comment    |
+//| here claimed): the first cut sized height in PRICE units (ATR-     |
+//| based) and half-width in TIME units (bar-period-based) - two       |
+//| unrelated scales with no fixed relationship to screen pixels, so   |
+//| depending on zoom/instrument the rendered shape came out stretched|
+//| or skewed, not a clean symmetric triangle ("lopsided", per direct  |
+//| user report). Fixed by building the 3 corners in actual SCREEN     |
+//| PIXEL space instead - ChartTimePriceToXY() to get the anchor's     |
+//| pixel, a fixed pixel half-width/height (scaled only by sizeMult,   |
+//| the signal's own InpXArrowSize input) for the other two corners,   |
+//| then ChartXYToTimePrice() to convert all 3 back to time/price for  |
+//| ObjectCreate - this guarantees a correctly proportioned, symmetric |
+//| triangle AT THE MOMENT IT'S DRAWN, matching how the old font-glyph |
+//| arrow always looked, regardless of current zoom/instrument. Left  |
+//| as a genuine, unavoidable trade-off (not a bug): because the 3     |
+//| corners become fixed time/price coordinates once created, the     |
+//| shape's on-screen proportions will still drift if you zoom or      |
+//| rescale AFTER it's drawn - there is no live-redraw hook for that   |
+//| without redrawing every visible arrow on every zoom/scroll event,  |
+//| which isn't worth the cost for a cosmetic marker.                  |
+//| UNTESTED - no MQL5 compiler is available in this environment;      |
+//| verify it compiles and actually renders solid + symmetric in a     |
+//| real MT5 terminal before trusting it.                              |
 //+------------------------------------------------------------------+
 void CreateFilledTriangleArrow(const string nm, const datetime t, const double price, const bool isBuy,
                                 const color col, const int sizeMult, const double atrv, const int perSecIn,
@@ -2709,13 +2720,18 @@ void CreateFilledTriangleArrow(const string nm, const datetime t, const double p
   {
    if(ObjectFind(0, nm) >= 0) return;
    int sm = (int)MathMax(1, sizeMult);
-   double hgt = (atrv == SIG_NA || atrv <= 0.0) ? price * 0.0008 : 0.18 * atrv;
-   hgt *= sm;
-   datetime hw = (datetime)MathRound((double)perSecIn * 0.40 * sm);
-   if(hw <= 0) hw = 1;
-   double apexPrice = price;
-   double basePrice = isBuy ? price - hgt : price + hgt;
-   if(!ObjectCreate(0, nm, OBJ_TRIANGLE, 0, t, apexPrice, t - hw, basePrice, t + hw, basePrice)) return;
+   int halfW  = 5 * sm;
+   int height = 9 * sm;
+   int x0, y0;
+   if(!ChartTimePriceToXY(0, 0, t, price, x0, y0)) return;
+   int yBase = isBuy ? y0 + height : y0 - height;
+   int sw0, sw1, sw2;
+   datetime t1, t2, t3;
+   double   p1, p2, p3;
+   if(!ChartXYToTimePrice(0, x0,          y0,    sw0, t1, p1)) return;
+   if(!ChartXYToTimePrice(0, x0 - halfW,  yBase, sw1, t2, p2)) return;
+   if(!ChartXYToTimePrice(0, x0 + halfW,  yBase, sw2, t3, p3)) return;
+   if(!ObjectCreate(0, nm, OBJ_TRIANGLE, 0, t1, p1, t2, p2, t3, p3)) return;
    ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
    ObjectSetInteger(0, nm, OBJPROP_FILL, true);
    ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
