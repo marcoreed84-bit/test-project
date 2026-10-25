@@ -1438,11 +1438,9 @@ input color  InpStochBuyCol        = C'93,255,25';
 input color  InpStochSellCol       = C'255,12,201';
 input color  InpStochStopCol       = clrRed;
 input color  InpStochTPCol         = C'0,255,0';
-input int    InpStochArrowSize     = 3;   // bumped 1->3 per direct request (asked more than once) -
-                                               // OBJ_ARROW_UP/DOWN has no outline/fill property in MT5,
-                                               // it's always one solid monochrome glyph - width=1 just
-                                               // rendered it thin enough to look hollow/outlined, not
-                                               // an actual outline setting. This is the only lever.
+input int    InpStochArrowSize     = 1;   // v2.33: reverted 3->1 - misread the original request as
+                                               // being about SIZE; it was about COLOR FILL (solid vs
+                                               // outlined), not size - never asked for, reverted.
 input int    InpStochLineBars      = 8;
 input double InpStochArrowOffsetATR = 1.1;
 input bool   InpStochCrossAlert    = false;   // v2.16: default OFF per direct request - push notifications
@@ -1460,7 +1458,7 @@ input color  InpCdlSellCol         = C'255,12,147';
 input color  InpCdlStopCol         = clrRed;
 input color  InpCdlTPCol           = clrYellow;
 input double InpCdlArrowOffsetATR  = 1.6;
-input int    InpCdlArrowSize       = 3;   // bumped 1->3 - see InpStochArrowSize's own comment
+input int    InpCdlArrowSize       = 1;   // v2.33: reverted 3->1 - see InpStochArrowSize's own comment
 input int    InpCdlLineBars        = 8;
 input bool   InpCdlAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 input bool   InpCdlRequireTrend    = true;    // v2.18 FIX: extra confirmation, per direct request - a
@@ -1497,7 +1495,7 @@ input color  InpDivHidSellCol      = C'255,93,12';    // HIDDEN bearish divergen
                                                        // higher high, in a downtrend) - continuation sell
 input color  InpDivStopCol         = clrRed;
 input color  InpDivTPCol           = C'0,255,0';
-input int    InpDivArrowSize       = 3;   // bumped 1->3 - see InpStochArrowSize's own comment
+input int    InpDivArrowSize       = 1;   // v2.33: reverted 3->1 - see InpStochArrowSize's own comment
 input double InpDivArrowOffsetATR  = 1.9;
 input int    InpDivLineBars        = 8;
 input bool   InpDivAlert           = false;   // default OFF, same convention as every other non-MA overlay
@@ -1535,7 +1533,7 @@ input color  InpBBBuyCol           = C'25,42,255';
 input color  InpBBSellCol          = C'255,147,12';
 input color  InpBBStopCol          = clrRed;
 input color  InpBBTPCol            = C'0,255,0';
-input int    InpBBArrowSize        = 3;   // bumped 1->3 - see InpStochArrowSize's own comment
+input int    InpBBArrowSize        = 1;   // v2.33: reverted 3->1 - see InpStochArrowSize's own comment
 input double InpBBArrowOffsetATR   = 1.9;
 input int    InpBBLineBars         = 8;
 input bool   InpBBAlert            = false;   // default OFF, same convention as every other non-MA overlay
