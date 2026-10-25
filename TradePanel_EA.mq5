@@ -20,7 +20,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.36"
+#property version   "2.37"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -2719,9 +2719,13 @@ void CreateFilledTriangleArrow(const string nm, const datetime t, const double p
                                 const string tooltip)
   {
    if(ObjectFind(0, nm) >= 0) return;
+   //--- v2.36: smaller than the old default glyph size, per direct
+   //--- request, now that every signal is a triangle (a filled shape
+   //--- reads as "bigger" than a thin glyph outline at the same pixel
+   //--- footprint, so it needs to run smaller to look the same size).
    int sm = (int)MathMax(1, sizeMult);
-   int halfW  = 5 * sm;
-   int height = 9 * sm;
+   int halfW  = 3 * sm;
+   int height = 5 * sm;
    int x0, y0;
    if(!ChartTimePriceToXY(0, 0, t, price, x0, y0)) return;
    int yBase = isBuy ? y0 + height : y0 - height;
