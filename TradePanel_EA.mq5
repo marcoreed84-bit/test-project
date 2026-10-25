@@ -20,7 +20,31 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.30"
+#property version   "2.31"
+//--- 2.31: Per direct request - dropped the separate 1m-locked development
+//--- track; this canonical file is the one being developed going forward,
+//--- across all timeframes. Changes:
+//--- (1) VWAP and MA overlays defaulted OFF (InpShowVWAP/InpShowMAs) -
+//---     standalone VWAP_Bands_Metals.mq5/VWAP_Bands_Crypto.mq5 indicators
+//---     now cover VWAP; MAs already defaulted off since v2.27. Code kept
+//---     in both cases, not removed.
+//--- (2) FVG and Liquidity overlays defaulted OFF (InpShowFVG/
+//---     InpShowLiquidity) - code kept, not removed.
+//--- (3) EMA21/50 Crossover signal overlay REMOVED ENTIRELY (not just
+//---     defaulted off) - ComputeEmaCrossSignals/ResyncEmaCrossSignals,
+//---     all its inputs, all its globals.
+//--- (4) The 21/50 MA cross-proximity push alert REMOVED ENTIRELY -
+//---     CheckCrossProximity, InpEnableCrossAlert and its related inputs/
+//---     globals (g_atrHandleCross/g_crossAlerted/g_lastCrossAlertAt).
+//--- Stochastic cross-in-zone (85/15), Divergence (regular+hidden) and
+//--- Bollinger outer-band rejection all left unchanged, still ON by
+//--- default - the three overlays actually being kept and traded now.
+//--- A VWAP/deviation-band confluence filter for Divergence was tested
+//--- (per direct request - "divergence is most powerful... at the vwap
+//--- line or deviation level") and did NOT improve results at any
+//--- horizon (OOS p=0.22-0.62 both with and without the filter) - not
+//--- implemented, per this project's standing discipline of not shipping
+//--- untested/failed constructions even as an optional toggle.
 //--- 2.30: Final Opus audit of today's v2.26-2.29 changes found several
 //--- more real bugs, all fixed here:
 //--- (1) Possible compile error: the Divergence TP tooltip (two sites)
@@ -1278,20 +1302,16 @@ input color  InpBuyColor           = C'30,120,60';
 input color  InpSellColor          = C'150,40,40';
 
 input group "=== Moving averages (hand-drawn in the project's own colours, same idiom as Aurelius_EA.mq5) ==="
-input bool          InpShowMAs     = false;  // v2.27: defaulted OFF per direct request - "lets remove the
+input bool          InpShowMAs     = false;  // defaulted OFF per direct request - "lets remove the
                                                // moving averages from the EA, i will add these to the chart
-                                               // manually from MT5". The EMA21/50 CROSSOVER signal overlay
-                                               // (InpShowEmaCrossSignals, the validated one) and the 21/50
-                                               // cross-proximity push alert (InpEnableCrossAlert) are both
-                                               // UNAFFECTED - they already compute their own EMA values
-                                               // independently (ComputeEmaCrossSignals uses its own SigEMA()
-                                               // call on raw closes; CheckCrossProximity uses the g_maHandle21/
-                                               // 50 iMA handles, which SetupMAs() already creates whenever
-                                               // InpEnableCrossAlert is on even with InpShowMAs off - see
-                                               // SetupMAs' own `if(!InpShowMAs && !InpEnableCrossAlert) return`
-                                               // guard, unchanged). This input only controls whether the
-                                               // hand-drawn trend-line segments get drawn at all - turn it
-                                               // back on if you ever want them back instead of your own
+                                               // manually from MT5". The EMA21/50 crossover signal overlay
+                                               // and cross-proximity push alert this comment used to
+                                               // reference have since been REMOVED ENTIRELY (per direct
+                                               // request - VWAP/MA are now separate standalone indicators,
+                                               // the EMA-cross signal/alerts are gone). This input only
+                                               // controls whether the hand-drawn trend-line segments get
+                                               // drawn at all - turn it back on if you ever want them back
+                                               // instead of your own
                                                // manual MT5 indicators.
 input ENUM_MA_METHOD InpMAMethod   = MODE_EMA;    // MODE_EMA = exponential, MODE_SMA = simple
 input int            InpMA21      = 21;
@@ -1323,17 +1343,10 @@ input int            InpMAHistoryBars = 2500;         // v1.58: REVERTED to hand
                                                        // 2500 = ~26 days of M15 history per line, matching
                                                        // Aurelius's own proven default exactly.
 
-input group "=== 21/50 MA cross-proximity push alert (fires on PERIOD_CURRENT - attach this panel to the same chart/timeframe as whichever strategy EA you want warned about) ==="
-input bool   InpEnableCrossAlert   = true;
-input double InpCrossAlertATRMult  = 0.3;    // "near" threshold: alert once the 21/50 gap closes to
-                                              // within this many ATR - smaller = later/tighter warning,
-                                              // larger = earlier but noisier
-input int    InpCrossATRPeriod     = 14;
-input int    InpCrossAlertCooldownMin = 30;  // minimum minutes between alerts for the SAME approach,
-                                              // so a gap oscillating right at the threshold doesn't spam
-
 input group "=== Session VWAP (MT5 has no built-in VWAP - hand-drawn, same construction/idiom as Aurelius_EA.mq5) ==="
-input bool   InpShowVWAP           = true;
+input bool   InpShowVWAP           = false;  // defaulted OFF per direct request - standalone
+                                               // VWAP_Bands_Metals.mq5/VWAP_Bands_Crypto.mq5 indicators
+                                               // now cover this. Code kept, turn back on if wanted.
 input color  InpColVWAP            = C'0,255,255';    // neon aqua - same family as the other EAs' VWAP
 input int    InpVwapHistoryBars    = 400;    // v1.58: REVERTED to hand-drawn (see InpMAHistoryBars'
                                               // own comment for why) - VWAP resets every session, so a
@@ -1392,59 +1405,6 @@ input int    InpMaxSlLines          = 3;      // v2.28: per direct request - onl
                                                // (re-added in v2.28, was removed in v2.20) shares the same
                                                // "in total" rule but is always capped at 1 - only the single
                                                // most recent signal of ANY type on the whole chart ever shows one.
-
-input group "=== EMA21/50 Crossover signal overlay - the ONLY construction tonight that showed a real, validated edge (Gold longs, hold-to-next-cross, %PF=1.031) - VISUAL ONLY, never places/modifies/closes anything ==="
-input bool   InpShowEmaCrossSignals = true;   // per direct request - entry on EMA21/50 cross, held until
-                                               // the NEXT opposite EMA21/50 cross (the exact construction
-                                               // validated in research tonight - a FASTER exit on EMA21
-                                               // alone was tried and tested WORSE, so this overlay does NOT
-                                               // offer that as an option)
-input int    InpEmaConfirmBars     = 2;       // per direct request, after research confirmed it holds up
-                                               // walk-forward (longs %PF 0.920->0.927 IS, 1.134->1.167 OOS):
-                                               // after a cross, wait this many bars and require price still
-                                               // past EMA50 in the cross direction before the entry fires -
-                                               // screens out immediate one-bar fakeout reversals. Set to 0
-                                               // to go back to firing on the cross bar itself. A separate
-                                               // min-gap-before-ATR filter was also tested and rejected -
-                                               // on Gold it collapses the trade count to near zero (or
-                                               // exactly zero above 0.5x ATR) with no edge to show for it.
-input int    InpEmaCrossSwingBars  = 10;      // stop-loss reference = N-bar swing low/high at the cross bar
-input double InpEmaCrossRR         = 2.0;     // R:R convention for the TP reference line - a representative
-                                               // example only; the validated exit is the NEXT opposite
-                                               // EMA cross, not this target - the TP line is for visual
-                                               // reference/context, same as the stochastic overlay's own TP line
-input color  InpEmaCrossBuyCol     = C'178,255,25';
-input color  InpEmaCrossSellCol    = C'255,12,255';
-input color  InpEmaCrossStopCol    = clrRed;
-input color  InpEmaCrossTPCol      = clrYellow;
-input double InpEmaCrossArrowOffsetATR = 1.6; // own offset so it never sits on top of the stochastic overlay's
-input double InpEmaCrossExitOffsetATR  = 1.2; // own markers (independent overlay, never touches posDir/lastArr above)
-input int    InpEmaCrossArrowSize  = 1;   // v2.08: standardized to match every other overlay's arrow size -
-                                           // per direct request, all entry arrows same shape AND same size,
-                                           // colour/label is what tells them apart (at width 1 some arrows
-                                           // render small enough to look like a dot rather than a clear arrow)
-input int    InpEmaCrossDotSize    = 2;
-input int    InpEmaCrossLineBars   = 8;       // stop-line length in bars; the TP line runs 2 bars longer
-input bool   InpEmaCrossAlert      = true;    // push notification on entry AND exit (next opposite cross)
-input bool   InpShowEmaWeakenSignals = true;  // per direct request: a SEPARATE warning signal, fired
-                                               // once per open EMA-cross run, when the 21/50 gap (which
-                                               // widens as a healthy trend continues) stops widening and
-                                               // starts pulling back together again - i.e. the 21EMA
-                                               // losing its angle / momentum fading - BEFORE the actual
-                                               // opposite cross that would close the position outright
-input int    InpEmaWeakenConfirmBars = 2;     // consecutive bars the gap must shrink (from its run's own
-                                               // peak) before this fires - 1 bar is noisy, raise if still
-                                               // too trigger-happy
-input color  InpEmaWeakenCol        = clrGold;
-input double InpEmaWeakenOffsetATR  = 1.6;    // own offset, bigger than entry/exit so it never sits on
-                                               // top of either of those markers
-input int    InpEmaWeakenSize       = 2;
-input bool   InpEmaWeakenAlert      = false;  // v2.16: default OFF per direct request - "only give me
-                                               // notification push when the moving averages are closing
-                                               // the gap and when they actually cross, no push
-                                               // notifications for the other signals" - weakening is
-                                               // neither of those (not a gap-closing warning, not a
-                                               // cross), so it's chart-only now. Turn back on if wanted.
 
 input group "=== Stochastic cross signal overlay (re-added by request, v2.02) - UNVALIDATED - VISUAL ONLY, never places/modifies/closes anything ==="
 input bool   InpShowStochSignals   = true;
@@ -1576,7 +1536,8 @@ input bool   InpBBAlert            = false;   // default OFF, same convention as
 input int    InpBBCooldownBars     = 8;       // same per-direction-cooldown idea as InpDivCooldownBars
 
 input group "=== Fair Value Gap (FVG) zones + rejection signals (NEW, v2.19, per direct request) - UNVALIDATED - VISUAL ONLY ==="
-input bool   InpShowFVG            = true;    // lightly-shaded zone (not a solid block) for each 3-candle
+input bool   InpShowFVG            = false;  // defaulted OFF per direct request - code kept, turn
+                                               // back on if wanted    // lightly-shaded zone (not a solid block) for each 3-candle
                                                // imbalance (bullish: candle 3's low is above candle 1's
                                                // high; bearish: mirror) - fires a BUY/SELL signal the first
                                                // time price comes back and REJECTS the zone (wicks in,
@@ -1613,7 +1574,8 @@ input bool   InpFvgAlert           = false;   // default OFF, same convention as
 input int    InpFvgCooldownBars    = 8;
 
 input group "=== Liquidity (equal highs/lows) zones + rejection signals (NEW, v2.19, per direct request) - UNVALIDATED - VISUAL ONLY ==="
-input bool   InpShowLiquidity      = true;    // a thin shaded band wherever two confirmed swing highs (or
+input bool   InpShowLiquidity      = false;  // defaulted OFF per direct request - code kept, turn
+                                               // back on if wanted    // a thin shaded band wherever two confirmed swing highs (or
                                                // two swing lows) sit within InpLiqTolATR of each other -
                                                // marks resting liquidity (stops) above equal highs / below
                                                // equal lows. Same rejection-signal + auto-remove behaviour
@@ -1648,11 +1610,6 @@ CTrade trade;
 int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
 
 int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
-int g_atrHandleCross = INVALID_HANDLE;
-bool     g_crossAlerted = false;     // true while the current approach has already fired its one
-                                      // alert - cleared once the gap widens back out or the cross
-                                      // actually happens, so the NEXT approach can alert again
-datetime g_lastCrossAlertAt = 0;     // cooldown - see InpCrossAlertCooldownMin
 //--- NOT "TPNL_..." - PFX ("TPNL_") is used with ObjectsDeleteAll(0, PFX) in
 //--- RebuildPanel(), which matches by PREFIX. A "TPNL_MA_..." name would
 //--- have been swept by that call too, wiping every MA/VWAP line (including
@@ -1687,29 +1644,6 @@ datetime g_slFifoTimes[];   // v2.30: parallel to g_slFifo - see TrimLevelFifo's
 datetime g_tpFifoTimes[];   // v2.30: parallel to g_tpFifo
 
 //--- v1.47: EMA21/50 crossover overlay - own namespace, fully independent of
-//--- own namespace, fully independent of the manual panel. Validated construction: entry on a fresh EMA21/50 cross,
-//--- held until the NEXT opposite EMA21/50 cross (ema21_50_pure_crossover_test.py,
-//--- GOLD longs %PF=1.031) - NOT the faster EMA21-touch exit, which was tested
-//--- and found WORSE (ema21_50_crossover_fast_exit_test.py).
-string   g_emax = "TPEMX_";
-ENUM_TIMEFRAMES g_emaxPeriod = PERIOD_CURRENT;
-int      g_emaxLastDir = 0, g_emaxPosDir = 0;
-string   g_emaxLastArr = "", g_emaxLastSl = "", g_emaxLastTp = "";
-datetime g_emaxLastProcessedBar = 0;
-double   g_emaxLastMarkerPrice = 0.0;
-datetime g_emaxLastMarkerTime  = 0;
-//--- v2.0: "trend weakening" marker state - tracks the 21/50 gap's own
-//--- running peak WITHIN the current open run, reset on every fresh entry
-double   g_emaxRunMaxGap    = 0.0;
-int      g_emaxDeclineCount = 0;
-bool     g_emaxWeakenFired  = false;
-//--- v2.01: confirmation-bars entry filter state - a cross starts a
-//--- "pending" countdown instead of entering immediately; entry only
-//--- fires if price is still past EMA50 in that direction once the
-//--- countdown reaches InpEmaConfirmBars. Persisted across live calls
-//--- since each call typically processes only one freshly-closed bar.
-int      g_emaxPendingDir         = 0;
-int      g_emaxPendingBarsElapsed = 0;
 
 //--- v2.02: Stochastic cross overlay (re-added) - own namespace
 string   g_sig = "TPSIG_";
@@ -2901,314 +2835,6 @@ void FireSigAlert(const string msg)
   }
 
 
-//+------------------------------------------------------------------+
-//| v1.47: EMA21/50 crossover overlay. Entry = a fresh EMA21/50 cross,  |
-//| only while flat (no new entry until the previous one has closed -   |
-//| matches ema21_50_pure_crossover_test.py exactly). Exit = the NEXT    |
-//| opposite EMA21/50 cross - NOT a faster EMA21-touch exit, which was   |
-//| tested and found WORSE (ema21_50_crossover_fast_exit_test.py). A     |
-//| single bar can both close the old position and open the new one     |
-//| (the same cross that ends one trend starts the next), same as the   |
-//| Python reference. The stop/target lines drawn on entry are visual   |
-//| REFERENCE ONLY (per the input comments) - the validated exit is the |
-//| next opposite cross, not either of those levels.                    |
-//+------------------------------------------------------------------+
-void ComputeEmaCrossSignals(const bool backfill)
-  {
-   int minBars = InpMA50 + InpEmaCrossSwingBars + 5;
-   int available = Bars(_Symbol, PERIOD_CURRENT) - 1;
-   //--- v2.24 FIX: this overlay (pre-existing before this session) was
-   //--- always uncapped on backfill like every overlay here except FVG/
-   //--- Liquidity (capped v2.21) and Divergence/BB (capped v2.23) - on
-   //--- its own this was apparently tolerable, but stacked together with
-   //--- four new overlays all doing their own full/capped scans in the
-   //--- same OnInit() call, the combined synchronous cost was still
-   //--- enough to hang attach ("mt5 still hanging" after v2.23). Capped
-   //--- the same way as the others - the signal/trend state this overlay
-   //--- needs only requires a bounded recent window, not the entire
-   //--- chart history, to warm up correctly.
-   int sigDrawBarsCap = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int total = backfill ? MathMin(available, minBars + sigDrawBarsCap + 200) : MathMin(available, minBars + 500);
-   if(total < minBars) return;
-   MqlRates r[];
-   int n = CopyRates(_Symbol, PERIOD_CURRENT, 1, total, r);
-   if(n < minBars) return;
-
-   double c[], h[], l[];
-   ArrayResize(c, n); ArrayResize(h, n); ArrayResize(l, n);
-   for(int i = 0; i < n; i++) { c[i] = r[i].close; h[i] = r[i].high; l[i] = r[i].low; }
-
-   double e21[], e50[];
-   SigEMA(c, n, InpMA21, e21);
-   SigEMA(c, n, InpMA50, e50);
-   double atr[];
-   SigATR(h, l, c, n, 14, atr);
-
-   int perSec = PeriodSeconds(PERIOD_CURRENT);
-   int from = minBars;
-   if(!backfill)
-     {
-      for(int p = n - 1; p >= minBars; p--)
-        {
-         if(r[p].time <= g_emaxLastProcessedBar) break;
-         from = p;
-        }
-     }
-   int sigDrawBars = (int)MathMax(1.0, (double)InpSigDrawDays * 86400.0 / (double)PeriodSeconds(PERIOD_CURRENT));
-   int drawFrom = backfill ? MathMax(from, n - sigDrawBars) : from;
-
-   int lastDir, posDir;
-   string lastArr, lastSl, lastTp;
-   double lastMarkerPrice;
-   datetime lastMarkerTime;
-   double runMaxGap;
-   int    declineCount;
-   bool   weakenFired;
-   int    pendingDir;
-   int    pendingBarsElapsed;
-   if(backfill)
-     {
-      lastDir = 0; posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
-      lastMarkerPrice = 0.0; lastMarkerTime = 0;
-      runMaxGap = 0.0; declineCount = 0; weakenFired = false;
-      pendingDir = 0; pendingBarsElapsed = 0;
-     }
-   else
-     {
-      lastDir = g_emaxLastDir; posDir = g_emaxPosDir;
-      lastArr = g_emaxLastArr; lastSl = g_emaxLastSl; lastTp = g_emaxLastTp;
-      lastMarkerPrice = g_emaxLastMarkerPrice; lastMarkerTime = g_emaxLastMarkerTime;
-      runMaxGap = g_emaxRunMaxGap; declineCount = g_emaxDeclineCount; weakenFired = g_emaxWeakenFired;
-      pendingDir = g_emaxPendingDir; pendingBarsElapsed = g_emaxPendingBarsElapsed;
-     }
-
-   for(int i = from; i < n; i++)
-     {
-      if(e21[i] == SIG_NA || e50[i] == SIG_NA || e21[i - 1] == SIG_NA || e50[i - 1] == SIG_NA) continue;
-      bool draw = (i >= drawFrom);
-      double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpEmaCrossArrowOffsetATR * atr[i];
-      double offExit  = (atr[i] == SIG_NA) ? 0.0 : InpEmaCrossExitOffsetATR  * atr[i];
-
-      bool crossUp   = e21[i - 1] <= e50[i - 1] && e21[i] > e50[i];
-      bool crossDown = e21[i - 1] >= e50[i - 1] && e21[i] < e50[i];
-      int dir = crossUp ? 1 : (crossDown ? -1 : 0);
-
-      int prevPosDir = posDir;
-      bool entryFiredThisBar = false;
-
-      //--- EXIT: an opposite cross closes whatever position the ENTRY block
-      //--- below opened - the validated exit, held all the way to here.
-      if(dir != 0 && prevPosDir != 0 && dir != prevPosDir)
-        {
-         if(draw)
-           {
-            datetime t = r[i].time;
-            string exId = g_emax + "exit_" + IntegerToString((long)t);
-            bool wasLong = prevPosDir > 0;
-            double dotPrice = wasLong ? h[i] + offExit : l[i] - offExit;
-            double minGapExit = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-            //--- v2.30 FIX (Opus-found, same class as the weaken-marker
-            //--- fix in v2.29): dotPrice sits ABOVE price on a long
-            //--- (h[i]+offset), so a collision needs to push further UP
-            //--- (wasLong), not down - cosmetic only, same reasoning.
-            dotPrice = NudgeAwayFromLastMarker(dotPrice, t, wasLong, lastMarkerPrice, lastMarkerTime, minGapExit);
-            dotPrice = NudgeClearOfOtherOverlays(dotPrice, t, wasLong, minGapExit, exId);
-            lastMarkerPrice = dotPrice; lastMarkerTime = t;
-            bool exitWasNew = (ObjectFind(0, exId) < 0);   // v2.15 FIX - see Rejection overlay's own comment
-            DrawEmaCrossDot(exId, t, dotPrice, wasLong);
-            PrintFormat("EmaCrossSignal LOG: %s EXIT-%s @ %s  E21=%s E50=%s (closing posDir %d -> 0)",
-                        TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                        DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
-                        DoubleToString(e50[i], _Digits), prevPosDir);
-            if(!backfill && exitWasNew && InpEmaCrossAlert)
-              {
-               string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-               FireSigAlert(StringFormat("%s %s: EMA21/50 cross EXIT-%s PRINTED (held to this opposite cross) - "
-                                          "chart overlay only, does not place/modify/close anything",
-                                          _Symbol, tf, wasLong ? "LONG" : "SHORT"));
-              }
-           }
-         posDir = 0; lastArr = ""; lastSl = ""; lastTp = "";
-        }
-
-      //--- v2.01: confirmation-bars entry filter. A cross starts a pending
-      //--- countdown rather than entering immediately; entryDir only gets
-      //--- set once the countdown reaches InpEmaConfirmBars AND price is
-      //--- still past EMA50 in the pending direction on that bar (a one-bar
-      //--- fakeout reversal cancels it). InpEmaConfirmBars=0 reproduces the
-      //--- old immediate-entry behavior exactly.
-      int entryDir = 0;
-      if(posDir == 0)
-        {
-         if(pendingDir != 0)
-           {
-            pendingBarsElapsed++;
-            if(pendingBarsElapsed >= InpEmaConfirmBars)
-              {
-               bool stillOk = (pendingDir > 0) ? (c[i] > e50[i]) : (c[i] < e50[i]);
-               if(stillOk) entryDir = pendingDir;
-               pendingDir = 0; pendingBarsElapsed = 0;
-              }
-           }
-         if(dir != 0)
-           {
-            pendingDir = dir; pendingBarsElapsed = 0;
-           }
-        }
-
-      //--- ENTRY: only while flat - matches the validated construction
-      //--- exactly (no new entry until the previous one has closed above),
-      //--- gated by the confirmation countdown above (entryDir, not dir)
-      if(entryDir != 0 && posDir == 0)
-        {
-         int dir = entryDir;
-         double swing = (dir > 0) ? l[i] : h[i];
-         for(int j = i - InpEmaCrossSwingBars + 1; j < i; j++)
-            swing = (dir > 0) ? MathMin(swing, l[j]) : MathMax(swing, h[j]);
-         double risk = dir * (c[i] - swing);
-         if(risk > 0.0)
-           {
-            posDir = dir;
-            lastDir = dir;
-            entryFiredThisBar = true;
-            if(draw)
-              {
-               double stop = swing;
-               double tp   = c[i] + dir * InpEmaCrossRR * risk;
-               datetime t = r[i].time;
-               string id = IntegerToString((long)t);
-               bool isBuy = dir > 0;
-               lastArr = g_emax + "arr_" + id;
-               lastSl  = g_emax + "sl_" + id;
-               lastTp  = g_emax + "tp_" + id;
-               double entryPrice = isBuy ? l[i] - offEntry : h[i] + offEntry;
-               double minGap = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-               entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
-               entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, lastArr);
-               entryPrice = NudgeClearOfMALine(entryPrice, e21[i], !isBuy, minGap);
-               entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
-               lastMarkerPrice = entryPrice; lastMarkerTime = t;
-               bool entryWasNew = (ObjectFind(0, lastArr) < 0);   // v2.15 FIX
-               DrawEmaCrossArrow(lastArr, t, entryPrice, isBuy);
-               DrawSigLevel(lastSl, t, t + InpEmaCrossLineBars * perSec, stop, InpEmaCrossStopCol, STYLE_SOLID,
-                            "EMA-cross SL: recent " + IntegerToString(InpEmaCrossSwingBars) + "-bar swing (reference only - validated exit is the next opposite EMA cross)");
-               TrimLevelFifo(g_slFifo, g_slFifoTimes, lastSl, t, InpMaxSlLines);
-               //--- v2.28: TP line re-added (was removed in v2.20) per
-               //--- direct request - "add a tp line to the current signal
-               //--- given" - shares the single chart-wide TP pool (always
-               //--- capped at 1), so re-adding it here automatically
-               //--- deletes whatever the PREVIOUS signal's TP was, from
-               //--- ANY overlay.
-               DrawSigLevel(lastTp, t, t + InpEmaCrossLineBars * perSec, tp, InpEmaCrossTPCol, STYLE_SOLID,
-                            "EMA-cross TP reference (R:R=" + DoubleToString(InpEmaCrossRR, 1) + ", example only)");
-               TrimLevelFifo(g_tpFifo, g_tpFifoTimes, lastTp, t, 1);
-               PrintFormat("EmaCrossSignal LOG: %s ENTRY %s @ %s  E21=%s E50=%s  posDir->%d",
-                           TimeToString(t, TIME_DATE | TIME_MINUTES), isBuy ? "BUY" : "SELL",
-                           DoubleToString(c[i], _Digits), DoubleToString(e21[i], _Digits),
-                           DoubleToString(e50[i], _Digits), posDir);
-               if(!backfill && entryWasNew && InpEmaCrossAlert)
-                 {
-                  string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                  FireSigAlert(StringFormat("%s %s: EMA21/50 cross %s PRINTED (validated construction, hold to "
-                                             "next opposite cross) - chart overlay only, does not place/modify/close anything",
-                                             _Symbol, tf, isBuy ? "BUY" : "SELL"));
-                 }
-              }
-           }
-        }
-
-      //--- v2.0: "trend weakening" check - runs on EVERY bar while a
-      //--- position from the entry block above is still open (posDir!=0),
-      //--- not just on cross bars. Tracks the gap's own running peak
-      //--- WITHIN this open run; a fresh entry this bar resets tracking.
-      if(posDir != 0)
-        {
-         double gap = MathAbs(e21[i] - e50[i]);
-         if(entryFiredThisBar)
-           {
-            runMaxGap = gap; declineCount = 0; weakenFired = false;
-           }
-         else
-           {
-            if(gap > runMaxGap) { runMaxGap = gap; declineCount = 0; }
-            else if(gap < runMaxGap) declineCount++;
-            if(!weakenFired && declineCount >= InpEmaWeakenConfirmBars)
-              {
-               weakenFired = true;
-               if(draw && InpShowEmaWeakenSignals)
-                 {
-                  bool wasLong = posDir > 0;
-                  double offWeaken = (atr[i] == SIG_NA) ? 0.0 : InpEmaWeakenOffsetATR * atr[i];
-                  datetime t = r[i].time;
-                  string wkId = g_emax + "weak_" + IntegerToString((long)t);
-                  double wkPrice = wasLong ? h[i] + offWeaken : l[i] - offWeaken;
-                  double minGapWk = (atr[i] == SIG_NA) ? 0.0 : InpSigMinMarkerGapATR * atr[i];
-                  //--- v2.29 FIX (real bug, found alongside the ARROWCODE
-                  //--- one): wkPrice sits ABOVE price on a long run (h[i]
-                  //--- + offset) and below on a short, so on a collision
-                  //--- it needs to push FURTHER in that same direction -
-                  //--- pushUp should be wasLong, not !wasLong (that
-                  //--- inversion is correct for the ENTRY arrow, which is
-                  //--- placed on the OPPOSITE side of price from its own
-                  //--- direction - copied here without adjusting for this
-                  //--- marker's own placement). Only engages when a
-                  //--- collision is actually detected, so this never fully
-                  //--- hid the marker (the ARROWCODE bug above did) - just
-                  //--- mispositioned it to the wrong side on the rare
-                  //--- occasions a collision fired.
-                  wkPrice = NudgeAwayFromLastMarker(wkPrice, t, wasLong, lastMarkerPrice, lastMarkerTime, minGapWk);
-                  wkPrice = NudgeClearOfOtherOverlays(wkPrice, t, wasLong, minGapWk, wkId);
-                  lastMarkerPrice = wkPrice; lastMarkerTime = t;
-                  bool weakWasNew = (ObjectFind(0, wkId) < 0);   // v2.15 FIX
-                  DrawEmaWeakenMarker(wkId, t, wkPrice, wasLong);
-                  PrintFormat("EmaWeakenSignal LOG: %s WEAKENING in %s run @ %s  gap=%s (peak was %s, %d declining bars)",
-                              TimeToString(t, TIME_DATE | TIME_MINUTES), wasLong ? "LONG" : "SHORT",
-                              DoubleToString(c[i], _Digits), DoubleToString(gap, _Digits),
-                              DoubleToString(runMaxGap, _Digits), declineCount);
-                  if(!backfill && weakWasNew && InpEmaWeakenAlert)
-                    {
-                     string tf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-                     FireSigAlert(StringFormat("%s %s: EMA21/50 gap WEAKENING in the %s run (21EMA losing its "
-                                                "angle) - not an exit, just a caution, chart overlay only",
-                                                _Symbol, tf, wasLong ? "LONG" : "SHORT"));
-                    }
-                 }
-              }
-           }
-        }
-      else
-        {
-         runMaxGap = 0.0; declineCount = 0; weakenFired = false;
-        }
-     }
-
-   g_emaxLastDir = lastDir; g_emaxPosDir = posDir;
-   g_emaxLastArr = lastArr; g_emaxLastSl = lastSl; g_emaxLastTp = lastTp;
-   g_emaxLastProcessedBar = r[n - 1].time;
-   g_emaxLastMarkerPrice = lastMarkerPrice; g_emaxLastMarkerTime = lastMarkerTime;
-   g_emaxRunMaxGap = runMaxGap; g_emaxDeclineCount = declineCount; g_emaxWeakenFired = weakenFired;
-   g_emaxPendingDir = pendingDir; g_emaxPendingBarsElapsed = pendingBarsElapsed;
-  }
-
-//--- v2.14: the EMA-cross overlay's own rolling-cap purge
-//--- (PurgeOldEmaCrossObjects) is now part of HousekeepOldObjects().
-
-//+------------------------------------------------------------------+
-//| Full wipe + backfill for the EMA-cross overlay - same reasoning as   |
-//| ResyncStochSignals() above.                                          |
-//+------------------------------------------------------------------+
-void ResyncEmaCrossSignals()
-  {
-   ObjectsDeleteAll(0, g_emax);
-   g_emaxPeriod = (ENUM_TIMEFRAMES)_Period;
-   g_emaxLastDir = 0; g_emaxPosDir = 0;
-   g_emaxLastArr = ""; g_emaxLastSl = ""; g_emaxLastTp = "";
-   g_emaxLastProcessedBar = 0;
-   g_emaxLastMarkerPrice = 0.0; g_emaxLastMarkerTime = 0;
-   g_emaxRunMaxGap = 0.0; g_emaxDeclineCount = 0; g_emaxWeakenFired = false;
-   g_emaxPendingDir = 0; g_emaxPendingBarsElapsed = 0;
-   if(InpShowEmaCrossSignals) ComputeEmaCrossSignals(true);
-  }
 
 //+------------------------------------------------------------------+
 //| v2.02: textbook %K/%D stochastic, extended with a price-mode switch |
@@ -4560,12 +4186,10 @@ void SetupMAs()
    //--- InpMAHistoryBars' own comment for why) - these handles now serve
    //--- BOTH the hand-drawn lines (UpdateOverlayLines/BackfillOverlayLines)
    //--- AND the cross-proximity alert, exactly as before v1.49.
-   if(!InpShowMAs && !InpEnableCrossAlert) return;
+   if(!InpShowMAs) return;
    g_maHandle21  = iMA(_Symbol, PERIOD_CURRENT, InpMA21,  0, InpMAMethod, PRICE_CLOSE);
    g_maHandle50  = iMA(_Symbol, PERIOD_CURRENT, InpMA50,  0, InpMAMethod, PRICE_CLOSE);
    g_maHandle200 = iMA(_Symbol, PERIOD_CURRENT, InpMA200, 0, InpMAMethod, PRICE_CLOSE);
-   if(InpEnableCrossAlert)
-      g_atrHandleCross = iATR(_Symbol, PERIOD_CURRENT, InpCrossATRPeriod);
   }
 
 //+------------------------------------------------------------------+
@@ -4578,9 +4202,8 @@ void ReleaseMAHandles()
    if(g_maHandle21     != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
    if(g_maHandle50     != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
    if(g_maHandle200    != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
-   if(g_atrHandleCross != INVALID_HANDLE) IndicatorRelease(g_atrHandleCross);
    g_maHandle21 = INVALID_HANDLE; g_maHandle50 = INVALID_HANDLE;
-   g_maHandle200 = INVALID_HANDLE; g_atrHandleCross = INVALID_HANDLE;
+   g_maHandle200 = INVALID_HANDLE;
   }
 
 //+------------------------------------------------------------------+
@@ -4647,7 +4270,6 @@ bool SyncMAOverlays()
       g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
       //--- v2.27: the overlays that read the chart's own timeframe
       //--- (Rejection / Rejection M15 removed entirely per direct request)
-      ResyncEmaCrossSignals();
       ResyncStochSignals();
       ResyncCandleSignals();
       ResyncDivSignals();
@@ -4716,65 +4338,6 @@ bool SyncMAOverlays()
    return(changed);
   }
 
-//+------------------------------------------------------------------+
-//| Push-notification warning that the 21/50 MA gap is closing and a  |
-//| cross looks imminent, BEFORE it actually happens - not an alert   |
-//| on the cross itself. Checked once per new closed bar (same        |
-//| cadence as UpdateOverlayLines - no reason to re-check every tick, |
-//| the MA values for a closed bar don't change until the next one).  |
-//|                                                                     |
-//| Uses shift 1/2 (the last two CLOSED bars) rather than the forming  |
-//| bar 0 - same reasoning as this project's standard fix for H4-bar   |
-//| lookups elsewhere: an unclosed bar's MA value still moves as price |
-//| moves, which would fire (or un-fire) the alert on noise rather    |
-//| than a settled reading.                                            |
-//|                                                                     |
-//| "Likely to cross soon" = the 21/50 gap, measured in ATR, has both  |
-//| (a) narrowed versus the prior closed bar and (b) closed to within  |
-//| InpCrossAlertATRMult*ATR - not yet crossed (sign unchanged). Fires |
-//| once per approach (g_crossAlerted latches), resets once the gap    |
-//| widens back out past 1.5x the threshold or the cross actually      |
-//| happens, so the next approach can alert again.                     |
-//+------------------------------------------------------------------+
-void CheckCrossProximity()
-  {
-   if(!InpEnableCrossAlert) return;
-   if(g_maHandle21 == INVALID_HANDLE || g_maHandle50 == INVALID_HANDLE || g_atrHandleCross == INVALID_HANDLE) return;
-
-   double ma21_1, ma21_2, ma50_1, ma50_2, atr_1;
-   if(!MAValue(g_maHandle21, 1, ma21_1) || !MAValue(g_maHandle21, 2, ma21_2)) return;
-   if(!MAValue(g_maHandle50, 1, ma50_1) || !MAValue(g_maHandle50, 2, ma50_2)) return;
-   double atrBuf[];
-   ArraySetAsSeries(atrBuf, true);
-   if(CopyBuffer(g_atrHandleCross, 0, 1, 1, atrBuf) != 1 || atrBuf[0] <= 0.0) return;
-   atr_1 = atrBuf[0];
-
-   double gapNow  = ma21_1 - ma50_1;
-   double gapPrev = ma21_2 - ma50_2;
-   bool alreadyCrossed = (gapNow >= 0.0) != (gapPrev >= 0.0);
-   double threshold = InpCrossAlertATRMult * atr_1;
-
-   if(alreadyCrossed || MathAbs(gapNow) > threshold * 1.5)
-     {
-      g_crossAlerted = false;   // clear reset - diverged again, or the cross already happened
-      return;
-     }
-
-   bool narrowing = MathAbs(gapNow) < MathAbs(gapPrev);
-   bool near       = MathAbs(gapNow) <= threshold;
-   if(!narrowing || !near) return;
-   if(g_crossAlerted) return;   // already warned for this approach, waiting for a reset
-   if(TimeCurrent() - g_lastCrossAlertAt < InpCrossAlertCooldownMin * 60) return;
-
-   string dir = (gapNow > 0.0) ? "21 crossing DOWN through 50 (bearish)" : "21 crossing UP through 50 (bullish)";
-   string tf  = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);   // "PERIOD_M15" -> "M15"
-   string msg = StringFormat("%s %s: 21/50 MA gap closing, %s likely soon (gap %.1f%% of threshold)",
-                              _Symbol, tf, dir, 100.0 * MathAbs(gapNow) / threshold);
-   SendNotification(msg);
-   Print("CrossAlert: ", msg);
-   g_crossAlerted = true;
-   g_lastCrossAlertAt = TimeCurrent();
-  }
 
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
@@ -4996,8 +4559,8 @@ int OnInit()
    //--- with - check this line in the Experts log any time there's doubt
    //--- about whether a changed input actually took effect, rather than
    //--- trusting the Properties dialog alone
-   PrintFormat("TradePanel v2.0 OnInit: showEmaCross=%s  magic=%d (InpMagic=%d)",
-               InpShowEmaCrossSignals ? "true" : "false", g_effectiveMagic, InpMagic);
+   PrintFormat("TradePanel v2.0 OnInit: magic=%d (InpMagic=%d)",
+               g_effectiveMagic, InpMagic);
 
    ApplyTheme();
    //--- v2.09: MT5 keeps global variables across a timeframe-switch
@@ -5093,7 +4656,6 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, g_pm);
-   ObjectsDeleteAll(0, g_emax);
    ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_cdl);
    //--- v2.27: Rejection/Rejection M15 overlays removed entirely (per
@@ -5170,14 +4732,12 @@ void CheckNewBar()
    //--- created, and behind all 7 before the ChartRedraw below showed it.
    //--- Old-object housekeeping now runs at the END of this function,
    //--- after the redraw - see HousekeepOldObjects().
-   if(InpShowEmaCrossSignals)  ComputeEmaCrossSignals(false);
    if(InpShowStochSignals)     ComputeStochSignals(false);
    if(InpShowCandleSignals)    ComputeCandleSignals(false);
    if(InpShowDivSignals)       ComputeDivSignals(false);
    if(InpShowBBSignals)        ComputeBBSignals(false);
    if(InpShowFVG)              ComputeFvgSignals(false);
    if(InpShowLiquidity)        ComputeLiquiditySignals(false);
-   CheckCrossProximity();
    //--- skip the rebuild while actively dragging - recreating the title
    //--- bar object out from under an in-progress drag is asking for
    //--- trouble. The next new bar after the drag ends reclaims paint
