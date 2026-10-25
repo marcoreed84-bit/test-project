@@ -20,7 +20,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.37"
+#property version   "2.38"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -2719,27 +2719,26 @@ void CreateFilledTriangleArrow(const string nm, const datetime t, const double p
                                 const string tooltip)
   {
    if(ObjectFind(0, nm) >= 0) return;
-   //--- v2.36: smaller than the old default glyph size, per direct
-   //--- request, now that every signal is a triangle (a filled shape
-   //--- reads as "bigger" than a thin glyph outline at the same pixel
-   //--- footprint, so it needs to run smaller to look the same size).
-   int sm = (int)MathMax(1, sizeMult);
-   int halfW  = 3 * sm;
-   int height = 5 * sm;
-   int x0, y0;
-   if(!ChartTimePriceToXY(0, 0, t, price, x0, y0)) return;
-   int yBase = isBuy ? y0 + height : y0 - height;
-   int sw0, sw1, sw2;
-   datetime t1, t2, t3;
-   double   p1, p2, p3;
-   if(!ChartXYToTimePrice(0, x0,          y0,    sw0, t1, p1)) return;
-   if(!ChartXYToTimePrice(0, x0 - halfW,  yBase, sw1, t2, p2)) return;
-   if(!ChartXYToTimePrice(0, x0 + halfW,  yBase, sw2, t3, p3)) return;
-   if(!ObjectCreate(0, nm, OBJ_TRIANGLE, 0, t1, p1, t2, p2, t3, p3)) return;
+   //--- v2.38 FIX: the OBJ_TRIANGLE geometry hack (v2.34-v2.37) is gone -
+   //--- per user-supplied Wingdings reference, OBJ_ARROW_UP/DOWN's hollow
+   //--- look came from their DEFAULT arrow codes (241/242 - a hollow
+   //--- chevron/outline glyph in Wingdings), not from any lack of a solid
+   //--- variant. Wingdings codes 233/234 ARE solid filled triangle
+   //--- pointers in the same font. So: still an OBJ_ARROW object (NOT
+   //--- OBJ_ARROW_UP/OBJ_ARROW_DOWN, which hardcode 241/242 with no way
+   //--- to override the code), just with OBJPROP_ARROWCODE explicitly set
+   //--- to the filled variant. This keeps everything that made the
+   //--- original glyph arrow work well: a fixed FONT POINT SIZE (not
+   //--- time/price coordinates), so it stays a correctly proportioned,
+   //--- symmetric shape at every zoom level with zero geometry math - the
+   //--- OBJ_TRIANGLE attempt's "lopsided"/zoom-distorted problems were
+   //--- inherent to building it from price/time corners; this sidesteps
+   //--- that entirely.
+   if(!ObjectCreate(0, nm, OBJ_ARROW, 0, t, price)) return;
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, isBuy ? 233 : 234);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
-   ObjectSetInteger(0, nm, OBJPROP_FILL, true);
-   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, MathMax(1, sizeMult));
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
