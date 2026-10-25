@@ -4494,6 +4494,16 @@ void OnTick()
       ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
    MaintainOverlaySync();   // v2.09: before CheckNewBar, so a new bar is never drawn with old-timeframe handles
    CheckNewBar();
+   //--- v2.38: belt-and-suspenders - still-unresolved panel z-order report
+   //--- (arrows rendering through the panel) persisted even after the
+   //--- g_editFocused fix (v2.35), with no further code bug found despite
+   //--- two passes over every call path that can create an arrow. Rather
+   //--- than keep guessing at a cause, reclaim paint order every TICK here
+   //--- (not just once per new bar, which is all CheckNewBar() does) - the
+   //--- panel is only ~15-30 small objects, cheap to rebuild this often,
+   //--- and this closes any remaining timing gap regardless of where it
+   //--- actually comes from.
+   if(!g_dragging && !AnyEditFocused()) RebuildPanel();
   }
 
 //+------------------------------------------------------------------+
