@@ -20,7 +20,37 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.32"
+#property version   "2.33"
+//--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
+//--- bugs again later" - found real bugs, not a rubber stamp:
+//--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
+//---     (DrawEmaCrossArrow/DrawEmaCrossDot/DrawEmaWeakenMarker) still
+//---     referencing deleted inputs (InpEmaCrossBuyCol etc.), and
+//---     NudgeClearOfOtherOverlays still referenced the deleted g_emax
+//---     global. MQL5 compiles every function body whether it's called
+//---     or not, so these were genuine "undeclared identifier" compile
+//---     errors - meaning NO BUILD SINCE v2.31 HAS ACTUALLY COMPILED. A
+//---     failed compile doesn't replace the old .ex5, so any chart
+//---     running this believed to be on v2.31/2.32 was almost certainly
+//---     still silently running v2.30 - EMA-cross overlay, MA/VWAP
+//---     lines and the 21/50 "gap closing" push alert all still live.
+//---     Fixed: the 3 dead functions deleted entirely;
+//---     NudgeClearOfOtherOverlays' names[]/others[]/loop bound shrunk
+//---     from 10 to 7 together (the exact same class of bug - buffer
+//---     size vs. loop bound drifting apart - that caused a real v2.29
+//---     crash; this time caught before shipping, not after).
+//--- (2) Added the missing "TPEMX_" (EMA-cross) prefix to OnDeinit's
+//---     upgrade-safety object cleanup, alongside the existing TPMA_/
+//---     TPRJX_/TPRJXM_ ones.
+//--- (3) Fixed a stale comment claiming InpMaxSlLines is validated >= 1
+//---     in OnInit - it isn't, no such validation exists; harmless
+//---     either way (the array-size guard already handles it), but the
+//---     comment was wrong.
+//--- Audit also flagged (not fixed here, pre-existing since v1.00, not
+//--- introduced by today's changes): VWAP_Bands_Metals/Crypto.mq5's
+//--- day-cutoff wasn't calendar-day-aligned, so the oldest displayed
+//--- day's VWAP started mid-day instead of at its own open - fixed
+//--- separately in those two files (v1.11).
 //--- 2.32: Per direct request:
 //--- (1) MA and VWAP overlays REMOVED ENTIRELY (not just defaulted off as
 //---     in v2.31) - SessionVWAP/DifferentSession/DrawSegment/MAValue/
@@ -2257,8 +2287,9 @@ void TrimLevelFifo(string &fifo[], datetime &fifoTimes[], const string newName, 
    //--- fully empty (0 > a negative number), so the loop then read
    //--- fifo[0] out of range - array-out-of-range crash. The `&&
    //--- ArraySize(fifo) > 0` guard makes this safe regardless of what
-   //--- maxKeep is; InpMaxSlLines is also now validated >= 1 in OnInit
-   //--- so this is belt-and-braces, not the only fix.
+   //--- maxKeep is - no separate InpMaxSlLines validation exists in
+   //--- OnInit (an earlier comment here claimed otherwise; this guard
+   //--- is harmless either way, a 0 value just means no SL lines draw).
    //--- v2.30 FIX (Opus-found, real bug - confirmed by simulation): this
    //--- used to always append at the end, so on a fresh attach/recompile
    //--- (every overlay backfills in a fixed order: EmaCross, Stoch,
@@ -2364,35 +2395,32 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
    //--- v2.27: Rejection/Rejection M15 overlays removed entirely (per
    //--- direct request) - their two entries (g_rjx/g_rjxm) dropped,
    //--- array shrunk from 12 to 10.
-   string names[10];
-   names[0] = g_emax + "arr_"  + id;
-   names[1] = g_emax + "exit_" + id;
-   names[2] = g_emax + "weak_" + id;
-   names[3] = g_sig  + "arr_"  + id;
-   names[4] = g_cdl  + "arr_"  + id;
-   names[5] = g_div  + "reg_buy_"  + id;
-   names[6] = g_div  + "hid_buy_"  + id;
-   names[7] = g_div  + "reg_sell_" + id;
-   names[8] = g_div  + "hid_sell_" + id;
-   names[9] = g_bb   + "arr_"  + id;
+   string names[7];
+   names[0] = g_sig  + "arr_"  + id;
+   names[1] = g_cdl  + "arr_"  + id;
+   names[2] = g_div  + "reg_buy_"  + id;
+   names[3] = g_div  + "hid_buy_"  + id;
+   names[4] = g_div  + "reg_sell_" + id;
+   names[5] = g_div  + "hid_sell_" + id;
+   names[6] = g_bb   + "arr_"  + id;
    //--- v2.19: FVG/Liquidity arrow names include a zone-index suffix
    //--- (g_fvgSig + "arr_" + id + "_" + zoneIndex), so an exact-name
    //--- lookup here can't work the way it does for the other overlays -
    //--- intentionally NOT added to this de-overlap check; their own
    //--- NudgeAwayFromLastMarker call (against each other, within the
    //--- same overlay) still applies
-   //--- v2.29 FIX (real bug, found while investigating an unrelated
-   //--- report): v2.27 shrank names[] from 12 to 10 entries (the two
-   //--- removed Rejection-overlay entries) but left both this loop
-   //--- bound and the others[] buffer at the OLD size 12 - reading
-   //--- names[10]/names[11] out of range raises a critical MQL5 "array
-   //--- out of range" runtime error on EVERY call to this shared
-   //--- function, i.e. every overlay, the moment this got compiled and
-   //--- attached. Caught before anyone ran v2.27/2.28 live. Both now
-   //--- match names[]'s real size.
-   double others[10];
+   //--- v2.29 FIX (real bug): v2.27 shrank names[] but left this loop
+   //--- bound and the others[] buffer at an OLD, larger size - reading
+   //--- past the end of names[] raises a critical MQL5 "array out of
+   //--- range" runtime error on EVERY call to this shared function, ie
+   //--- every overlay. v2.32 (Opus-found): the EMA-cross overlay was
+   //--- removed entirely but its 3 entries were left here referencing
+   //--- the deleted g_emax global - an undeclared-identifier COMPILE
+   //--- error, meaning no build since v2.31 actually compiled.
+   //--- names[]/others[]/this loop bound must always move together.
+   double others[7];
    int m = 0;
-   for(int j = 0; j < 10; j++)
+   for(int j = 0; j < 7; j++)
      {
       if(names[j] == selfName || ObjectFind(0, names[j]) < 0) continue;
       others[m] = ObjectGetDouble(0, names[j], OBJPROP_PRICE, 0);
@@ -2414,76 +2442,6 @@ double NudgeClearOfOtherOverlays(double price, const datetime t, const bool push
       if(!moved) break;
      }
    return price;
-  }
-
-
-//+------------------------------------------------------------------+
-//| v1.47: EMA21/50 crossover overlay's own entry arrow / exit dot -     |
-//| deliberately separate from DrawSigArrow/DrawSigDot (which hardcode   |
-//| the stochastic overlay's own color inputs) so this independent        |
-//| overlay has its own color inputs and tooltip text.                    |
-//+------------------------------------------------------------------+
-void DrawEmaCrossArrow(const string nm, const datetime t, const double price, const bool isBuy)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpEmaCrossBuyCol : InpEmaCrossSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaCrossArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "EMA Cross Buy" : "EMA Cross Sell");
-  }
-
-void DrawEmaCrossDot(const string nm, const datetime t, const double price, const bool wasLong)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 159);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, wasLong ? InpEmaCrossBuyCol : InpEmaCrossSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaCrossDotSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "EMA Cross Exit (long)" : "EMA Cross Exit (short)");
-  }
-
-//+------------------------------------------------------------------+
-//| v2.0: "trend weakening" marker - the 21/50 gap stopped widening and  |
-//| started pulling back together again WITHIN the current open run,     |
-//| before the actual opposite cross that would close the position -     |
-//| a distinct shape/color from the entry arrow and exit dot so it's      |
-//| never confused with either.                                           |
-//+------------------------------------------------------------------+
-void DrawEmaWeakenMarker(const string nm, const datetime t, const double price, const bool wasLong)
-  {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
-   //--- v2.29 FIX (real bug, per report - "i don't see the dots...
-   //--- they were always there", journal confirmed the condition WAS
-   //--- firing): was ARROWCODE 108, a value never used or verified
-   //--- anywhere else in this file's history - almost certainly a
-   //--- transcription slip for 117, the project's own long-verified
-   //--- diamond glyph, in continuous confirmed-working use since v1.30
-   //--- (the midline overlay's own diamond, and v1.48's RejectMarker,
-   //--- both 117) - 108 maps to a different, effectively blank/
-   //--- near-invisible Wingdings glyph, which exactly matches "logs
-   //--- fire, nothing visible" with no error anywhere (ObjectCreate
-   //--- succeeds either way - it has no concept of "that glyph is
-   //--- blank").
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, 117);   // diamond-dot shape, distinct from the entry
-                                                        // triangle (OBJ_ARROW_UP/DOWN) and exit filled
-                                                        // circle (code 159)
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, InpEmaWeakenCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpEmaWeakenSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, wasLong ? "EMA21/50 WEAKENING - gap narrowing again in the LONG run (21EMA losing its angle) - not an exit, just a caution"
-                                                     : "EMA21/50 WEAKENING - gap narrowing again in the SHORT run (21EMA losing its angle) - not an exit, just a caution");
   }
 
 
@@ -4361,10 +4319,12 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
-   //--- MA/VWAP overlays removed entirely - "TPMA_" hardcoded (not a live feature) purely so
-   //--- anyone upgrading from a version that still drew them gets them cleared out on next
-   //--- removal/reattach instead of stranded forever, same convention as TPRJX_/TPRJXM_ below.
+   //--- MA/VWAP/EMA-cross overlays removed entirely - prefixes hardcoded (not live features)
+   //--- purely so anyone upgrading from a version that still drew them gets them cleared out
+   //--- on next removal/reattach instead of stranded forever, same convention as TPRJX_/
+   //--- TPRJXM_ below.
    ObjectsDeleteAll(0, "TPMA_");
+   ObjectsDeleteAll(0, "TPEMX_");
    ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_cdl);
    //--- v2.27: Rejection/Rejection M15 overlays removed entirely (per

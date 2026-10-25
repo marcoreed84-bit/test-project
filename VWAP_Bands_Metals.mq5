@@ -46,7 +46,7 @@
 //|  reference only, same as every other level here.                 |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.10"
+#property version   "1.11"
 #property indicator_chart_window
 #property indicator_buffers 17
 #property indicator_plots   12
@@ -184,10 +184,18 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
   {
    if(rates_total < 2) return(0);
 
-   //--- find how far back to (re)compute: InpDaysToShow days of calendar time, plus 1 extra day
-   //--- of margin so the earliest shown day's own accumulator starts cleanly at ITS day boundary,
-   //--- not wherever this limited scan happens to begin.
-   datetime cutoff = time[rates_total - 1] - (datetime)((long)(InpDaysToShow + 1) * 86400);
+   //--- find how far back to (re)compute: InpDaysToShow FULL calendar days ending today.
+   //--- v1.11 FIX (Opus-found): the old cutoff (last bar's time minus N+1 days, no midnight
+   //--- alignment) landed mid-day, not on a day boundary - so the oldest shown day's VWAP
+   //--- accumulator started partway through that day instead of at its own open, understating
+   //--- its early bars' influence, and as `start` drifted forward on later calls, that same
+   //--- day's values got silently recomputed from a later starting point, drawing a visible
+   //--- step in what should be one continuous segment. Anchoring to the last bar's own
+   //--- calendar-day midnight first, then stepping back exactly InpDaysToShow-1 more full days,
+   //--- means `cutoff` itself IS a day boundary, so the earliest included day always starts
+   //--- cleanly at its own open.
+   datetime lastDay = time[rates_total - 1] - (time[rates_total - 1] % 86400);
+   datetime cutoff = lastDay - (datetime)((long)(InpDaysToShow - 1) * 86400);
    int start = 0;
    for(int i = rates_total - 1; i >= 0; i--)
      {
