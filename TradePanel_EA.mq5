@@ -20,7 +20,28 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.31"
+#property version   "2.32"
+//--- 2.32: Per direct request:
+//--- (1) MA and VWAP overlays REMOVED ENTIRELY (not just defaulted off as
+//---     in v2.31) - SessionVWAP/DifferentSession/DrawSegment/MAValue/
+//---     UpdateOverlayLines/BackfillOverlayLines/SetupMAs/ReleaseMAHandles/
+//---     MAHandleReady/MAHistoryReady all gone, SyncMAOverlays() trimmed to
+//---     just the shared timeframe-change detector the signal overlays
+//---     still need. InpMA21/InpMA50 (just the period numbers) KEPT -
+//---     Candle and Divergence still use them internally (arrow-nudge
+//---     check, hidden-divergence trend check) despite having no display
+//---     of their own anymore.
+//--- (2) Tested the EXACT construction requested - a candle closing
+//---     beyond VWAP's 2nd deviation band then closing back inside,
+//---     TradePanel's own real TP/SL (2R, 10-bar swing) - did not
+//---     improve on divergence's own result, in fact worse: OOS PF 0.895,
+//---     win% 29.8, and p=0.99 against a random-timing null using the
+//---     SAME TP/SL construction (real result underperforms random timing
+//---     99% of the time). Not implemented.
+//--- (3) Stoch/Candle/Div/BB arrow sizes bumped 1->3 (asked more than
+//---     once) - OBJ_ARROW_UP/DOWN has no outline/fill property in MT5,
+//---     it's always one solid glyph; width=1 just rendered it thin
+//---     enough to look hollow. This is the only lever that exists.
 //--- 2.31: Per direct request - dropped the separate 1m-locked development
 //--- track; this canonical file is the one being developed going forward,
 //--- across all timeframes. Changes:
@@ -1301,59 +1322,6 @@ input color  InpArmedColor         = clrOrangeRed;
 input color  InpBuyColor           = C'30,120,60';
 input color  InpSellColor          = C'150,40,40';
 
-input group "=== Moving averages (hand-drawn in the project's own colours, same idiom as Aurelius_EA.mq5) ==="
-input bool          InpShowMAs     = false;  // defaulted OFF per direct request - "lets remove the
-                                               // moving averages from the EA, i will add these to the chart
-                                               // manually from MT5". The EMA21/50 crossover signal overlay
-                                               // and cross-proximity push alert this comment used to
-                                               // reference have since been REMOVED ENTIRELY (per direct
-                                               // request - VWAP/MA are now separate standalone indicators,
-                                               // the EMA-cross signal/alerts are gone). This input only
-                                               // controls whether the hand-drawn trend-line segments get
-                                               // drawn at all - turn it back on if you ever want them back
-                                               // instead of your own
-                                               // manual MT5 indicators.
-input ENUM_MA_METHOD InpMAMethod   = MODE_EMA;    // MODE_EMA = exponential, MODE_SMA = simple
-input int            InpMA21      = 21;
-input int            InpMA50      = 50;
-input int            InpMA200     = 200;
-input color          InpCol21     = clrYellow;
-input color          InpCol50     = clrWhite;         // per direct request
-input color          InpCol200    = C'191,0,255';     // neon purple
-input int            InpMALineWidth = 1;
-input int            InpMAHistoryBars = 2500;         // v1.58: REVERTED to hand-drawn OBJ_TREND segments
-                                                       // (same DrawMASegment/PurgeOldMALines idiom as
-                                                       // Aurelius_EA.mq5, not the v1.49-1.57 native-
-                                                       // ChartIndicatorAdd approach) - per direct request,
-                                                       // after checking Aurelius_EA.mq5's own actual code:
-                                                       // it explicitly rejected ChartIndicatorAdd for
-                                                       // exactly this reason ("an EA has no plot buffers,
-                                                       // only an indicator can set PLOT_LINE_COLOR... could
-                                                       // only show MT5's own auto-assigned colours") and
-                                                       // uses this same hand-drawn approach with
-                                                       // InpMAHistoryBars=2500 as its own default - running
-                                                       // LIVE in production with 5 MAs (up to 12,500
-                                                       // objects) with no reported hang. The "7500 objects
-                                                       // caused a hang" conclusion from TradePanel's own
-                                                       // earlier history was wrong, or at minimum not the
-                                                       // whole story - Aurelius proves meaningfully MORE
-                                                       // objects than that work fine when properly bounded
-                                                       // and purged (OBJPROP_HIDDEN + PurgeOldMALines every
-                                                       // new bar, exactly what this file already does).
-                                                       // 2500 = ~26 days of M15 history per line, matching
-                                                       // Aurelius's own proven default exactly.
-
-input group "=== Session VWAP (MT5 has no built-in VWAP - hand-drawn, same construction/idiom as Aurelius_EA.mq5) ==="
-input bool   InpShowVWAP           = false;  // defaulted OFF per direct request - standalone
-                                               // VWAP_Bands_Metals.mq5/VWAP_Bands_Crypto.mq5 indicators
-                                               // now cover this. Code kept, turn back on if wanted.
-input color  InpColVWAP            = C'0,255,255';    // neon aqua - same family as the other EAs' VWAP
-input int    InpVwapHistoryBars    = 400;    // v1.58: REVERTED to hand-drawn (see InpMAHistoryBars'
-                                              // own comment for why) - VWAP resets every session, so a
-                                              // long backfill window doesn't add anything, same reasoning
-                                              // and same default Aurelius_EA.mq5 itself uses
-input int    InpVwapLineWidth      = 1;
-
 input group "=== Chart theme (same family-standard blue/white candles as the other EAs) ==="
 input bool   InpApplyTheme         = true;
 input color  InpChartBg            = clrBlack;
@@ -1376,7 +1344,12 @@ input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from thi
                                                // the ONLY thing the light checks (spread only, not a
                                                // trade signal of any kind - this panel has no strategy)
 
-input group "=== Shared signal-marker settings (used by the EMA21/50 crossover overlay's markers/alerts) ==="
+input group "=== Shared internal settings (used by multiple signal overlays, no display of their own) ==="
+input int    InpMA21 = 21;    // used internally by Candle (arrow-nudge "too close to an MA" check) and
+                               // Divergence (hidden-divergence trend-agreement check) - the MA/VWAP hand-
+                               // drawn overlay that used to also use these for its own display is gone,
+                               // but these two signal overlays still need the period numbers themselves
+input int    InpMA50 = 50;
 input int    InpSigDrawDays         = 2;      // v2.27: defaulted 7 -> 2 per direct request - "only show
                                                // previous day and current day, with each new day only the
                                                // previous day". Also fixed a real mismatch while changing
@@ -1435,7 +1408,11 @@ input color  InpStochBuyCol        = C'93,255,25';
 input color  InpStochSellCol       = C'255,12,201';
 input color  InpStochStopCol       = clrRed;
 input color  InpStochTPCol         = C'0,255,0';
-input int    InpStochArrowSize     = 1;   // v2.08: standardized - was 1 (thin enough to look like a dot)
+input int    InpStochArrowSize     = 3;   // bumped 1->3 per direct request (asked more than once) -
+                                               // OBJ_ARROW_UP/DOWN has no outline/fill property in MT5,
+                                               // it's always one solid monochrome glyph - width=1 just
+                                               // rendered it thin enough to look hollow/outlined, not
+                                               // an actual outline setting. This is the only lever.
 input int    InpStochLineBars      = 8;
 input double InpStochArrowOffsetATR = 1.1;
 input bool   InpStochCrossAlert    = false;   // v2.16: default OFF per direct request - push notifications
@@ -1453,7 +1430,7 @@ input color  InpCdlSellCol         = C'255,12,147';
 input color  InpCdlStopCol         = clrRed;
 input color  InpCdlTPCol           = clrYellow;
 input double InpCdlArrowOffsetATR  = 1.6;
-input int    InpCdlArrowSize       = 1;   // v2.08: standardized - was 1 (thin enough to look like a dot)
+input int    InpCdlArrowSize       = 3;   // bumped 1->3 - see InpStochArrowSize's own comment
 input int    InpCdlLineBars        = 8;
 input bool   InpCdlAlert           = false;   // v2.16: default OFF per direct request - see InpStochCrossAlert's own comment
 input bool   InpCdlRequireTrend    = true;    // v2.18 FIX: extra confirmation, per direct request - a
@@ -1490,7 +1467,7 @@ input color  InpDivHidSellCol      = C'255,93,12';    // HIDDEN bearish divergen
                                                        // higher high, in a downtrend) - continuation sell
 input color  InpDivStopCol         = clrRed;
 input color  InpDivTPCol           = C'0,255,0';
-input int    InpDivArrowSize       = 1;
+input int    InpDivArrowSize       = 3;   // bumped 1->3 - see InpStochArrowSize's own comment
 input double InpDivArrowOffsetATR  = 1.9;
 input int    InpDivLineBars        = 8;
 input bool   InpDivAlert           = false;   // default OFF, same convention as every other non-MA overlay
@@ -1528,7 +1505,7 @@ input color  InpBBBuyCol           = C'25,42,255';
 input color  InpBBSellCol          = C'255,147,12';
 input color  InpBBStopCol          = clrRed;
 input color  InpBBTPCol            = C'0,255,0';
-input int    InpBBArrowSize        = 1;
+input int    InpBBArrowSize        = 3;   // bumped 1->3 - see InpStochArrowSize's own comment
 input double InpBBArrowOffsetATR   = 1.9;
 input int    InpBBLineBars         = 8;
 input bool   InpBBAlert            = false;   // default OFF, same convention as every other non-MA overlay
@@ -1609,14 +1586,12 @@ input int    InpLiqCooldownBars    = 8;
 CTrade trade;
 int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
 
-int g_maHandle21 = INVALID_HANDLE, g_maHandle50 = INVALID_HANDLE, g_maHandle200 = INVALID_HANDLE;
 //--- NOT "TPNL_..." - PFX ("TPNL_") is used with ObjectsDeleteAll(0, PFX) in
 //--- RebuildPanel(), which matches by PREFIX. A "TPNL_MA_..." name would
 //--- have been swept by that call too, wiping every MA/VWAP line (including
 //--- the whole backfilled history) on every single new bar - exactly the
 //--- real bug that made them vanish entirely rather than just sit behind
 //--- the panel. Keep this prefix namespace-disjoint from PFX.
-string g_pm = "TPMA_";
 datetime g_lastBarTime = 0;
 //--- v2.08: the ONE source of truth for "which timeframe are the MA
 //--- handles and MA/VWAP lines currently built for" - owned only by
@@ -1625,14 +1600,6 @@ datetime g_lastBarTime = 0;
 //--- side effect of ResyncEmaCrossSignals()). PERIOD_CURRENT (0) = "not
 //--- built yet" - _Period is never 0, so that always forces a rebuild.
 ENUM_TIMEFRAMES g_maPeriod = PERIOD_CURRENT;
-//--- v2.08: true from a timeframe change until the MA/VWAP history has
-//--- been backfilled ONCE on handles that have actually finished
-//--- calculating (a fresh iMA handle usually hasn't yet - see
-//--- MAHistoryReady()). Set true only by SyncMAOverlays()' period-change
-//--- step, set false only by its backfill step.
-bool     g_maBackfillPending = false;
-ulong    g_maPendingSinceMs  = 0;
-bool     g_maInitialDrawDone = false;     // v2.11: true once the one-shot immediate attempt below has run
 #define SIG_NA EMPTY_VALUE   // stands in for the Python reference's NaN
 
 //--- v2.28: ONE shared pool each for SL lines (InpMaxSlLines) and TP
@@ -2164,90 +2131,15 @@ void ApplyTheme()
    ChartSetInteger(0, CHART_MODE,        CHART_CANDLES);
   }
 
-//+------------------------------------------------------------------+
-//| Session VWAP - MT5 has no built-in VWAP indicator, so this is the|
-//| exact same construction already validated in Aurelius_EA.mq5's   |
-//| SessionVWAP(): typical-price*volume accumulated from midnight,   |
-//| one bulk CopyTime/CopyHigh/.../CopyTickVolume per call rather    |
-//| than per-bar iTime/iHigh/... lookups (that was the real slow     |
-//| part when this was first built, not "repainting").               |
-//+------------------------------------------------------------------+
-double SessionVWAP(const int shift)
-  {
-   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, shift);
-   if(barTime == 0) return(0.0);
-   MqlDateTime dt; TimeToStruct(barTime, dt);
-   dt.hour = 0; dt.min = 0; dt.sec = 0;
-   datetime dayStart = StructToTime(dt);
 
-   datetime tArr[]; double hArr[], lArr[], cArr[]; long vArr[];
-   ArraySetAsSeries(tArr, true); ArraySetAsSeries(hArr, true);
-   ArraySetAsSeries(lArr, true); ArraySetAsSeries(cArr, true);
-   ArraySetAsSeries(vArr, true);
-   int got = CopyTime(_Symbol, PERIOD_CURRENT, shift, 400, tArr);
-   if(got <= 0) return(0.0);
-   if(CopyHigh(_Symbol, PERIOD_CURRENT, shift, got, hArr) <= 0) return(0.0);
-   if(CopyLow(_Symbol, PERIOD_CURRENT, shift, got, lArr) <= 0) return(0.0);
-   if(CopyClose(_Symbol, PERIOD_CURRENT, shift, got, cArr) <= 0) return(0.0);
-   if(CopyTickVolume(_Symbol, PERIOD_CURRENT, shift, got, vArr) <= 0) return(0.0);
 
-   double cumPV = 0.0, cumV = 0.0;
-   for(int s = 0; s < got; s++)
-     {
-      if(tArr[s] < dayStart) break;
-      double typical = (hArr[s] + lArr[s] + cArr[s]) / 3.0;
-      cumPV += typical * (double)vArr[s];
-      cumV  += (double)vArr[s];
-     }
-   if(cumV <= 0.0) return(0.0);
-   return(cumPV / cumV);
-  }
 
 //+------------------------------------------------------------------+
-bool DifferentSession(const int shiftA, const int shiftB)
-  {
-   datetime tA = iTime(_Symbol, PERIOD_CURRENT, shiftA);
-   datetime tB = iTime(_Symbol, PERIOD_CURRENT, shiftB);
-   if(tA == 0 || tB == 0) return(true);
-   MqlDateTime dA, dB; TimeToStruct(tA, dA); TimeToStruct(tB, dB);
-   return(dA.day != dB.day || dA.mon != dB.mon || dA.year != dB.year);
-  }
-
-//+------------------------------------------------------------------+
-//| Generic per-bar trend-line segment, same idiom (and reasoning)   |
-//| as Aurelius_EA.mq5's DrawMASegment - hand-drawn rather than a     |
-//| native ChartIndicatorAdd plot because MT5 doesn't expose a        |
-//| per-instance colour override for a chart-added indicator handle,  |
-//| and these need the project's own "family standard" colours.      |
-//+------------------------------------------------------------------+
-void DrawSegment(const string tag, const datetime tOld, const double vOld,
-                  const datetime tNew, const double vNew, const color col, const int width = 1)
-  {
-   string nm = g_pm + tag + "_" + IntegerToString((long)tNew);
-   if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
-   ObjectCreate(0, nm, OBJ_TREND, 0, tOld, vOld, tNew, vNew);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, width);
-   ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-  }
-
-//+------------------------------------------------------------------+
-//| v2.14: ONE pass over the chart's objects that drops BOTH expired   |
-//| MA/VWAP segments AND expired signal-overlay objects. Replaces       |
-//| PurgeOldSegments() plus six separate PurgeOld*Objects() functions   |
-//| (one per signal overlay) that EACH walked every object on the chart |
-//| (~7,000 at default settings) on EVERY new bar - about 55,000        |
-//| synchronous ObjectName/ObjectGetInteger calls per bar, each of which|
-//| has to wait for the chart's own command queue, all of it sitting    |
-//| between a signal's push alert and the ChartRedraw that actually     |
-//| shows its arrow. Same cutoffs as before, exactly: MA/VWAP segments  |
-//| older than InpMAHistoryBars (or InpVwapHistoryBars if larger) bars  |
-//| of chart time, signal objects older than InpSigDrawDays calendar    |
-//| days (Rejection M15 measured against the last closed M15 bar, as    |
-//| before). Never touches the panel (PFX) or anything this EA didn't   |
+//| v2.14: ONE pass over the chart's objects that drops expired         |
+//| signal-overlay objects. Previously also handled MA/VWAP segments -   |
+//| those overlays are gone entirely now (per direct request), so this  |
+//| only purges signal objects older than InpSigDrawDays calendar       |
+//| days. Never touches the panel (PFX) or anything this EA didn't      |
 //| create. Called from CheckNewBar() AFTER the chart is redrawn, and   |
 //| at most once per hour of bar time - see there.                      |
 //+------------------------------------------------------------------+
@@ -2257,9 +2149,6 @@ void HousekeepOldObjects()
   {
    datetime tB = iTime(_Symbol, PERIOD_CURRENT, 1);
    if(tB == 0) return;
-   int maxHist = InpMAHistoryBars;
-   if(InpShowVWAP && InpMAHistoryBars < InpVwapHistoryBars) maxHist = InpVwapHistoryBars;
-   datetime segCutoff = tB - (datetime)((long)maxHist * PeriodSeconds(PERIOD_CURRENT));
    //--- v2.27 FIX: per direct request - "only show previous day and
    //--- current day, with each new day only the previous day" - this
    //--- used to be a ROLLING window (tB - N*86400, i.e. "the last N*24
@@ -2286,10 +2175,9 @@ void HousekeepOldObjects()
      {
       string nm = ObjectName(0, i, 0, -1);
       datetime cutoff = 0;
-      if(StringFind(nm, g_pm) == 0) cutoff = segCutoff;
-      else if(StringFind(nm, g_emax) == 0 || StringFind(nm, g_sig) == 0 || StringFind(nm, g_cdl) == 0
-              || StringFind(nm, g_div) == 0 || StringFind(nm, g_bb) == 0
-              || StringFind(nm, g_fvgSig) == 0 || StringFind(nm, g_liqSig) == 0)
+      if(StringFind(nm, g_sig) == 0 || StringFind(nm, g_cdl) == 0
+         || StringFind(nm, g_div) == 0 || StringFind(nm, g_bb) == 0
+         || StringFind(nm, g_fvgSig) == 0 || StringFind(nm, g_liqSig) == 0)
          cutoff = sigCutoff;
       else continue;   // panel widgets, other programs' / the user's own objects - never touched
       if(cutoff <= 0) continue;
@@ -2297,86 +2185,8 @@ void HousekeepOldObjects()
      }
   }
 
-//+------------------------------------------------------------------+
-bool MAValue(int handle, int shift, double &out)
-  {
-   if(handle == INVALID_HANDLE) return(false);
-   double buf[];
-   ArraySetAsSeries(buf, true);
-   if(CopyBuffer(handle, 0, shift, 1, buf) < 1) return(false);
-   out = buf[0];
-   return(true);
-  }
 
-//+------------------------------------------------------------------+
-//| v1.58: REVERTED to hand-drawn (see InpMAHistoryBars' own comment     |
-//| for why) - draws exactly one new segment per line (MAs + VWAP) per   |
-//| new bar, same idiom as Aurelius_EA.mq5's own UpdateMALines.          |
-//+------------------------------------------------------------------+
-void UpdateOverlayLines()
-  {
-   datetime tA = iTime(_Symbol, PERIOD_CURRENT, 2);
-   datetime tB = iTime(_Symbol, PERIOD_CURRENT, 1);
-   if(tA == 0 || tB == 0) return;
-   if(InpShowMAs)
-     {
-      double a21, b21, a50, b50, a200, b200;
-      if(MAValue(g_maHandle21, 2, a21) && MAValue(g_maHandle21, 1, b21))
-         DrawSegment("21", tA, a21, tB, b21, InpCol21, InpMALineWidth);
-      if(MAValue(g_maHandle50, 2, a50) && MAValue(g_maHandle50, 1, b50))
-         DrawSegment("50", tA, a50, tB, b50, InpCol50, InpMALineWidth);
-      if(MAValue(g_maHandle200, 2, a200) && MAValue(g_maHandle200, 1, b200))
-         DrawSegment("200", tA, a200, tB, b200, InpCol200, InpMALineWidth);
-     }
-   if(InpShowVWAP && !DifferentSession(2, 1))
-     {
-      double vA = SessionVWAP(2), vB = SessionVWAP(1);
-      if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP, InpVwapLineWidth);
-     }
-   //--- v2.14: the old-segment purge that used to run here (a full scan of
-   //--- every trend object on the chart, every bar, BEFORE any signal was
-   //--- computed) now lives in HousekeepOldObjects(), run from
-   //--- CheckNewBar() after the chart has already been redrawn.
-  }
 
-//+------------------------------------------------------------------+
-//| v1.58: REVERTED to hand-drawn - walks backward and draws the whole   |
-//| rolling window immediately on attach, same reasoning as              |
-//| Aurelius_EA.mq5's own BackfillMALines (otherwise a fresh attach      |
-//| shows a 1-bar stub and takes the full history window to fill in).    |
-//+------------------------------------------------------------------+
-void BackfillOverlayLines()
-  {
-   if(InpShowMAs)
-     {
-      int avail = Bars(_Symbol, PERIOD_CURRENT) - 2;
-      int n = MathMin(InpMAHistoryBars, avail);
-      double a, b;
-      for(int s = n; s >= 1; s--)
-        {
-         datetime tA = iTime(_Symbol, PERIOD_CURRENT, s + 1);
-         datetime tB = iTime(_Symbol, PERIOD_CURRENT, s);
-         if(tA == 0 || tB == 0) continue;
-         if(MAValue(g_maHandle21,  s + 1, a) && MAValue(g_maHandle21,  s, b)) DrawSegment("21",  tA, a, tB, b, InpCol21, InpMALineWidth);
-         if(MAValue(g_maHandle50,  s + 1, a) && MAValue(g_maHandle50,  s, b)) DrawSegment("50",  tA, a, tB, b, InpCol50, InpMALineWidth);
-         if(MAValue(g_maHandle200, s + 1, a) && MAValue(g_maHandle200, s, b)) DrawSegment("200", tA, a, tB, b, InpCol200, InpMALineWidth);
-        }
-     }
-   if(InpShowVWAP)
-     {
-      int availV = Bars(_Symbol, PERIOD_CURRENT) - 2;
-      int nV = MathMin(InpVwapHistoryBars, availV);
-      for(int s = nV; s >= 1; s--)
-        {
-         if(DifferentSession(s + 1, s)) continue;
-         datetime tA = iTime(_Symbol, PERIOD_CURRENT, s + 1);
-         datetime tB = iTime(_Symbol, PERIOD_CURRENT, s);
-         if(tA == 0 || tB == 0) continue;
-         double vA = SessionVWAP(s + 1), vB = SessionVWAP(s);
-         if(vA > 0.0 && vB > 0.0) DrawSegment("vwap", tA, vA, tB, vB, InpColVWAP, InpVwapLineWidth);
-        }
-     }
-  }
 
 //+------------------------------------------------------------------+
 //| CLASSIC / TEXTBOOK Stochastic signal overlay.                      |
@@ -4179,78 +3989,17 @@ void ResyncLiquiditySignals()
    if(InpShowLiquidity) ComputeLiquiditySignals(true);
   }
 
-//+------------------------------------------------------------------+
-void SetupMAs()
-  {
-   //--- v1.58: REVERTED to the plain built-in iMA handles only (see
-   //--- InpMAHistoryBars' own comment for why) - these handles now serve
-   //--- BOTH the hand-drawn lines (UpdateOverlayLines/BackfillOverlayLines)
-   //--- AND the cross-proximity alert, exactly as before v1.49.
-   if(!InpShowMAs) return;
-   g_maHandle21  = iMA(_Symbol, PERIOD_CURRENT, InpMA21,  0, InpMAMethod, PRICE_CLOSE);
-   g_maHandle50  = iMA(_Symbol, PERIOD_CURRENT, InpMA50,  0, InpMAMethod, PRICE_CLOSE);
-   g_maHandle200 = iMA(_Symbol, PERIOD_CURRENT, InpMA200, 0, InpMAMethod, PRICE_CLOSE);
-  }
+
+
 
 //+------------------------------------------------------------------+
-//| v2.09: release all 4 handles AND mark them INVALID, so a second    |
-//| release (e.g. OnDeinit, then the next rebuild) can never hit a     |
-//| stale handle number.                                                |
-//+------------------------------------------------------------------+
-void ReleaseMAHandles()
-  {
-   if(g_maHandle21     != INVALID_HANDLE) IndicatorRelease(g_maHandle21);
-   if(g_maHandle50     != INVALID_HANDLE) IndicatorRelease(g_maHandle50);
-   if(g_maHandle200    != INVALID_HANDLE) IndicatorRelease(g_maHandle200);
-   g_maHandle21 = INVALID_HANDLE; g_maHandle50 = INVALID_HANDLE;
-   g_maHandle200 = INVALID_HANDLE;
-  }
-
-//+------------------------------------------------------------------+
-//| v2.09: true once the MA handles have actually finished calculating |
-//| on the current timeframe, so a backfill now draws REAL values for  |
-//| every bar. A brand-new iMA handle (OnInit, or right after a        |
-//| timeframe switch) usually reports BarsCalculated() = -1 and        |
-//| CopyBuffer fails - BackfillOverlayLines() used to run at exactly   |
-//| that moment and silently draw little or nothing, with no retry.    |
-//| Waits for the timeseries to be synchronized too, but only for up   |
-//| to 10s - after that it settles for "every handle has calculated at |
-//| least once", so this can never wait forever on a terminal quirk.   |
-//+------------------------------------------------------------------+
-bool MAHandleReady(const int handle, const int need)
-  {
-   if(handle == INVALID_HANDLE) return(true);   // disabled/failed - MAValue() skips it anyway
-   int bc = BarsCalculated(handle);
-   return(bc > 0 && bc >= need);
-  }
-
-bool MAHistoryReady()
-  {
-   int bars = Bars(_Symbol, PERIOD_CURRENT);
-   if(bars <= 2) return(false);
-   bool waitedLong = (GetTickCount64() - g_maPendingSinceMs >= 10000);
-   bool synced = (bool)SeriesInfoInteger(_Symbol, PERIOD_CURRENT, SERIES_SYNCHRONIZED);
-   if(!synced && !waitedLong) return(false);
-   if(!InpShowMAs) return(true);                // VWAP-only: no handle to wait for
-   int need = waitedLong ? 1 : bars - 1;        // -1: tolerate a new bar arriving between the two reads
-   return(MAHandleReady(g_maHandle21, need) && MAHandleReady(g_maHandle50, need)
-          && MAHandleReady(g_maHandle200, need));
-  }
-
-//+------------------------------------------------------------------+
-//| v2.09: the ONLY place the MA handles and MA/VWAP lines are ever    |
-//| rebuilt. Idempotent - provably a no-op unless something actually   |
-//| changed:                                                            |
-//|  Step 1 runs only if the chart's timeframe differs from g_maPeriod,|
-//|         and sets g_maPeriod to it - so it runs ONCE per real       |
-//|         timeframe change, never on scroll/zoom/resize/autoscroll.  |
-//|  Step 2 runs only while g_maBackfillPending is true, and clears it |
-//|         - so the expensive wipe + 2500-bar redraw happens ONCE per |
-//|         timeframe change, as soon as the new handles are ready.    |
-//| Safe to call from anywhere, as often as you like (OnInit, every    |
-//| OnTick, every 2s OnTimer, every CHARTEVENT_CHART_CHANGE) - when    |
-//| nothing changed it costs one comparison and one bool check.        |
-//| Returns true if it drew anything (caller should reclaim the        |
+//| The shared timeframe-change detector for every signal overlay      |
+//| (Stoch/Candle/Div/BB/FVG/Liquidity) - MA/VWAP overlays removed      |
+//| entirely, this function now only resyncs those on a real chart      |
+//| timeframe change (g_maPeriod differs from the current one), never   |
+//| on scroll/zoom/resize/autoscroll. Safe to call from anywhere, as    |
+//| often as you like - when nothing changed it costs one comparison.   |
+//| Returns true if it resynced anything (caller should reclaim the     |
 //| panel's paint order).                                               |
 //+------------------------------------------------------------------+
 bool SyncMAOverlays()
@@ -4260,13 +4009,6 @@ bool SyncMAOverlays()
    if(g_maPeriod != cur)
      {
       g_maPeriod = cur;
-      ReleaseMAHandles();
-      SetupMAs();
-      ObjectsDeleteAll(0, g_pm);          // old timeframe's lines go NOW, never left behind
-      g_maBackfillPending = true;
-      g_maPendingSinceMs  = GetTickCount64();
-      g_maInitialDrawDone = false;   // v2.11: step 2 below draws once immediately, then once more
-                                      // when ready/hard-capped - nothing in between, so no blinking
       g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
       //--- v2.27: the overlays that read the chart's own timeframe
       //--- (Rejection / Rejection M15 removed entirely per direct request)
@@ -4299,42 +4041,6 @@ bool SyncMAOverlays()
    //--- turned ready since. In between those two draws, this is a cheap
    //--- no-redraw check (no wipe, no BackfillOverlayLines, no panel
    //--- rebuild) - so no 2-second blinking during a slow history load.
-   if(g_maBackfillPending)
-     {
-      bool ready = MAHistoryReady();
-      if(!g_maInitialDrawDone)
-        {
-         ObjectsDeleteAll(0, g_pm);
-         BackfillOverlayLines();
-         g_maInitialDrawDone = true;
-         changed = true;
-         if(ready) g_maBackfillPending = false;   // already good on the first try - done
-        }
-      else if(ready)
-        {
-         ObjectsDeleteAll(0, g_pm);          // replace whatever the first attempt managed
-         BackfillOverlayLines();
-         g_maBackfillPending = false;
-         changed = true;
-        }
-      else if((GetTickCount64() - g_maPendingSinceMs) >= 15000)
-        {
-         //--- last-resort second attempt with whatever's available now,
-         //--- then stop - MAHistoryReady() keeps getting checked for
-         //--- free on every future call (the line above), so if it DOES
-         //--- turn true later this branch won't fire again, but nothing
-         //--- is drawn again either; the next genuine timeframe switch
-         //--- (or CheckNewBar's own per-bar UpdateOverlayLines()) is
-         //--- what catches up from there - an edge case, not the common
-         //--- path, per Opus's review.
-         ObjectsDeleteAll(0, g_pm);
-         BackfillOverlayLines();
-         g_maBackfillPending = false;
-         changed = true;
-        }
-      //--- else: still waiting on the SECOND draw, handles not ready yet,
-      //--- under 15s - deliberately do nothing (no redraw, no flicker)
-     }
    return(changed);
   }
 
@@ -4655,7 +4361,10 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
-   ObjectsDeleteAll(0, g_pm);
+   //--- MA/VWAP overlays removed entirely - "TPMA_" hardcoded (not a live feature) purely so
+   //--- anyone upgrading from a version that still drew them gets them cleared out on next
+   //--- removal/reattach instead of stranded forever, same convention as TPRJX_/TPRJXM_ below.
+   ObjectsDeleteAll(0, "TPMA_");
    ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_cdl);
    //--- v2.27: Rejection/Rejection M15 overlays removed entirely (per
@@ -4672,10 +4381,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, g_fvgSig);
    ObjectsDeleteAll(0, g_liq);
    ObjectsDeleteAll(0, g_liqSig);
-   ReleaseMAHandles();
    g_maPeriod = PERIOD_CURRENT;      // globals survive a reinit - "nothing built" now
-   g_maBackfillPending = false;
-   g_maInitialDrawDone = false;
   }
 
 bool AnyEditFocused()
@@ -4724,7 +4430,6 @@ void CheckNewBar()
    if(t0 == 0) return;
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
-   UpdateOverlayLines();
    //--- v2.14: compute + draw every overlay FIRST, with no purge scans in
    //--- between - each overlay used to be followed by its own full-chart
    //--- purge scan, so a Rejection/Continuation arrow (computed late in
