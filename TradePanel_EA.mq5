@@ -20,7 +20,7 @@
 //|  needs a confirm step.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.33"
+#property version   "2.34"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -2681,17 +2681,56 @@ void SigClassicStoch(const double &h[], const double &l[], const double &c[], co
      }
   }
 
-void DrawStochArrow(const string nm, const datetime t, const double price, const bool isBuy)
+//+------------------------------------------------------------------+
+//| v2.34: solid-filled signal arrow, drawn as OBJ_TRIANGLE (a real    |
+//| 3-point object with a genuine OBJPROP_FILL bool) instead of        |
+//| OBJ_ARROW_UP/DOWN (a single Wingdings glyph - no documented solid- |
+//| fill variant exists for it; direct user report was "the arrow      |
+//| have background fill in the middle", i.e. hollow/outlined, not     |
+//| solid). Apex touches the anchor price/time (same spot the old      |
+//| glyph's tip sat at); base extends away from price - buy: apex on   |
+//| top, base below; sell: apex on bottom, base above. Height scales   |
+//| with ATR (so it stays a sensible size across GOLD/SILVER/BTCUSD's  |
+//| very different price scales), half-width scales with the chart's   |
+//| own bar period (so it stays readable across M5/M15/H1/etc.) - both |
+//| also scale with sizeMult (the signal's own InpXArrowSize input,    |
+//| kept for this purpose even though it no longer maps to             |
+//| OBJPROP_WIDTH/font size, which OBJ_TRIANGLE has no equivalent of).  |
+//| NOTE: unlike the old font-glyph arrow, this shape's on-screen pixel|
+//| size will visibly change as you zoom in/out, since its 3 corners   |
+//| are fixed price/time coordinates, not a fixed font point size -    |
+//| an inherent OBJ_TRIANGLE trade-off, not a bug. UNTESTED - no MQL5  |
+//| compiler is available in this environment; verify it compiles and  |
+//| actually renders solid in a real MT5 terminal before trusting it.  |
+//+------------------------------------------------------------------+
+void CreateFilledTriangleArrow(const string nm, const datetime t, const double price, const bool isBuy,
+                                const color col, const int sizeMult, const double atrv, const int perSecIn,
+                                const string tooltip)
   {
    if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpStochBuyCol : InpStochSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpStochArrowSize);
+   int sm = (int)MathMax(1, sizeMult);
+   double hgt = (atrv == SIG_NA || atrv <= 0.0) ? price * 0.0008 : 0.18 * atrv;
+   hgt *= sm;
+   datetime hw = (datetime)MathRound((double)perSecIn * 0.40 * sm);
+   if(hw <= 0) hw = 1;
+   double apexPrice = price;
+   double basePrice = isBuy ? price - hgt : price + hgt;
+   if(!ObjectCreate(0, nm, OBJ_TRIANGLE, 0, t, apexPrice, t - hw, basePrice, t + hw, basePrice)) return;
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_FILL, true);
+   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
    ObjectSetInteger(0, nm, OBJPROP_BACK, false);
    ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Stoch Buy" : "Stoch Sell");
+   ObjectSetString(0, nm, OBJPROP_TOOLTIP, tooltip);
+  }
+
+void DrawStochArrow(const string nm, const datetime t, const double price, const bool isBuy,
+                     const double atrv, const int perSecIn)
+  {
+   CreateFilledTriangleArrow(nm, t, price, isBuy, isBuy ? InpStochBuyCol : InpStochSellCol,
+                             InpStochArrowSize, atrv, perSecIn, isBuy ? "Stoch Buy" : "Stoch Sell");
   }
 
 //+------------------------------------------------------------------+
@@ -2826,7 +2865,7 @@ void ComputeStochSignals(const bool backfill)
          entryPrice = NudgeAwayFromLastMarker(entryPrice, t, !isBuy, lastMarkerPrice, lastMarkerTime, minGap);
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t, !isBuy, minGap, lastArr);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
-         DrawStochArrow(lastArr, t, entryPrice, isBuy);
+         DrawStochArrow(lastArr, t, entryPrice, isBuy, atr[i], perSec);
          DrawSigLevel(lastSl, t, t + InpStochLineBars * perSec, stop, InpStochStopCol, STYLE_SOLID,
                       "Stoch SL: recent " + IntegerToString(InpStochSwingBars) + "-bar swing (unvalidated)");
          TrimLevelFifo(g_slFifo, g_slFifoTimes, lastSl, t, InpMaxSlLines);
@@ -2860,17 +2899,11 @@ void ResyncStochSignals()
 //| extreme. Validated on GOLD ONLY (p=0.0010) - Silver/BTC are NOT     |
 //| real (p=0.8511/0.5564).                                             |
 //+------------------------------------------------------------------+
-void DrawCandleArrow(const string nm, const datetime t, const double price, const bool isBuy)
+void DrawCandleArrow(const string nm, const datetime t, const double price, const bool isBuy,
+                      const double atrv, const int perSecIn)
   {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpCdlBuyCol : InpCdlSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpCdlArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "Engulfing Buy" : "Engulfing Sell");
+   CreateFilledTriangleArrow(nm, t, price, isBuy, isBuy ? InpCdlBuyCol : InpCdlSellCol,
+                             InpCdlArrowSize, atrv, perSecIn, isBuy ? "Engulfing Buy" : "Engulfing Sell");
   }
 
 void ComputeCandleSignals(const bool backfill)
@@ -2995,7 +3028,7 @@ void ComputeCandleSignals(const bool backfill)
          entryPrice = NudgeClearOfMALine(entryPrice, e50[i], !isBuy, minGap);
          lastMarkerPrice = entryPrice; lastMarkerTime = t;
          bool cdlWasNew = (ObjectFind(0, arrNm) < 0);   // v2.15 FIX
-         DrawCandleArrow(arrNm, t, entryPrice, isBuy);
+         DrawCandleArrow(arrNm, t, entryPrice, isBuy, atr[i], perSec);
          DrawSigLevel(slNm, t, t + InpCdlLineBars * perSec, stop, InpCdlStopCol, STYLE_SOLID,
                       "Engulfing SL: " + IntegerToString(InpCdlSwingBars) + "-bar swing (validated GOLD only, p=0.0010)");
          TrimLevelFifo(g_slFifo, g_slFifoTimes, slNm, t, InpMaxSlLines);
@@ -3028,19 +3061,13 @@ void ResyncCandleSignals()
 
 
 //+------------------------------------------------------------------+
-void DrawDivArrow(const string nm, const datetime t, const double price, const bool isBuy, const bool regular)
+void DrawDivArrow(const string nm, const datetime t, const double price, const bool isBuy, const bool regular,
+                   const double atrv, const int perSecIn)
   {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
    color col = regular ? (isBuy ? InpDivRegBuyCol : InpDivRegSellCol) : (isBuy ? InpDivHidBuyCol : InpDivHidSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpDivArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, (regular ? "Regular " : "Hidden ") + string(isBuy ? "Bullish" : "Bearish") +
-                    " Divergence " + (isBuy ? "Buy" : "Sell") + " (unvalidated)");
+   string tooltip = (regular ? "Regular " : "Hidden ") + string(isBuy ? "Bullish" : "Bearish") +
+                     " Divergence " + (isBuy ? "Buy" : "Sell") + " (unvalidated)";
+   CreateFilledTriangleArrow(nm, t, price, isBuy, col, InpDivArrowSize, atrv, perSecIn, tooltip);
   }
 
 //+------------------------------------------------------------------+
@@ -3157,7 +3184,7 @@ void ComputeDivSignals(const bool backfill)
                      entryPrice = NudgeClearOfMALine(entryPrice, e50[i], false, minGap);
                      lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
                      bool wasNew = (ObjectFind(0, nm) < 0);
-                     DrawDivArrow(nm, t_i, entryPrice, true, regular);
+                     DrawDivArrow(nm, t_i, entryPrice, true, regular, atr[i], perSec);
 
                      double swing = l[i];
                      for(int j = i - InpDivSwingBars + 1; j < i; j++)
@@ -3221,7 +3248,7 @@ void ComputeDivSignals(const bool backfill)
                      entryPrice = NudgeClearOfMALine(entryPrice, e50[i], true, minGap);
                      lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
                      bool wasNew = (ObjectFind(0, nm) < 0);
-                     DrawDivArrow(nm, t_i, entryPrice, false, regular);
+                     DrawDivArrow(nm, t_i, entryPrice, false, regular, atr[i], perSec);
 
                      double swing = h[i];
                      for(int j = i - InpDivSwingBars + 1; j < i; j++)
@@ -3279,18 +3306,13 @@ void ResyncDivSignals()
   }
 
 //+------------------------------------------------------------------+
-void DrawBBArrow(const string nm, const datetime t, const double price, const bool isBuy)
+void DrawBBArrow(const string nm, const datetime t, const double price, const bool isBuy,
+                 const double atrv, const int perSecIn)
   {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? InpBBBuyCol : InpBBSellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpBBArrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, isBuy ? "BB Outer-Band Rejection Buy (unvalidated)" :
-                    "BB Outer-Band Rejection Sell (unvalidated)");
+   CreateFilledTriangleArrow(nm, t, price, isBuy, isBuy ? InpBBBuyCol : InpBBSellCol,
+                             InpBBArrowSize, atrv, perSecIn,
+                             isBuy ? "BB Outer-Band Rejection Buy (unvalidated)" :
+                                     "BB Outer-Band Rejection Sell (unvalidated)");
   }
 
 //+------------------------------------------------------------------+
@@ -3396,7 +3418,7 @@ void ComputeBBSignals(const bool backfill)
          entryPrice = NudgeClearOfOtherOverlays(entryPrice, t_i, !isBuy, minGap, nm);
          lastMarkerPrice = entryPrice; lastMarkerTime = t_i;
          bool wasNew = (ObjectFind(0, nm) < 0);
-         DrawBBArrow(nm, t_i, entryPrice, isBuy);
+         DrawBBArrow(nm, t_i, entryPrice, isBuy, atr[i], perSec);
 
          double tp = c[i] + dir * InpBBRR * risk;
          DrawSigLevel(g_bb + "sl_" + id, t_i, t_i + InpBBLineBars * perSec, swing, InpBBStopCol, STYLE_SOLID,
@@ -3430,17 +3452,10 @@ void ResyncBBSignals()
 
 //+------------------------------------------------------------------+
 void DrawZoneSignalArrow(const string nm, const datetime t, const double price, const bool isBuy,
-                          const color buyCol, const color sellCol, const int arrowSize, const string tip)
+                          const color buyCol, const color sellCol, const int arrowSize, const string tip,
+                          const double atrv, const int perSecIn)
   {
-   if(ObjectFind(0, nm) >= 0) return;
-   ObjectCreate(0, nm, isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, isBuy ? buyCol : sellCol);
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, arrowSize);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip);
+   CreateFilledTriangleArrow(nm, t, price, isBuy, isBuy ? buyCol : sellCol, arrowSize, atrv, perSecIn, tip);
   }
 
 //+------------------------------------------------------------------+
@@ -3618,7 +3633,7 @@ void ComputeFvgSignals(const bool backfill)
                   bool wasNew = (ObjectFind(0, nm) < 0);
                   DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpFvgArrowBuyCol, InpFvgArrowSellCol,
                                        InpFvgArrowSize, isBuy ? "FVG Rejection Buy (unvalidated)" :
-                                       "FVG Rejection Sell (unvalidated)");
+                                       "FVG Rejection Sell (unvalidated)", atr[i], perSec);
                   //--- v2.25: per direct request - "lets have the blocks change
                   //--- colour if a signal is triggered off them" - only recolors
                   //--- when a signal actually drew (not when cooldown silently
@@ -3825,7 +3840,7 @@ void ComputeLiquiditySignals(const bool backfill)
                   bool wasNew = (ObjectFind(0, nm) < 0);
                   DrawZoneSignalArrow(nm, t_i, entryPrice, isBuy, InpLiqArrowBuyCol, InpLiqArrowSellCol,
                                        InpLiqArrowSize, isBuy ? "Liquidity Sweep Buy (unvalidated)" :
-                                       "Liquidity Sweep Sell (unvalidated)");
+                                       "Liquidity Sweep Sell (unvalidated)", atr[i], perSec);
                   //--- v2.25: per direct request - see the FVG overlay's own comment
                   DrawZoneRect(g_liqZones[zi].rectName, g_liqZones[zi].startTime, t_i,
                                g_liqZones[zi].top, g_liqZones[zi].bottom, InpLiqSpentCol);
