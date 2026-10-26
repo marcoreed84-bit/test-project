@@ -42,7 +42,7 @@
 //|  it shows have any backtested predictive edge.                        |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -54,30 +54,67 @@ input int    InpBuckets          = 30;      // price buckets - more buckets = fi
 input bool   InpUseRealVolume    = false;   // GOLD/SILVER real_volume is 0 on this broker's feed
                                              // (confirmed this project) - leave off unless you have
                                              // verified your own symbol/broker actually populates it
-input int    InpMaxBarWidthBars  = 18;      // v1.02: shrunk from 50 - per direct request, the busiest
-                                             // bucket was stretching almost to the chart's right edge,
-                                             // reading as one solid wall rather than a profile. The
-                                             // busiest bucket's rectangle extends this many bars
-                                             // rightward from the last candle; every other bucket
-                                             // scales proportionally to its own volume share of that max
+input int    InpMaxBarWidthBars  = 10;      // v1.03: shrunk from 18 - per direct request, bars were
+                                             // still reaching past the chart's right-margin space and
+                                             // getting cut off behind the price column. The busiest
+                                             // bucket's rectangle extends this many bars rightward from
+                                             // the last candle; every other bucket scales proportionally
+                                             // to its own volume share of that max.
+input bool   InpAutoRightMargin  = true;    // v1.03: the real fix for the cut-off problem - MT5 clips
+                                             // any object past the chart's own right-margin ("shift")
+                                             // space, which is a SEPARATE setting from anything this
+                                             // indicator draws. When true, claims enough right-margin
+                                             // room for InpMaxBarWidthBars automatically (only ever
+                                             // INCREASES it, never shrinks a larger margin you already
+                                             // have set). Turn off if you'd rather control Chart
+                                             // Properties -> right margin yourself.
 input double InpBucketGapFrac    = 0.25;    // v1.02: each bucket's rectangle only fills this fraction
                                              // of its own vertical slot (centered), leaving a thin gap
                                              // above/below - breaks the solid-wall look into a readable
                                              // comb of bars. 0 = no gap (old look), try 0.15-0.35
 input color  InpBarColor         = C'40,70,110';     // ordinary bucket fill
 input color  InpPocColor         = C'255,165,0';     // Point-of-Control (busiest bucket) fill - distinct
-input bool   InpShowPocLine      = true;    // a thin dotted line at the POC price, extended back across
-                                             // the VISIBLE candles too - easier to read against price
-                                             // action despite the profile itself sitting off to the side
-input int    InpPocLineBackBars  = 150;     // how many bars back (left, over the candles) the POC line extends
-input color  InpPocLineColor     = C'255,165,0';
+input bool   InpShowPocLine      = true;    // a line at the POC price, extended across the chart so you
+                                             // can see the level against price history and how price
+                                             // reacted there, not just where it sits now
+input bool   InpPocLineRayLeft   = true;    // v1.03: per direct request - extend the POC line ALL the
+                                             // way across the visible chart to the left (MT5's own
+                                             // OBJPROP_RAY_LEFT, genuinely infinite, not just N bars
+                                             // back) instead of stopping InpPocLineBackBars bars behind
+                                             // the last candle. false = use InpPocLineBackBars instead.
+input int    InpPocLineBackBars  = 150;     // only used when InpPocLineRayLeft is false
+input color  InpPocLineColor     = C'130,95,35';   // v1.03: dimmed from a bright C'255,165,0' per direct
+                                             // request ("lightly shaded") - a faint line you can still
+                                             // follow across price history without it dominating the chart
 
 #define VP_PFX "VPS_"
+
+//+------------------------------------------------------------------+
+//| v1.03: claims enough right-margin ("shift") chart space for the    |
+//| profile to actually fit without MT5 clipping it behind the price   |
+//| column - the real fix for "extend far into the right past the     |
+//| price column, and get cut off". CHART_SHIFT_SIZE is a PERCENTAGE   |
+//| of the chart's own width, independent of anything this indicator   |
+//| draws in bars, so there's no exact bar->percent conversion - uses  |
+//| a generous fixed value instead and only ever INCREASES the margin, |
+//| never shrinks one you already had set bigger for your own reasons. |
+//+------------------------------------------------------------------+
+void EnsureRightMargin()
+  {
+   if(!InpAutoRightMargin) return;
+   if(!(bool)ChartGetInteger(0, CHART_SHIFT))
+      ChartSetInteger(0, CHART_SHIFT, true);
+   long cur = ChartGetInteger(0, CHART_SHIFT_SIZE);
+   long want = 25;   // percent - comfortably fits InpMaxBarWidthBars at typical zoom levels
+   if(cur < want)
+      ChartSetInteger(0, CHART_SHIFT_SIZE, want);
+  }
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
    IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile (" + IntegerToString(InpDaysToShow) + "d)");
+   EnsureRightMargin();
    return(INIT_SUCCEEDED);
   }
 
@@ -99,6 +136,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                  const long &tick_volume[], const long &volume[], const int &spread[])
   {
    if(rates_total < 2) return(0);
+   EnsureRightMargin();   // cheap (SetIfDiff-style guard inside) - re-asserted here in case another
+                          // EA/indicator on the same chart changed CHART_SHIFT_SIZE back since OnInit
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    if(perSec <= 0) return(rates_total);
 
@@ -201,17 +240,18 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
      {
       string pocNm = VP_PFX + "pocline";
       double pocPrice = lo + (pocBucket + 0.5) * bw;
-      //--- extends from InpPocLineBackBars bars BEHIND the last candle (so it
-      //--- reads against recent price action) through to the right edge of
-      //--- the profile itself - covers both the candles and the profile in
-      //--- one continuous line.
-      int backIdx = (int)MathMax(0, end - InpPocLineBackBars);
-      datetime lineStart = time[backIdx];
+      //--- v1.03: per direct request - InpPocLineRayLeft uses MT5's own
+      //--- OBJPROP_RAY_LEFT to extend the line genuinely infinitely across
+      //--- the whole visible (and scrollable-back-into) chart history,
+      //--- rather than stopping InpPocLineBackBars bars behind the last
+      //--- candle - "so I can see on the chart the levels and how price
+      //--- reacted" needs the line to reach back over whatever history
+      //--- you scroll to, not a fixed recent window.
+      datetime lineStart = InpPocLineRayLeft ? anchorTime : time[(int)MathMax(0, end - InpPocLineBackBars)];
       datetime lineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
       if(ObjectFind(0, pocNm) < 0)
         {
          ObjectCreate(0, pocNm, OBJ_TREND, 0, lineStart, pocPrice, lineEnd, pocPrice);
-         ObjectSetInteger(0, pocNm, OBJPROP_RAY_RIGHT, false);
          ObjectSetInteger(0, pocNm, OBJPROP_SELECTABLE, false);
          ObjectSetInteger(0, pocNm, OBJPROP_HIDDEN, true);
          ObjectSetInteger(0, pocNm, OBJPROP_STYLE, STYLE_DOT);
@@ -225,6 +265,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          ObjectSetInteger(0, pocNm, OBJPROP_TIME, 1, lineEnd);
          ObjectSetDouble (0, pocNm, OBJPROP_PRICE, 1, pocPrice);
         }
+      ObjectSetInteger(0, pocNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
+      ObjectSetInteger(0, pocNm, OBJPROP_RAY_RIGHT, false);
       ObjectSetInteger(0, pocNm, OBJPROP_COLOR, InpPocLineColor);
      }
    else
