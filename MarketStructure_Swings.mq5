@@ -57,16 +57,26 @@
 //|  filters by bar-COUNT), this filters by actual price MAGNITUDE: a       |
 //|  pivot only counts as a real swing if it's at least InpMinMoveATR        |
 //|  ATR away from the previous confirmed swing of the OPPOSITE type.         |
-//|  InpRequireStochExtreme only counts a pivot low if Stochastic %K was       |
-//|  at/below InpStochZoneLow at that bar (pivot high: %K at/above                |
-//|  InpStochZoneHigh) - same zone convention as TradePanel_EA's own Stoch         |
-//|  overlay. A pivot that fails either filter is skipped entirely: no             |
-//|  label, no zigzag segment, no state update, no signal - it's as if the          |
-//|  minor wiggle never happened, so the next REAL swing compares against           |
-//|  the last REAL one, not the noise in between.                                    |
+//|  InpRequireStochExtreme originally required %K to cross a hard         |
+//|  15/85 zone (v1.02/v1.03) - replaced in v1.04 (see its own note        |
+//|  below) with a local-turning-point check, since the fixed zone was      |
+//|  far stricter than "where the stochastic turns" and over-filtered        |
+//|  real swings in a steadily trending market. A pivot that fails either      |
+//|  filter is skipped entirely: no label, no zigzag segment, no state         |
+//|  update, no signal - as if the minor wiggle never happened, so the          |
+//|  next REAL swing compares against the last REAL one, not the noise.          |
+//|                                                                   |
+//|  v1.04 (real definition fix, not just threshold tuning - per direct  |
+//|  report "its still very extreme"): InpRequireStochExtreme now checks  |
+//|  whether %K is a LOCAL TURNING POINT (a pivot in %K itself, over        |
+//|  InpStochTurnWindow bars each side) instead of crossing a fixed 15/85    |
+//|  zone. The old zone check was much stricter than "where the stochastic    |
+//|  turns" literally means - in a steady trend with shallow pullbacks, %K     |
+//|  often never reaches 15/85 at all, so nearly every swing got rejected       |
+//|  regardless of InpMinMoveATR. Also lowered InpMinMoveATR 1.5->0.8 in v1.03.  |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -87,18 +97,25 @@ input double InpMinMoveATR       = 0.8;     // v1.03: lowered from 1.5 - per dir
                                              // unlike InpPivotWindow, which only filters by bar-count, this
                                              // filters by actual price MAGNITUDE). 0 = disable this filter
                                              // (keep only the Stochastic one below, if that one's on).
-input bool   InpRequireStochExtreme = true; // per direct observation - "these levels on the chart are
-                                             // mostly where the stochastic turns": only count a pivot LOW
-                                             // if %K was at/below InpStochZoneLow at that bar, and a pivot
-                                             // HIGH only if %K was at/above InpStochZoneHigh - same zone
-                                             // convention as TradePanel_EA's own Stochastic overlay. STACKS
-                                             // with InpMinMoveATR above (both required) - if it's still too
-                                             // strict together, turn one off rather than raise both at once.
+input bool   InpRequireStochExtreme = true; // v1.04 FIX (real definition bug, not just a threshold
+                                             // tuning issue): v1.02/v1.03 required %K to cross a HARD
+                                             // 15/85 zone - much stricter than "where the stochastic
+                                             // turns". In a steadily trending market with shallow
+                                             // pullbacks (exactly what the screenshots showed), %K often
+                                             // never reaches 15/85 at all, so nearly everything got
+                                             // rejected regardless of InpMinMoveATR - that's what was
+                                             // actually "extreme", not the ATR threshold. Now requires %K
+                                             // to be a LOCAL TURNING POINT instead (a pivot in %K itself,
+                                             // over InpStochTurnWindow bars each side) - matches "where the
+                                             // stochastic turns" literally, works on shallow pullbacks too.
+                                             // STACKS with InpMinMoveATR above (both required) - if still
+                                             // too strict together, turn one off rather than raise both.
 input int    InpStochKPeriod     = 14;
 input int    InpStochSlowing     = 5;
 input int    InpStochDPeriod     = 5;
-input double InpStochZoneLow     = 15.0;
-input double InpStochZoneHigh    = 85.0;
+input int    InpStochTurnWindow  = 3;       // v1.04: bars on each side %K must turn against to count as
+                                             // a local extreme - smaller than InpPivotWindow on purpose,
+                                             // since %K turns faster than price itself
 
 input group "=== Labels ==="
 input color  InpHHColor          = clrLime;         // Higher High
@@ -185,6 +202,28 @@ void ComputeStoch(const double &h[], const double &l[], const double &c[], const
   }
 
 //+------------------------------------------------------------------+
+//| v1.04: is stochK[i] a local turning point (min for a swing low,     |
+//| max for a swing high) over InpStochTurnWindow bars each side? This  |
+//| is what actually matches "where the stochastic turns" - a FIXED     |
+//| 15/85 zone (the old v1.02/v1.03 check) is a much stricter, different|
+//| condition that a shallow pullback in a strong trend often never     |
+//| reaches at all.                                                     |
+//+------------------------------------------------------------------+
+bool IsStochLocalExtreme(const double &k[], const int n, const int i, const int window, const bool wantMin)
+  {
+   if(k[i] == SIG_NA) return false;
+   int lo = (int)MathMax(0, i - window);
+   int hi = (int)MathMin(n - 1, i + window);
+   for(int j = lo; j <= hi; j++)
+     {
+      if(j == i || k[j] == SIG_NA) continue;
+      if(wantMin && k[j] < k[i]) return false;
+      if(!wantMin && k[j] > k[i]) return false;
+     }
+   return true;
+  }
+
+//+------------------------------------------------------------------+
 //| Solid-filled buy/sell arrow - same technique as TradePanel_EA.mq5's|
 //| v2.38 fix (generic OBJ_ARROW + explicit Wingdings code 233/234 =   |
 //| filled triangle pointer, NOT OBJ_ARROW_UP/DOWN's hollow default).  |
@@ -254,7 +293,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- kept simple: every pivot fully inside [start-W, rates_total) prints).
    //--- also needs enough extra room for the Stochastic warm-up period when
    //--- InpRequireStochExtreme is on, so %K is actually defined that far back.
-   int margin = (int)MathMax(InpPivotWindow, InpStochKPeriod + InpStochSlowing + 20);
+   int margin = (int)MathMax(MathMax(InpPivotWindow, InpStochTurnWindow), InpStochKPeriod + InpStochSlowing + 20);
    int scanStart = (int)MathMax(0, start - margin);
 
    double h[], l[], c[];
@@ -293,7 +332,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       //--- v1.02 noise filters - per direct request/observation
       if(isPivotHigh)
         {
-         if(InpRequireStochExtreme && (stochK[i] == SIG_NA || stochK[i] < InpStochZoneHigh))
+         if(InpRequireStochExtreme && !IsStochLocalExtreme(stochK, n, i, InpStochTurnWindow, false))
             isPivotHigh = false;
          else if(InpMinMoveATR > 0.0 && haveLow && atr[i] != SIG_NA && atr[i] > 0.0
                  && MathAbs(h[i] - lastLowPrice) < InpMinMoveATR * atr[i])
@@ -301,7 +340,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
       if(isPivotLow)
         {
-         if(InpRequireStochExtreme && (stochK[i] == SIG_NA || stochK[i] > InpStochZoneLow))
+         if(InpRequireStochExtreme && !IsStochLocalExtreme(stochK, n, i, InpStochTurnWindow, true))
             isPivotLow = false;
          else if(InpMinMoveATR > 0.0 && haveHigh && atr[i] != SIG_NA && atr[i] > 0.0
                  && MathAbs(lastHighPrice - l[i]) < InpMinMoveATR * atr[i])
