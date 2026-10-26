@@ -66,7 +66,7 @@
 //|  the last REAL one, not the noise in between.                                    |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -76,20 +76,24 @@ input int    InpPivotWindow      = 5;       // bars on EACH side a pivot high/lo
                                              // Liquidity overlays (InpDivPivotWindow/InpLiqPivotWindow)
 input int    InpDaysToShow       = 10;      // how many calendar days of history to label
 
-input group "=== Noise filters (v1.02, per direct request - 'most of the signals are noise') ==="
-input double InpMinMoveATR       = 1.5;     // a pivot only counts as a REAL swing if it's at least this
-                                             // many ATR away from the previous CONFIRMED swing of the
-                                             // OPPOSITE type (a classic "ZigZag deviation" filter - unlike
-                                             // InpPivotWindow, which only filters by bar-count, this
-                                             // filters by actual price MAGNITUDE, which is what was
-                                             // letting small wiggles through). 0 = no filter (old v1.01
-                                             // behaviour). A failed pivot is skipped entirely - no label,
-                                             // no state update, no signal.
+input group "=== Noise filters (v1.03) - STACK: a pivot needs BOTH on to pass, not either/or ==="
+input double InpMinMoveATR       = 0.8;     // v1.03: lowered from 1.5 - per direct report, 1.5 combined
+                                             // WITH InpRequireStochExtreme below was filtering out real
+                                             // swings, not just noise (both filters must pass for a pivot
+                                             // to count, so they compound - 1.5 ATR was already strict on
+                                             // its own). A pivot only counts as a real swing if it's at
+                                             // least this many ATR away from the previous CONFIRMED swing
+                                             // of the OPPOSITE type (a classic "ZigZag deviation" filter -
+                                             // unlike InpPivotWindow, which only filters by bar-count, this
+                                             // filters by actual price MAGNITUDE). 0 = disable this filter
+                                             // (keep only the Stochastic one below, if that one's on).
 input bool   InpRequireStochExtreme = true; // per direct observation - "these levels on the chart are
                                              // mostly where the stochastic turns": only count a pivot LOW
                                              // if %K was at/below InpStochZoneLow at that bar, and a pivot
                                              // HIGH only if %K was at/above InpStochZoneHigh - same zone
-                                             // convention as TradePanel_EA's own Stochastic overlay
+                                             // convention as TradePanel_EA's own Stochastic overlay. STACKS
+                                             // with InpMinMoveATR above (both required) - if it's still too
+                                             // strict together, turn one off rather than raise both at once.
 input int    InpStochKPeriod     = 14;
 input int    InpStochSlowing     = 5;
 input int    InpStochDPeriod     = 5;
