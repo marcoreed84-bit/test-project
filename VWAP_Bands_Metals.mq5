@@ -76,7 +76,7 @@
 //|  bar, rather than just "close enough" after the first visible day/week.|
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.12"
+#property version   "1.13"
 #property indicator_chart_window
 #property indicator_buffers 19
 #property indicator_plots   14
@@ -158,8 +158,15 @@
 #property indicator_style14 STYLE_SOLID
 
 input group "=== VWAP settings ==="
-input int    InpDaysToShow      = 5;        // how many calendar days of independently-anchored
-                                             // VWAP+band segments to keep visible at once
+input int    InpDaysToShow      = 31;       // how many calendar days of independently-anchored
+                                             // VWAP+band segments to keep visible at once - also
+                                             // doubles as the Weekly/Monthly VWAP lines' own history
+                                             // window (see their v1.12 note above), so bumped from
+                                             // 5 to 31 per direct request: 31 days covers a full
+                                             // calendar month cleanly (and a full week several times
+                                             // over), so both lines' oldest visible segment now
+                                             // starts at that period's own true calendar boundary
+                                             // instead of wherever a shorter window happened to begin
 input bool   InpUseRealVolume   = false;    // GOLD/SILVER real_volume is 0 on this broker's feed
                                              // (confirmed this project) - leave off unless you have
                                              // verified your own symbol/broker actually populates it
