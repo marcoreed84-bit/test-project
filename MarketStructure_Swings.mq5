@@ -76,7 +76,7 @@
 //|  regardless of InpMinMoveATR. Also lowered InpMinMoveATR 1.5->0.8 in v1.03.  |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -97,19 +97,19 @@ input double InpMinMoveATR       = 0.8;     // v1.03: lowered from 1.5 - per dir
                                              // unlike InpPivotWindow, which only filters by bar-count, this
                                              // filters by actual price MAGNITUDE). 0 = disable this filter
                                              // (keep only the Stochastic one below, if that one's on).
-input bool   InpRequireStochExtreme = true; // v1.04 FIX (real definition bug, not just a threshold
-                                             // tuning issue): v1.02/v1.03 required %K to cross a HARD
-                                             // 15/85 zone - much stricter than "where the stochastic
-                                             // turns". In a steadily trending market with shallow
-                                             // pullbacks (exactly what the screenshots showed), %K often
-                                             // never reaches 15/85 at all, so nearly everything got
-                                             // rejected regardless of InpMinMoveATR - that's what was
-                                             // actually "extreme", not the ATR threshold. Now requires %K
-                                             // to be a LOCAL TURNING POINT instead (a pivot in %K itself,
-                                             // over InpStochTurnWindow bars each side) - matches "where the
-                                             // stochastic turns" literally, works on shallow pullbacks too.
-                                             // STACKS with InpMinMoveATR above (both required) - if still
-                                             // too strict together, turn one off rather than raise both.
+input bool   InpRequireStochExtreme = false; // v1.05 FIX (misread the original request, not a threshold
+                                             // issue): the direct observation was that the FIRST, UN-
+                                             // filtered version's swings already lined up with where the
+                                             // stochastic turned - evidence the base swing detection was
+                                             // sound, not a request to GATE on a stochastic condition. A
+                                             // local price swing and a local %K turn coincide almost by
+                                             // definition anyway, so this filter barely discriminates
+                                             // anything on its own - InpMinMoveATR above is the real,
+                                             // correctly-targeted lever for "fewer, bigger moves only".
+                                             // Left in and still usable (now checks %K is a LOCAL TURNING
+                                             // POINT, not a hard 15/85 zone crossing - the zone version was
+                                             // a separate, real over-filtering bug from v1.02/v1.03, fixed
+                                             // in v1.04) but defaulted OFF since it isn't what was asked for.
 input int    InpStochKPeriod     = 14;
 input int    InpStochSlowing     = 5;
 input int    InpStochDPeriod     = 5;
