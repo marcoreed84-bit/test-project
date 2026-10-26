@@ -49,8 +49,24 @@
 //|  The HH/HL/LH/LL LABELS themselves (no signal attached) are a separate    |
 //|  visual-only feature from v1.00 and carry no backtest claim either way.    |
 //+------------------------------------------------------------------+
+//|  v1.02 (per direct request/observation - "most of the signals on   |
+//|  the chart are just noise... we want the bigger moves" and "these   |
+//|  levels on the chart are mostly where the stochastic turns"): two    |
+//|  new noise filters, both on by default. InpMinMoveATR is a classic    |
+//|  "ZigZag deviation" filter - unlike InpPivotWindow (which only         |
+//|  filters by bar-COUNT), this filters by actual price MAGNITUDE: a       |
+//|  pivot only counts as a real swing if it's at least InpMinMoveATR        |
+//|  ATR away from the previous confirmed swing of the OPPOSITE type.         |
+//|  InpRequireStochExtreme only counts a pivot low if Stochastic %K was       |
+//|  at/below InpStochZoneLow at that bar (pivot high: %K at/above                |
+//|  InpStochZoneHigh) - same zone convention as TradePanel_EA's own Stoch         |
+//|  overlay. A pivot that fails either filter is skipped entirely: no             |
+//|  label, no zigzag segment, no state update, no signal - it's as if the          |
+//|  minor wiggle never happened, so the next REAL swing compares against           |
+//|  the last REAL one, not the noise in between.                                    |
+//+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -59,6 +75,26 @@ input int    InpPivotWindow      = 5;       // bars on EACH side a pivot high/lo
                                              // same default as this project's existing Divergence/
                                              // Liquidity overlays (InpDivPivotWindow/InpLiqPivotWindow)
 input int    InpDaysToShow       = 10;      // how many calendar days of history to label
+
+input group "=== Noise filters (v1.02, per direct request - 'most of the signals are noise') ==="
+input double InpMinMoveATR       = 1.5;     // a pivot only counts as a REAL swing if it's at least this
+                                             // many ATR away from the previous CONFIRMED swing of the
+                                             // OPPOSITE type (a classic "ZigZag deviation" filter - unlike
+                                             // InpPivotWindow, which only filters by bar-count, this
+                                             // filters by actual price MAGNITUDE, which is what was
+                                             // letting small wiggles through). 0 = no filter (old v1.01
+                                             // behaviour). A failed pivot is skipped entirely - no label,
+                                             // no state update, no signal.
+input bool   InpRequireStochExtreme = true; // per direct observation - "these levels on the chart are
+                                             // mostly where the stochastic turns": only count a pivot LOW
+                                             // if %K was at/below InpStochZoneLow at that bar, and a pivot
+                                             // HIGH only if %K was at/above InpStochZoneHigh - same zone
+                                             // convention as TradePanel_EA's own Stochastic overlay
+input int    InpStochKPeriod     = 14;
+input int    InpStochSlowing     = 5;
+input int    InpStochDPeriod     = 5;
+input double InpStochZoneLow     = 15.0;
+input double InpStochZoneHigh    = 85.0;
 
 input group "=== Labels ==="
 input color  InpHHColor          = clrLime;         // Higher High
@@ -108,6 +144,39 @@ void ComputeATR(const double &h[], const double &l[], const double &c[], const i
      {
       double tr = MathMax(h[i] - l[i], MathMax(MathAbs(h[i] - c[i-1]), MathAbs(l[i] - c[i-1])));
       atr[i] = (atr[i-1] * (period - 1) + tr) / period;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Classic Stochastic(K,slowing,D), Low/High price mode, SMA method -  |
+//| same formula/convention as TradePanel_EA's own Stochastic overlay,  |
+//| used here only to gate which pivots count as real swings (v1.02),   |
+//| per direct observation that the chart's real turning points line    |
+//| up with where %K actually reaches its extreme zone.                  |
+//+------------------------------------------------------------------+
+void ComputeStoch(const double &h[], const double &l[], const double &c[], const int n,
+                   const int kPeriod, const int slowing, const int dPeriod, double &k[])
+  {
+   ArrayResize(k, n);
+   ArrayInitialize(k, SIG_NA);
+   int minBars = kPeriod + slowing;
+   if(n < minBars) return;
+   double rawK[];
+   ArrayResize(rawK, n);
+   ArrayInitialize(rawK, SIG_NA);
+   for(int i = kPeriod - 1; i < n; i++)
+     {
+      double hh = h[i], ll = l[i];
+      for(int j = i - kPeriod + 1; j <= i; j++) { hh = MathMax(hh, h[j]); ll = MathMin(ll, l[j]); }
+      double range = hh - ll;
+      rawK[i] = (range > 0.0) ? 100.0 * (c[i] - ll) / range : 50.0;
+     }
+   for(int i = kPeriod - 1 + slowing - 1; i < n; i++)
+     {
+      double sum = 0.0; int cnt = 0;
+      for(int j = i - slowing + 1; j <= i; j++)
+         if(rawK[j] != SIG_NA) { sum += rawK[j]; cnt++; }
+      if(cnt > 0) k[i] = sum / cnt;
      }
   }
 
@@ -179,7 +248,10 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- back up further for the scan itself (labels still only PRINT from
    //--- `start` onward via the lastLabelTime guard below, if you want - here
    //--- kept simple: every pivot fully inside [start-W, rates_total) prints).
-   int scanStart = (int)MathMax(0, start - InpPivotWindow);
+   //--- also needs enough extra room for the Stochastic warm-up period when
+   //--- InpRequireStochExtreme is on, so %K is actually defined that far back.
+   int margin = (int)MathMax(InpPivotWindow, InpStochKPeriod + InpStochSlowing + 20);
+   int scanStart = (int)MathMax(0, start - margin);
 
    double h[], l[], c[];
    int n = rates_total - scanStart;
@@ -187,6 +259,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    for(int i = 0; i < n; i++) { h[i] = high[scanStart + i]; l[i] = low[scanStart + i]; c[i] = close[scanStart + i]; }
    double atr[];
    ComputeATR(h, l, c, n, 14, atr);
+   double stochK[];
+   if(InpRequireStochExtreme)
+      ComputeStoch(h, l, c, n, InpStochKPeriod, InpStochSlowing, InpStochDPeriod, stochK);
 
    ObjectsDeleteAll(0, MSW_PFX);   // cheap over a bounded window - simplest way to avoid stale labels
                                    // from a shrinking/shifting window without extra bookkeeping
@@ -209,6 +284,24 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          if(j == i) continue;
          if(h[j] > h[i]) isPivotHigh = false;
          if(l[j] < l[i]) isPivotLow = false;
+        }
+
+      //--- v1.02 noise filters - per direct request/observation
+      if(isPivotHigh)
+        {
+         if(InpRequireStochExtreme && (stochK[i] == SIG_NA || stochK[i] < InpStochZoneHigh))
+            isPivotHigh = false;
+         else if(InpMinMoveATR > 0.0 && haveLow && atr[i] != SIG_NA && atr[i] > 0.0
+                 && MathAbs(h[i] - lastLowPrice) < InpMinMoveATR * atr[i])
+            isPivotHigh = false;   // too close to the last confirmed swing LOW to count as a real swing
+        }
+      if(isPivotLow)
+        {
+         if(InpRequireStochExtreme && (stochK[i] == SIG_NA || stochK[i] > InpStochZoneLow))
+            isPivotLow = false;
+         else if(InpMinMoveATR > 0.0 && haveHigh && atr[i] != SIG_NA && atr[i] > 0.0
+                 && MathAbs(lastHighPrice - l[i]) < InpMinMoveATR * atr[i])
+            isPivotLow = false;   // too close to the last confirmed swing HIGH to count as a real swing
         }
 
       if(isPivotHigh)
