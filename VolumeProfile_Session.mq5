@@ -42,7 +42,7 @@
 //|  it shows have any backtested predictive edge.                        |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -54,9 +54,16 @@ input int    InpBuckets          = 30;      // price buckets - more buckets = fi
 input bool   InpUseRealVolume    = false;   // GOLD/SILVER real_volume is 0 on this broker's feed
                                              // (confirmed this project) - leave off unless you have
                                              // verified your own symbol/broker actually populates it
-input int    InpMaxBarWidthBars  = 50;      // the busiest bucket's rectangle extends this many bars
+input int    InpMaxBarWidthBars  = 18;      // v1.02: shrunk from 50 - per direct request, the busiest
+                                             // bucket was stretching almost to the chart's right edge,
+                                             // reading as one solid wall rather than a profile. The
+                                             // busiest bucket's rectangle extends this many bars
                                              // rightward from the last candle; every other bucket
                                              // scales proportionally to its own volume share of that max
+input double InpBucketGapFrac    = 0.25;    // v1.02: each bucket's rectangle only fills this fraction
+                                             // of its own vertical slot (centered), leaving a thin gap
+                                             // above/below - breaks the solid-wall look into a readable
+                                             // comb of bars. 0 = no gap (old look), try 0.15-0.35
 input color  InpBarColor         = C'40,70,110';     // ordinary bucket fill
 input color  InpPocColor         = C'255,165,0';     // Point-of-Control (busiest bucket) fill - distinct
 input bool   InpShowPocLine      = true;    // a thin dotted line at the POC price, extended back across
@@ -151,8 +158,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          ObjectDelete(0, nm);
          continue;
         }
-      double bucketLo = lo + b * bw;
-      double bucketHi = bucketLo + bw;
+      double gap = bw * InpBucketGapFrac * 0.5;
+      double bucketLo = lo + b * bw + gap;
+      double bucketHi = bucketLo + bw - 2.0 * gap;
       int widthBars = (int)MathRound(InpMaxBarWidthBars * (vol[b] / pocVol));
       if(widthBars < 1) widthBars = 1;
       datetime t1 = anchorTime;
