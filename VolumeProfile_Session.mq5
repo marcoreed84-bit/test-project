@@ -42,7 +42,7 @@
 //|  it shows have any backtested predictive edge.                        |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -104,10 +104,17 @@ void EnsureRightMargin()
    if(!InpAutoRightMargin) return;
    if(!(bool)ChartGetInteger(0, CHART_SHIFT))
       ChartSetInteger(0, CHART_SHIFT, true);
-   long cur = ChartGetInteger(0, CHART_SHIFT_SIZE);
-   long want = 25;   // percent - comfortably fits InpMaxBarWidthBars at typical zoom levels
+   //--- v1.04 FIX (real compile error, caught by the actual MT5 compiler -
+   //--- this environment has none, so this slipped through): CHART_SHIFT_SIZE
+   //--- is a DOUBLE property (a percentage, e.g. 25.0), not an integer one -
+   //--- ChartGetInteger/ChartSetInteger don't have a matching overload for
+   //--- it ("wrong parameters count" / "cannot convert enum"). CHART_SHIFT
+   //--- itself (the bool just above) genuinely is an integer property, so
+   //--- that half was always correct.
+   double cur = ChartGetDouble(0, CHART_SHIFT_SIZE);
+   double want = 25.0;   // percent - comfortably fits InpMaxBarWidthBars at typical zoom levels
    if(cur < want)
-      ChartSetInteger(0, CHART_SHIFT_SIZE, want);
+      ChartSetDouble(0, CHART_SHIFT_SIZE, want);
   }
 
 //+------------------------------------------------------------------+
