@@ -1,26 +1,24 @@
 //+------------------------------------------------------------------+
 //|                                               TradePanel_EA.mq5  |
-//|  Movable on-chart manual trading widget. NOT a strategy - no    |
-//|  automated entry/exit logic at all, just buttons that place or  |
-//|  close trades on command.                                       |
+//|  Signal-overlay indicator-like EA. NOT a strategy, and - as of    |
+//|  v2.39 - no manual trading UI either: draws Stochastic cross,     |
+//|  Candlestick engulfing, Stochastic divergence, and Bollinger      |
+//|  outer-band rejection signal arrows (plus FVG/Liquidity zones,    |
+//|  default off), each with a suggested SL/TP reference line. Never |
+//|  touches an order - nothing in this file calls OrderSend/CTrade.  |
 //|                                                                   |
-//|  Run this on its OWN chart window (MT5 allows only one EA per   |
-//|  chart) - open a second chart of the same symbol/timeframe next |
-//|  to whatever strategy EA is already running, and attach this   |
-//|  one there. It manages ONLY positions it opened itself (matched |
-//|  by its effective magic number, see InpMagic) - the stats row,  |
-//|  CLOSE ALL, 25/50/75% partial                                   |
-//|  close, and Set SL/Set TP all act exclusively on this panel's   |
-//|  own trades, never on a strategy EA's live position.            |
-//|                                                                   |
-//|  SAFETY: placing a NEW batch of trades (the "PLACE xN" buttons) |
-//|  requires ARM then a second click within InpArmSeconds - a      |
-//|  single misclick cannot fire a batch of market orders. Closing  |
-//|  (25/50/75%/CLOSE ALL) fires immediately - reducing risk never   |
-//|  needs a confirm step.                                           |
+//|  v2.39: the manual-trading panel window (lot/count/delay edit     |
+//|  boxes, buy/sell/close-all/partial-close/set-SL/set-TP buttons,   |
+//|  drag) is REMOVED ENTIRELY, per direct request - a recurring      |
+//|  flashing/panel-z-order fight was never fully run down despite    |
+//|  several real fixes (v2.35's g_editFocused bug, v2.38's per-tick  |
+//|  reclaim), and manual execution now goes through MT5's own native |
+//|  one-click trading panel instead. Run this alongside that, or     |
+//|  alongside any strategy EA, on the same chart - it only ever      |
+//|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.38"
+#property version   "2.39"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1329,50 +1327,20 @@
 #property indicator_chart_window
 #property indicator_plots 0
 
-#include <Trade/Trade.mqh>
-
-input group "=== Trade buttons ==="
-input int    InpMagic              = 20261014;   // magic tag applied to trades THIS panel opens -
-                                                  // stats/close/SL-TP are always scoped to this magic only.
-                                                  // Leave at 0 to auto-derive a DIFFERENT magic per symbol+
-                                                  // timeframe (per direct request, for running two separate
-                                                  // panel instances - one on an M5 chart, one on an M15
-                                                  // chart - without them managing each other's trades) -
-                                                  // see g_effectiveMagic/OnInit. The non-zero default above
-                                                  // is kept EXACTLY as before for backward compatibility -
-                                                  // nothing changes for an existing single-panel setup
-                                                  // unless you deliberately set this to 0.
-input int    InpArmSeconds         = 60;         // ARM auto-expires after this many seconds unused -
-                                                  // starting value only, adjustable live from the panel
-                                                  // itself now (Arm delay row) via g_armSeconds
-input int    InpSlippage           = 30;
-input color  InpBgColor            = C'30,30,34';
-input color  InpTextColor          = clrWhite;
-input color  InpArmedColor         = clrOrangeRed;
-input color  InpBuyColor           = C'30,120,60';
-input color  InpSellColor          = C'150,40,40';
-
-input group "=== Chart theme (same family-standard blue/white candles as the other EAs) ==="
-input bool   InpApplyTheme         = true;
-input color  InpChartBg            = clrBlack;
-input color  InpBullCol            = C'0,150,255';    // neon blue - family standard
-input color  InpBearCol            = clrWhite;        // neon white - family standard
-input bool   InpShowTradeLevels     = true;   // show MT5's native open-price/SL/TP lines - the ones you
-                                               // drag on the chart to set/move SL and TP. Kept ON by
-                                               // default; split out from trade-history so this panel can
-                                               // win the fight against a strategy EA on the same chart
-                                               // that turns it off for its own solo-chart case.
-input bool   InpHideTradeHistory    = true;   // hide MT5's own closed-trade arrows/labels only - applied
-                                               // unconditionally (not gated behind InpApplyTheme) since
-                                               // those arrows drawing through the panel is exactly what
-                                               // this fixes. Independent of InpShowTradeLevels above.
-
-input group "=== Trade condition light (green/red, same traffic-light idiom as the other EAs' panels) ==="
-input int    InpMaxSpreadPoints    = 70;      // Silver-specific number from this project's own research
-                                               // (research/trendbreaker/hs_silver_spread_threshold_test.py) -
-                                               // change this per instrument; light goes RED when live spread exceeds this - this is
-                                               // the ONLY thing the light checks (spread only, not a
-                                               // trade signal of any kind - this panel has no strategy)
+//--- v2.39: the manual-trading panel window (buttons, lot/count/delay
+//--- edit boxes, drag, CTrade order execution) is REMOVED ENTIRELY per
+//--- direct request - the recurring flashing/z-order fight was never
+//--- fully run down despite several real fixes along the way (v2.35's
+//--- g_editFocused bug, v2.38's per-tick reclaim), and the user is
+//--- switching to MT5's own native one-click trading panel for manual
+//--- execution instead. This file is now PURELY the signal-overlay
+//--- indicator-like EA it always also was underneath the panel -
+//--- Stochastic/Candle/Divergence/BB signals plus FVG/Liquidity zones,
+//--- none of which ever touched an order. #include <Trade/Trade.mqh>
+//--- and every trade-execution/panel-UI input, global, and function
+//--- this implies are gone with it - see the removed functions listed
+//--- in this version's commit message if you need to resurrect any of
+//--- it later (git history, not a backup kept in this file).
 
 input group "=== Shared internal settings (used by multiple signal overlays, no display of their own) ==="
 input int    InpMA21 = 21;    // used internally by Candle (arrow-nudge "too close to an MA" check) and
@@ -1611,15 +1579,9 @@ input int    InpLiqLineBars        = 8;
 input bool   InpLiqAlert           = false;
 input int    InpLiqCooldownBars    = 8;
 
-CTrade trade;
-int g_effectiveMagic = 0;   // v2.12: set once in OnInit - see InpMagic's own comment
-
-//--- NOT "TPNL_..." - PFX ("TPNL_") is used with ObjectsDeleteAll(0, PFX) in
-//--- RebuildPanel(), which matches by PREFIX. A "TPNL_MA_..." name would
-//--- have been swept by that call too, wiping every MA/VWAP line (including
-//--- the whole backfilled history) on every single new bar - exactly the
-//--- real bug that made them vanish entirely rather than just sit behind
-//--- the panel. Keep this prefix namespace-disjoint from PFX.
+//--- v2.39: namespace-disjoint from the old panel prefix PFX ("TPNL_",
+//--- removed along with the panel itself) - kept distinct in case any
+//--- upgrade path still checks for it.
 datetime g_lastBarTime = 0;
 //--- v2.08: the ONE source of truth for "which timeframe are the MA
 //--- handles and MA/VWAP lines currently built for" - owned only by
@@ -1723,441 +1685,7 @@ datetime g_liqLastBuyAt = 0, g_liqLastSellAt = 0;
 bool     g_liqHaveLow = false;  datetime g_liqLowTime = 0;  double g_liqLowPrice = 0.0;
 bool     g_liqHaveHigh = false; datetime g_liqHighTime = 0; double g_liqHighPrice = 0.0;
 
-string   PFX = "TPNL_";
-int      g_panelX = 40, g_panelY = 40;
-int      g_panelW = 250;
-int      g_panelH = 0;
-bool     g_armed = false;
-datetime g_armedUntil = 0;
-int      g_armSeconds = InpArmSeconds;   // live-adjustable from the panel's Arm delay row
 
-#define PANEL_ZORDER 1000   // keeps every panel widget drawn above freshly-created MA/VWAP
-                             // segments AND above MT5's own native trade arrows/levels, which
-                             // InpShowTradeLevels/InpHideTradeHistory handle separately (z-order alone
-                             // cannot reach those - they are not chart objects)
-#define TITLE_BAR_H  24      // drag is restricted to this strip at the top of the panel
-
-bool g_dragging = false;
-int  g_dragOffX = 0, g_dragOffY = 0;
-ulong g_dragStartMs = 0;   // safety timeout - see OnTimer
-ulong g_lastDragUpdateMs = 0;   // throttle - see the mouse-move handler
-
-struct Ctrl { string name; int dx; int dy; };
-Ctrl g_ctrls[];
-int  g_nCtrls = 0;
-
-//+------------------------------------------------------------------+
-//| True while the user is actively typing in any of this panel's     |
-//| edit boxes. Previously checked OBJPROP_SELECTED, which depends on |
-//| OBJPROP_SELECTABLE being true on the edit object - but SELECTABLE |
-//| has to be FALSE for an OBJ_EDIT to enter text-edit mode on click  |
-//| at all (true just selects/drags it instead). So this is now a     |
-//| plain flag, set true on CHARTEVENT_OBJECT_CLICK for one of these  |
-//| boxes and cleared on CHARTEVENT_OBJECT_ENDEDIT - both of which    |
-//| fire regardless of SELECTABLE.                                    |
-//| v2.23: moved up here (was declared AFTER OnInit(), which needs to  |
-//| reset it on reinit - MQL5 requires a global declared before any    |
-//| function that references it, textually).                           |
-//+------------------------------------------------------------------+
-bool g_editFocused = false;
-
-//+------------------------------------------------------------------+
-void AddCtrl(string name, int dx, int dy)
-  {
-   ArrayResize(g_ctrls, g_nCtrls + 1);
-   g_ctrls[g_nCtrls].name = name;
-   g_ctrls[g_nCtrls].dx = dx;
-   g_ctrls[g_nCtrls].dy = dy;
-   g_nCtrls++;
-  }
-
-//+------------------------------------------------------------------+
-void MkLabel(string name, int dx, int dy, string text, color c, int fontsize = 9)
-  {
-   string full = PFX + name;
-   ObjectCreate(0, full, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, full, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, full, OBJPROP_XDISTANCE, g_panelX + dx);
-   ObjectSetInteger(0, full, OBJPROP_YDISTANCE, g_panelY + dy);
-   ObjectSetString(0, full, OBJPROP_TEXT, text);
-   ObjectSetInteger(0, full, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, full, OBJPROP_FONTSIZE, fontsize);
-   ObjectSetString(0, full, OBJPROP_FONT, "Consolas");
-   ObjectSetInteger(0, full, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, full, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(0, full, OBJPROP_BACK, false);
-   ObjectSetInteger(0, full, OBJPROP_ZORDER, PANEL_ZORDER);
-   AddCtrl(full, dx, dy);
-  }
-
-//+------------------------------------------------------------------+
-void MkEdit(string name, int dx, int dy, int w, int h, string text)
-  {
-   string full = PFX + name;
-   ObjectCreate(0, full, OBJ_EDIT, 0, 0, 0);
-   ObjectSetInteger(0, full, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, full, OBJPROP_XDISTANCE, g_panelX + dx);
-   ObjectSetInteger(0, full, OBJPROP_YDISTANCE, g_panelY + dy);
-   ObjectSetInteger(0, full, OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, full, OBJPROP_YSIZE, h);
-   ObjectSetString(0, full, OBJPROP_TEXT, text);
-   ObjectSetInteger(0, full, OBJPROP_COLOR, clrBlack);
-   ObjectSetInteger(0, full, OBJPROP_BGCOLOR, clrWhite);
-   ObjectSetInteger(0, full, OBJPROP_ALIGN, ALIGN_CENTER);
-   ObjectSetInteger(0, full, OBJPROP_FONTSIZE, 10);
-   //--- SELECTABLE=true on an OBJ_EDIT makes a click SELECT the object
-   //--- (drag handles, for moving it on the chart) instead of putting it
-   //--- into text-edit mode - the real cause of "clicking does nothing,
-   //--- no text cursor" on every edit box on this panel. false here
-   //--- matches MkButton's own setting below and is what actually lets a
-   //--- click (or double-click) focus the box for typing.
-   ObjectSetInteger(0, full, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, full, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(0, full, OBJPROP_ZORDER, PANEL_ZORDER);
-   AddCtrl(full, dx, dy);
-  }
-
-//+------------------------------------------------------------------+
-void MkButton(string name, int dx, int dy, int w, int h, string text, color bg, color fg = clrWhite, int fontsize = 9)
-  {
-   string full = PFX + name;
-   ObjectCreate(0, full, OBJ_BUTTON, 0, 0, 0);
-   ObjectSetInteger(0, full, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, full, OBJPROP_XDISTANCE, g_panelX + dx);
-   ObjectSetInteger(0, full, OBJPROP_YDISTANCE, g_panelY + dy);
-   ObjectSetInteger(0, full, OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, full, OBJPROP_YSIZE, h);
-   ObjectSetString(0, full, OBJPROP_TEXT, text);
-   ObjectSetInteger(0, full, OBJPROP_BGCOLOR, bg);
-   ObjectSetInteger(0, full, OBJPROP_COLOR, fg);
-   ObjectSetInteger(0, full, OBJPROP_BORDER_COLOR, clrBlack);
-   ObjectSetInteger(0, full, OBJPROP_FONTSIZE, fontsize);
-   ObjectSetString(0, full, OBJPROP_FONT, "Consolas");
-   ObjectSetInteger(0, full, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, full, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(0, full, OBJPROP_STATE, false);
-   ObjectSetInteger(0, full, OBJPROP_ZORDER, PANEL_ZORDER);
-   AddCtrl(full, dx, dy);
-  }
-
-//+------------------------------------------------------------------+
-double GetLot()
-  {
-   double lot = StringToDouble(ObjectGetString(0, PFX + "lotEdit", OBJPROP_TEXT));
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   if(lot < minLot) lot = minLot;
-   //--- v2.26 FIX (Opus-flagged, unverified but a real divide-by-zero
-   //--- risk): this runs from BuildPanel(), called from OnInit - if the
-   //--- symbol's info isn't ready yet that early (possible right after
-   //--- terminal restart), SymbolInfoDouble could return 0 here, and
-   //--- dividing by it would crash the EA outright. Falls back to the
-   //--- broker's minimum lot step (0.01) rather than ever dividing by 0.
-   if(step <= 0.0) step = 0.01;
-   lot = MathRound(lot / step) * step;
-   return lot;
-  }
-
-//+------------------------------------------------------------------+
-int GetCount()
-  {
-   int n = (int)StringToInteger(ObjectGetString(0, PFX + "cntEdit", OBJPROP_TEXT));
-   if(n < 1) n = 1;
-   if(n > 50) n = 50;   // hard safety cap regardless of what's typed in - real money, no fat-finger "500"
-   return n;
-  }
-
-//+------------------------------------------------------------------+
-void UpdateExposureLabel()
-  {
-   double lot = GetLot();
-   int n = GetCount();
-   string txt = StringFormat("Exposure: %d x %s = %s lot", n, DoubleToString(lot, 2), DoubleToString(lot * n, 2));
-   ObjectSetString(0, PFX + "expLbl", OBJPROP_TEXT, txt);
-  }
-
-//+------------------------------------------------------------------+
-void AdjustLot(double delta)
-  {
-   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double lot = GetLot() + delta;
-   if(lot < minLot) lot = minLot;
-   if(lot > maxLot) lot = maxLot;
-   //--- v2.26 FIX: same zero-divide guard as GetLot() above.
-   if(step <= 0.0) step = 0.01;
-   lot = MathRound(lot / step) * step;
-   int digits = step >= 0.01 ? 2 : (step >= 0.001 ? 3 : 2);
-   ObjectSetString(0, PFX + "lotEdit", OBJPROP_TEXT, DoubleToString(lot, digits));
-   UpdateExposureLabel();
-  }
-
-//+------------------------------------------------------------------+
-void AdjustCount(int delta)
-  {
-   int n = GetCount() + delta;
-   if(n < 1) n = 1;
-   if(n > 50) n = 50;
-   ObjectSetString(0, PFX + "cntEdit", OBJPROP_TEXT, IntegerToString(n));
-   UpdateExposureLabel();
-  }
-
-//+------------------------------------------------------------------+
-void AdjustArmSeconds(int delta)
-  {
-   g_armSeconds += delta;
-   if(g_armSeconds < 1) g_armSeconds = 1;
-   if(g_armSeconds > 60) g_armSeconds = 60;
-   ObjectSetString(0, PFX + "delayEdit", OBJPROP_TEXT, IntegerToString(g_armSeconds));
-  }
-
-//+------------------------------------------------------------------+
-void SyncArmSecondsFromEdit()
-  {
-   int n = (int)StringToInteger(ObjectGetString(0, PFX + "delayEdit", OBJPROP_TEXT));
-   if(n < 1) n = 1;
-   if(n > 60) n = 60;
-   g_armSeconds = n;
-   ObjectSetString(0, PFX + "delayEdit", OBJPROP_TEXT, IntegerToString(g_armSeconds));
-  }
-
-//+------------------------------------------------------------------+
-void SetArmed(bool on)
-  {
-   g_armed = on;
-   g_armedUntil = on ? TimeCurrent() + g_armSeconds : 0;
-   string btn = PFX + "armBtn";
-   if(on)
-     {
-      ObjectSetString(0, btn, OBJPROP_TEXT, "ARMED - click PLACE now");
-      ObjectSetInteger(0, btn, OBJPROP_BGCOLOR, InpArmedColor);
-     }
-   else
-     {
-      ObjectSetString(0, btn, OBJPROP_TEXT, "ARM (required before PLACE)");
-      ObjectSetInteger(0, btn, OBJPROP_BGCOLOR, InpBgColor);
-     }
-   ObjectSetInteger(0, btn, OBJPROP_STATE, false);
-   ChartRedraw(0);
-  }
-
-//+------------------------------------------------------------------+
-void PlaceBatch(bool isBuy)
-  {
-   if(!g_armed)
-     {
-      Alert("TradePanel: click ARM first, then PLACE, within ", g_armSeconds, "s.");
-      return;
-     }
-   double lot = GetLot();
-   int n = GetCount();
-   trade.SetExpertMagicNumber(g_effectiveMagic);
-   int placed = 0, failed = 0;
-   for(int k = 0; k < n; k++)
-     {
-      bool ok = isBuy ? trade.Buy(lot, _Symbol, 0.0, 0.0, 0.0, "TradePanel")
-                      : trade.Sell(lot, _Symbol, 0.0, 0.0, 0.0, "TradePanel");
-      if(ok) placed++; else failed++;
-     }
-   PrintFormat("TradePanel: requested %d x %s %s lot - placed %d, failed %d.",
-               n, isBuy ? "BUY" : "SELL", DoubleToString(lot, 2), placed, failed);
-   SetArmed(false);
-  }
-
-//+------------------------------------------------------------------+
-bool PositionMatches(ulong ticket)
-  {
-   if(!PositionSelectByTicket(ticket)) return false;
-   if(PositionGetString(POSITION_SYMBOL) != _Symbol) return false;
-   if(PositionGetInteger(POSITION_MAGIC) != g_effectiveMagic) return false;
-   return true;
-  }
-
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Closes exactly the N oldest matched positions, in full - avoids the
-//| ambiguity of a percentage-based close with several equal-size trades
-//| from one PLACE xN batch, where "close 50%" can only ever approximate
-//| a whole number of positions anyway. Closes fewer than N without
-//| complaint if fewer than N are open.
-//+------------------------------------------------------------------+
-void ClosePositionCount(int n)
-  {
-   int total = PositionsTotal();
-   ulong  tickets[];
-   datetime opens[];
-   int m = 0;
-   ArrayResize(tickets, total);
-   ArrayResize(opens, total);
-   for(int i = 0; i < total; i++)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionMatches(ticket)) continue;
-      tickets[m] = ticket;
-      opens[m]   = (datetime)PositionGetInteger(POSITION_TIME);
-      m++;
-     }
-   if(m == 0) return;
-
-   // oldest-first (ascending open time) - simple insertion sort, m is tiny
-   for(int a = 1; a < m; a++)
-     {
-      ulong tt = tickets[a]; datetime to = opens[a];
-      int b = a - 1;
-      while(b >= 0 && opens[b] > to)
-        {
-         tickets[b + 1] = tickets[b]; opens[b + 1] = opens[b];
-         b--;
-        }
-      tickets[b + 1] = tt; opens[b + 1] = to;
-     }
-
-   int closeN = MathMin(n, m);
-   int closed = 0, failed = 0;
-   for(int i = 0; i < closeN; i++)
-      if(trade.PositionClose(tickets[i], (ulong)InpSlippage)) closed++; else failed++;
-   PrintFormat("TradePanel: close %d position(s) - %d closed, %d failed (%d were open).", n, closed, failed, m);
-  }
-
-//+------------------------------------------------------------------+
-void CloseAll()
-  {
-   int total = PositionsTotal();
-   int closed = 0, failed = 0;
-   for(int i = total - 1; i >= 0; i--)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionMatches(ticket)) continue;
-      if(trade.PositionClose(ticket, (ulong)InpSlippage)) closed++; else failed++;
-     }
-   PrintFormat("TradePanel: CLOSE ALL - %d closed, %d failed.", closed, failed);
-  }
-
-//+------------------------------------------------------------------+
-//| Applies a new SL (or TP) to every matched open position, keeping  |
-//| that position's OWN current TP (or SL) unchanged - trade.PositionModify()
-//| always sets both levels together, so the one not being edited here
-//| has to be re-read from the position and re-sent, or it would get
-//| wiped to 0 (no stop/target at all) rather than left alone.
-//+------------------------------------------------------------------+
-void SetSLForAll(double newSL)
-  {
-   int total = PositionsTotal();
-   int done = 0, failed = 0;
-   for(int i = total - 1; i >= 0; i--)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionMatches(ticket)) continue;
-      double tp = PositionGetDouble(POSITION_TP);
-      if(trade.PositionModify(ticket, newSL, tp)) done++; else failed++;
-     }
-   PrintFormat("TradePanel: Set SL=%s - %d position(s) updated, %d failed.",
-               DoubleToString(newSL, _Digits), done, failed);
-   if(failed > 0)
-      Alert("TradePanel: Set SL failed on ", failed, " position(s) - check Experts log (common cause: price too close to market, broker's stop level).");
-  }
-
-//+------------------------------------------------------------------+
-void SetTPForAll(double newTP)
-  {
-   int total = PositionsTotal();
-   int done = 0, failed = 0;
-   for(int i = total - 1; i >= 0; i--)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionMatches(ticket)) continue;
-      double sl = PositionGetDouble(POSITION_SL);
-      if(trade.PositionModify(ticket, sl, newTP)) done++; else failed++;
-     }
-   PrintFormat("TradePanel: Set TP=%s - %d position(s) updated, %d failed.",
-               DoubleToString(newTP, _Digits), done, failed);
-   if(failed > 0)
-      Alert("TradePanel: Set TP failed on ", failed, " position(s) - check Experts log (common cause: price too close to market, broker's stop level).");
-  }
-
-//+------------------------------------------------------------------+
-//| Fills the SL/TP edit fields from the first matched open position -|
-//| convenience so you can nudge an existing level instead of typing   |
-//| one from scratch. Multiple matched positions only fills from the   |
-//| first found; Set SL/Set TP still apply to ALL of them.             |
-//+------------------------------------------------------------------+
-void FillCurrentSLTP()
-  {
-   int total = PositionsTotal();
-   for(int i = 0; i < total; i++)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionMatches(ticket)) continue;
-      double sl = PositionGetDouble(POSITION_SL);
-      double tp = PositionGetDouble(POSITION_TP);
-      ObjectSetString(0, PFX + "slEdit", OBJPROP_TEXT, DoubleToString(sl, _Digits));
-      ObjectSetString(0, PFX + "tpEdit", OBJPROP_TEXT, DoubleToString(tp, _Digits));
-      return;
-     }
-   Alert("TradePanel: no open position to read SL/TP from.");
-  }
-
-//+------------------------------------------------------------------+
-void UpdateStats()
-  {
-   int n = 0; double vol = 0, pl = 0;
-   int total = PositionsTotal();
-   for(int i = 0; i < total; i++)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionMatches(ticket)) continue;
-      n++;
-      vol += PositionGetDouble(POSITION_VOLUME);
-      pl  += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-     }
-   color plc = pl >= 0 ? clrLimeGreen : clrOrangeRed;
-   string txt = StringFormat("Open: %d pos | %s lot | P/L %s", n, DoubleToString(vol, 2), DoubleToString(pl, 2));
-   ObjectSetString(0, PFX + "statLbl", OBJPROP_TEXT, txt);
-   ObjectSetInteger(0, PFX + "statLbl", OBJPROP_COLOR, plc);
-  }
-
-//+------------------------------------------------------------------+
-void UpdateMarketLabel()
-  {
-   long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   long vol1 = iVolume(_Symbol, PERIOD_CURRENT, 1);   // last CLOSED bar's tick volume -
-                                                       // bar 0 is still forming and understates it
-   ObjectSetString(0, PFX + "spreadLbl", OBJPROP_TEXT, StringFormat("Spread: %d points", (int)spreadPts));
-   ObjectSetString(0, PFX + "volLbl",    OBJPROP_TEXT, StringFormat("Volume (last bar): %d", (int)vol1));
-
-   bool ok = spreadPts <= InpMaxSpreadPoints;
-   ObjectSetInteger(0, PFX + "light", OBJPROP_COLOR, ok ? clrLimeGreen : clrRed);
-   ObjectSetString(0, PFX + "lightLbl", OBJPROP_TEXT,
-                    ok ? "OK TO TRADE (spread within limit)" : "SPREAD TOO WIDE - WAIT");
-   ObjectSetInteger(0, PFX + "lightLbl", OBJPROP_COLOR, ok ? clrLimeGreen : clrRed);
-  }
-
-//+------------------------------------------------------------------+
-//| Chart theme - identical convention to the other EAs in this     |
-//| project (InpBullCol/InpBearCol/InpChartBg, same ChartSetInteger  |
-//| set) so a chart running this panel looks consistent with one     |
-//| running HeadShoulders/Aurelius/etc.                               |
-//+------------------------------------------------------------------+
-void ApplyTheme()
-  {
-   //--- two independent chart properties, two independent inputs - the
-   //--- native open/SL/TP drag-lines and the closed-trade history arrows
-   //--- are NOT the same setting and shouldn't share one toggle.
-   ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
-   if(InpHideTradeHistory) ChartSetInteger(0, CHART_SHOW_TRADE_HISTORY, false);
-   if(!InpApplyTheme) return;
-   ChartSetInteger(0, CHART_COLOR_BACKGROUND,  InpChartBg);
-   ChartSetInteger(0, CHART_COLOR_FOREGROUND,  C'138,152,178');
-   ChartSetInteger(0, CHART_COLOR_GRID,        C'20,26,40');
-   ChartSetInteger(0, CHART_COLOR_CHART_UP,    InpBullCol);
-   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  InpBearCol);
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpBullCol);
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpBearCol);
-   ChartSetInteger(0, CHART_COLOR_CHART_LINE,  C'138,152,178');
-   ChartSetInteger(0, CHART_SHOW_GRID,   false);
-   ChartSetInteger(0, CHART_MODE,        CHART_CANDLES);
-  }
 
 
 
@@ -4048,296 +3576,29 @@ bool SyncMAOverlays()
 //| and its call from OnTick. Same reasoning Aurelius_EA.mq5's own    |
 //| comments already describe for its UpdateMALines/DrawPanel order.  |
 //+------------------------------------------------------------------+
-void BuildPanel()
-  {
-   //--- per direct request: shorter panel, smaller text - traded a bit of
-   //--- width (340->370) for a lot less height (rows tightened from
-   //--- 28-38px down to 20-26px, fonts from 10 down to 8-9) so nothing
-   //--- wraps or crowds at the smaller size.
-   g_panelW = 370;
-   int w = g_panelW;
-   ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, g_panelX);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, g_panelY);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, g_panelH);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_BGCOLOR, InpBgColor);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_COLOR, clrSilver);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_BACK, false);
-   //--- NOT selectable - native rectangle-label dragging is unreliable once
-   //--- buttons/edits sit on top of it (they eat the mouse-down before the
-   //--- background ever sees it). Dragging is instead handled manually in
-   //--- OnChartEvent via CHARTEVENT_MOUSE_MOVE, restricted to the title
-   //--- strip (TITLE_BAR_H) - see DragPanel/the mouse-move handler below.
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_SELECTED, false);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_ZORDER, PANEL_ZORDER);
-
-   //--- title strip, visually separated so the drag area is obvious
-   ObjectCreate(0, PFX + "titlebar", OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_XDISTANCE, g_panelX);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_YDISTANCE, g_panelY);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_YSIZE, TITLE_BAR_H);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_BGCOLOR, C'55,55,62');
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_COLOR, clrSilver);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_BACK, false);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, PFX + "titlebar", OBJPROP_ZORDER, PANEL_ZORDER);
-   AddCtrl(PFX + "titlebar", 0, 0);
-
-   //--- v2.14: show which timeframe this instance is running on, right in
-   //--- the title - per direct request, so two separate panels (one per
-   //--- timeframe, the agreed setup after this file's timeframe-switch
-   //--- troubles) are obviously distinguishable at a glance rather than
-   //--- both saying the same generic "TRADE PANEL"
-   string panelTf = StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7);
-   MkLabel("title", 10, 4, "TRADE PANEL [" + panelTf + "]  (drag here to move)", clrWhite, 9);
-
-   int y = TITLE_BAR_H + 10;
-   MkLabel("lotLbl", 12, y + 3, "Lot size:", InpTextColor, 9);
-   MkEdit("lotEdit", 130, y, 80, 20, "0.01");
-   MkButton("lotMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
-   MkButton("lotPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
-
-   y += 26;
-   MkLabel("cntLbl", 12, y + 3, "Trade count:", InpTextColor, 9);
-   MkEdit("cntEdit", 130, y, 80, 20, "3");
-   MkButton("cntMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
-   MkButton("cntPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
-
-   y += 24;
-   MkLabel("expLbl", 12, y, "Exposure: -", clrKhaki, 9);
-
-   y += 22;
-   MkLabel("delayLbl", 12, y + 3, "Arm delay (s):", InpTextColor, 9);
-   MkEdit("delayEdit", 150, y, 50, 20, IntegerToString(g_armSeconds));
-   MkButton("delayMinus", 216, y, 22, 20, "-", C'70,70,78', clrWhite, 10);
-   MkButton("delayPlus",  242, y, 22, 20, "+", C'70,70,78', clrWhite, 10);
-
-   y += 26;
-   MkButton("armBtn", 12, y, w - 24, 22, "ARM (required before PLACE)", InpBgColor, clrSilver, 9);
-
-   y += 28;
-   MkButton("buyBtn", 12, y, (w - 36) / 2, 26, "PLACE BUY xN", InpBuyColor, clrWhite, 9);
-   MkButton("sellBtn", 12 + (w - 36) / 2 + 12, y, (w - 36) / 2, 26, "PLACE SELL xN", InpSellColor, clrWhite, 9);
-
-   //--- closes the N OLDEST matched positions exactly - replaced the old
-   //--- 25/50/75% buttons entirely per direct request: with several
-   //--- equal-size trades from one PLACE xN batch, "close N%" can only
-   //--- ever approximate a whole number of positions anyway, so exact
-   //--- count is both simpler and more precise.
-   //--- v1.52: this used to create "closeNLbl" twice in a row (copy/paste
-   //--- slip) - the second call silently re-created/moved the same-named
-   //--- object and added a spurious extra 18px gap, which made the panel
-   //--- taller than intended and doubled this one label's effective drag
-   //--- sensitivity if it was ever dragged by (Opus audit finding).
-   y += 34;
-   MkLabel("closeNLbl", 12, y, "Close N oldest position(s):", InpTextColor, 9);
-   y += 18;
-     {
-      int ncw = (w - 24 - 8 * 2) / 9;   // 9 buttons, 2px gaps between them
-      for(int k = 1; k <= 9; k++)
-         MkButton("cN" + IntegerToString(k), 12 + (k - 1) * (ncw + 2), y, ncw, 22,
-                  IntegerToString(k), C'70,70,78', clrWhite, 9);
-     }
-
-   y += 30;
-   MkButton("cAll", 12, y, w - 24, 24, "CLOSE ALL OPEN TRADES", C'150,40,40', clrWhite, 9);
-
-   y += 32;
-   MkLabel("sltpLbl", 12, y, "Manual SL / TP for current position(s):", InpTextColor, 9);
-   y += 18;
-   MkLabel("slLbl", 12, y + 3, "SL:", InpTextColor, 9);
-   MkEdit("slEdit", 45, y, 100, 20, "0.00");
-   MkButton("setSL", 155, y, 65, 20, "Set SL", C'70,70,78', clrWhite, 9);
-   y += 24;
-   MkLabel("tpLbl", 12, y + 3, "TP:", InpTextColor, 9);
-   MkEdit("tpEdit", 45, y, 100, 20, "0.00");
-   MkButton("setTP", 155, y, 65, 20, "Set TP", C'70,70,78', clrWhite, 9);
-   y += 24;
-   MkButton("fillCur", 12, y, w - 24, 18, "Fill fields with current SL/TP", C'55,55,62', clrSilver, 8);
-
-   y += 28;
-   MkLabel("statLbl", 12, y, "Open: 0 pos | 0.00 lot | P/L 0.00", clrSilver, 9);
-
-   y += 20;
-   MkLabel("spreadLbl", 12, y, "Spread: -", clrKhaki, 9);
-   y += 16;
-   MkLabel("volLbl", 12, y, "Volume (last bar): -", clrKhaki, 9);
-
-   y += 22;
-   MkLabel("light", 12, y, "l", clrLimeGreen, 12);
-   ObjectSetString(0, PFX + "light", OBJPROP_FONT, "Wingdings");
-   MkLabel("lightLbl", 30, y + 1, "OK TO TRADE (spread within limit)", clrLimeGreen, 9);
-
-   g_panelH = y + 36;   // extra bottom margin so the last row never sits flush with the edge
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, g_panelH);
-
-   UpdateExposureLabel();
-   UpdateStats();
-   UpdateMarketLabel();
-  }
-
-//+------------------------------------------------------------------+
-//| Rebuilds the panel so it becomes the newest (therefore topmost-   |
-//| painted) set of objects again - called once per new bar, right    |
-//| after UpdateOverlayLines() draws that bar's MA/VWAP segments.      |
-//| Preserves the lot/count/delay fields and the panel's current      |
-//| dragged-to position; does NOT preserve an in-progress ARM (it      |
-//| auto-expires in a few seconds anyway, and resetting it on rebuild  |
-//| is a safety positive, not a problem).                              |
-//+------------------------------------------------------------------+
-void RebuildPanel()
-  {
-   string lotText = ObjectGetString(0, PFX + "lotEdit", OBJPROP_TEXT);
-   string cntText = ObjectGetString(0, PFX + "cntEdit", OBJPROP_TEXT);
-   string slText  = ObjectGetString(0, PFX + "slEdit", OBJPROP_TEXT);
-   string tpText  = ObjectGetString(0, PFX + "tpEdit", OBJPROP_TEXT);
-   ObjectsDeleteAll(0, PFX);
-   g_nCtrls = 0;
-   BuildPanel();
-   ObjectSetString(0, PFX + "lotEdit", OBJPROP_TEXT, lotText);
-   ObjectSetString(0, PFX + "cntEdit", OBJPROP_TEXT, cntText);
-   ObjectSetString(0, PFX + "slEdit", OBJPROP_TEXT, slText);
-   ObjectSetString(0, PFX + "tpEdit", OBJPROP_TEXT, tpText);
-   UpdateExposureLabel();
-   UpdateMarketLabel();
-   ChartRedraw(0);
-  }
-
-//+------------------------------------------------------------------+
 int OnInit()
   {
-   ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);   // required for the manual title-bar drag handler
-
-   //--- v2.13 (Opus-reviewed, a real bug found in the first v2.12 cut and
-   //--- fixed here): InpMagic==0 means "auto" - derive a magic number
-   //--- that's different per TIMEFRAME, so two separate panel instances
-   //--- (e.g. one attached to an M5 chart, one to an M15 chart, per
-   //--- direct request) never see or manage each other's trades. Any
-   //--- non-zero InpMagic is used exactly as typed, unchanged from every
-   //--- version before this one - a single-panel setup that already has
-   //--- the default (20261014) is completely unaffected.
-   //--- The v2.12 formula used (int)PERIOD_CURRENT, which is the MQL5
-   //--- SYMBOLIC constant for "the chart's own timeframe" when passed as
-   //--- a function argument (like iMA's own timeframe parameter) - its
-   //--- actual integer value is always 0, not the real timeframe. Every
-   //--- instance would have silently derived the SAME magic number
-   //--- regardless of chart timeframe, defeating the entire point and
-   //--- risking two "separate" panels on different timeframes managing
-   //--- each other's real trades without any warning. Fixed: _Period is
-   //--- the correct live value (confirmed elsewhere in this same file,
-   //--- e.g. the MA-sync code a few hundred lines below this one, which
-   //--- already relies on exactly this distinction). Also dropped the
-   //--- old symbol-length term - PositionMatches() already filters on
-   //--- POSITION_SYMBOL==_Symbol separately (see its own code), so it
-   //--- added collision risk between same-length symbol names without
-   //--- actually preventing anything; timeframe is the only axis this
-   //--- auto-derivation needs to separate.
-   //--- Known, acceptable limitation: if InpMagic is left at 0 AND you
-   //--- still switch a single chart's own timeframe at runtime (rather
-   //--- than running two separate fixed-timeframe panels, which is the
-   //--- intended usage here), the derived magic changes with it, and
-   //--- this panel's stats/CLOSE ALL/SL-TP controls will stop seeing
-   //--- whatever it already had open under the OLD derived magic (the
-   //--- actual broker-side positions and their real SL/TP are
-   //--- unaffected - only this panel's own ability to see/manage them).
-   g_effectiveMagic = (InpMagic != 0) ? InpMagic : (int)(20260000 + (int)_Period);
-
-   //--- hard proof of what settings this EA instance actually initialized
-   //--- with - check this line in the Experts log any time there's doubt
-   //--- about whether a changed input actually took effect, rather than
-   //--- trusting the Properties dialog alone
-   PrintFormat("TradePanel v2.0 OnInit: magic=%d (InpMagic=%d)",
-               g_effectiveMagic, InpMagic);
-
-   ApplyTheme();
    //--- v2.09: MT5 keeps global variables across a timeframe-switch
    //--- reinit, so force a full rebuild here explicitly rather than
    //--- trusting whatever g_maPeriod the previous instance left behind.
-   //--- SyncMAOverlays() creates the handles, resyncs the 5 chart-timeframe
-   //--- signal overlays, and backfills the MA/VWAP history right now if
-   //--- the new handles are already calculated (then it lands BEFORE the
-   //--- panel, so it can't bury it) - otherwise the backfill is left
-   //--- pending and OnTick/OnTimer finish it within ~2s, then rebuild the
-   //--- panel on top.
-   //--- v2.23 FIX (Opus-found): g_nCtrls/g_ctrls[] are never reset here -
-   //--- MT5 keeps global variables across a reinit (same reasoning as
-   //--- g_maPeriod just above), but BuildPanel() below calls AddCtrl()
-   //--- unconditionally, appending to whatever g_ctrls[] the PREVIOUS
-   //--- compile left behind rather than starting clean. Every single
-   //--- recompile this session has been accumulating stale/duplicate
-   //--- control entries - DragPanel()'s loop over g_nCtrls would then
-   //--- move each duplicated widget multiple times per drag, which is
-   //--- exactly the kind of thing that would make the panel feel broken
-   //--- (jumpy or inconsistent dragging) after a lot of testing/recompiling.
-   g_nCtrls = 0;
-   ArrayResize(g_ctrls, 0);
+   //--- SyncMAOverlays() creates the handles, resyncs the 6 chart-timeframe
+   //--- signal overlays, and backfills history right now if the new
+   //--- handles are already calculated - otherwise the backfill is left
+   //--- pending and OnTick/OnTimer finish it within ~2s.
    //--- v2.30 FIX (Opus-found, real bug): g_slFifo/g_tpFifo are EA
-   //--- globals too, so they survive a reinit exactly like g_ctrls[]
-   //--- above (same v2.23 reasoning) - without this, a reinit after
-   //--- the arrays already held e.g. InpMaxSlLines entries meant the
-   //--- NEXT fresh backfill's SL/TP draws kept evicting lines that were
-   //--- about to be wiped anyway by each overlay's own ObjectsDeleteAll,
-   //--- and could leave the pool referencing names from before the
-   //--- reinit that no longer exist - under-filling the visible count
-   //--- (fewer than InpMaxSlLines lines shown) until enough new signals
-   //--- cycle the stale entries out.
+   //--- globals too, so they survive a reinit - without this, a reinit
+   //--- after the arrays already held e.g. InpMaxSlLines entries meant
+   //--- the NEXT fresh backfill's SL/TP draws kept evicting lines that
+   //--- were about to be wiped anyway by each overlay's own
+   //--- ObjectsDeleteAll, and could leave the pool referencing names
+   //--- from before the reinit that no longer exist.
    ArrayResize(g_slFifo, 0);
    ArrayResize(g_tpFifo, 0);
    ArrayResize(g_slFifoTimes, 0);
    ArrayResize(g_tpFifoTimes, 0);
-   //--- v2.23 FIX (Opus-found): same reasoning - if an edit box's
-   //--- ENDEDIT event never arrived (EA removed/crashed mid-typing),
-   //--- this could stay stuck true across a reinit, silently skipping
-   //--- every per-bar panel rebuild from then on (see AnyEditFocused()'s
-   //--- own use further down) - as if the panel had frozen.
-   g_editFocused = false;
    g_maPeriod = PERIOD_CURRENT;
 
-   //--- v2.26 FIX (Opus-found, per report on "panels missing/slow after
-   //--- MT5 restart"): BuildPanel() used to run LAST here, after
-   //--- SyncMAOverlays()+ResyncRejectSignalsM15() - both of which, on a
-   //--- fresh attach with every overlay on by default, make roughly
-   //--- 7,000-9,000 synchronous chart calls (ObjectFind/ObjectCreate/
-   //--- ObjectSet, each of which waits for every command already queued
-   //--- on that chart to finish first - worst exactly at terminal
-   //--- startup, when every chart's queue is also competing with
-   //--- history loading and rendering). So the panel - the one thing a
-   //--- user actually needs to see and use right away - didn't exist on
-   //--- screen until ALL of that finished, which is exactly the reported
-   //--- symptom: "missing" (still mid-backfill when checked) or "taking
-   //--- forever to load" (same thing, just checked later). Building the
-   //--- panel FIRST and redrawing immediately means it's on screen
-   //--- before any of that heavy work even starts; it's then rebuilt a
-   //--- second time right after, since MT5 paints in object-CREATION
-   //--- order (not OBJPROP_ZORDER - see BuildPanel()'s own comment) and
-   //--- the overlay/MA objects SyncMAOverlays() is about to create would
-   //--- otherwise paint on top of a panel built before them.
-   BuildPanel();
-   ChartRedraw(0);
    SyncMAOverlays();
-   //--- v2.30 FIX (Opus-found, real regression since v2.26): this
-   //--- second BuildPanel() call never reset g_nCtrls/g_ctrls[] first -
-   //--- every control got registered a SECOND time in g_ctrls[], so
-   //--- DragPanel() (which moves each entry in g_ctrls[] by the drag
-   //--- delta) moved every widget TWICE as far as the panel background
-   //--- on the very next drag, visibly splitting the panel apart until
-   //--- the next per-bar RebuildPanel() call quietly fixed it again.
-   //--- Same reset the FIRST BuildPanel() call above already gets
-   //--- (see the v2.23 FIX comment higher up) - just needed here too,
-   //--- since this call creates/re-registers the exact same widgets a
-   //--- second time, not new ones.
-   g_nCtrls = 0;
-   ArrayResize(g_ctrls, 0);
-   BuildPanel();
 
    g_lastBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
    EventSetTimer(2);   // was 1s - halving the poll frequency on top of no
@@ -4350,21 +3611,16 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   ObjectsDeleteAll(0, PFX);
-   //--- MA/VWAP/EMA-cross overlays removed entirely - prefixes hardcoded (not live features)
-   //--- purely so anyone upgrading from a version that still drew them gets them cleared out
-   //--- on next removal/reattach instead of stranded forever, same convention as TPRJX_/
-   //--- TPRJXM_ below.
+   //--- MA/VWAP/EMA-cross overlays and the manual-trading panel were all
+   //--- removed entirely across this file's history - prefixes hardcoded
+   //--- (not live features) purely so anyone upgrading from a version
+   //--- that still drew/built them gets the leftover objects cleared out
+   //--- on next removal/reattach instead of stranded forever.
+   ObjectsDeleteAll(0, "TPNL_");
    ObjectsDeleteAll(0, "TPMA_");
    ObjectsDeleteAll(0, "TPEMX_");
    ObjectsDeleteAll(0, g_sig);
    ObjectsDeleteAll(0, g_cdl);
-   //--- v2.27: Rejection/Rejection M15 overlays removed entirely (per
-   //--- direct request) - their globals (g_rjx/g_rjxm) are gone too, but
-   //--- the literal prefixes are kept here (hardcoded, not a live
-   //--- feature) purely so anyone upgrading from a version that still
-   //--- drew TPRJX_/TPRJXM_ objects gets them cleared out on next
-   //--- removal/reattach instead of stranded forever.
    ObjectsDeleteAll(0, "TPRJX_");
    ObjectsDeleteAll(0, "TPRJXM_");
    ObjectsDeleteAll(0, g_div);
@@ -4376,32 +3632,24 @@ void OnDeinit(const int reason)
    g_maPeriod = PERIOD_CURRENT;      // globals survive a reinit - "nothing built" now
   }
 
-bool AnyEditFocused()
-  {
-   return g_editFocused;
-  }
-
 //+------------------------------------------------------------------+
-//| v2.09: SyncMAOverlays() + put the panel back on top, but ONLY when |
-//| SyncMAOverlays() actually drew something. A no-op otherwise, so it |
-//| is safe on every tick, every timer tick and every chart event.     |
+//| v2.39: used to also put the panel back on top after a timeframe    |
+//| switch - the panel is gone now, so this is just the sync call.     |
 //+------------------------------------------------------------------+
 void MaintainOverlaySync()
   {
-   if(!SyncMAOverlays()) return;
-   if(!g_dragging && !AnyEditFocused()) RebuildPanel();   // RebuildPanel redraws the chart itself
-   else ChartRedraw(0);
+   SyncMAOverlays();
   }
 
 //+------------------------------------------------------------------+
-//| New-bar work (overlay lines, stoch signals/alerts, cross-alert,     |
-//| panel rebuild) - factored out so BOTH OnTick (driven by real price  |
-//| ticks) and OnTimer (every 2s regardless of ticks) can call it. A    |
-//| quiet/illiquid market can go well over a second between ticks, so   |
-//| relying on OnTick alone means a signal that closed mid-quiet-spell  |
-//| would sit undrawn until the NEXT trade prints somewhere - the timer |
-//| guarantees it appears within ~2s of the bar actually closing        |
-//| instead of waiting on a tick (or a manual chart refresh/scroll).    |
+//| New-bar work (overlay lines, signal draws/alerts) - factored out   |
+//| so BOTH OnTick (driven by real price ticks) and OnTimer (every 2s  |
+//| regardless of ticks) can call it. A quiet/illiquid market can go   |
+//| well over a second between ticks, so relying on OnTick alone means |
+//| a signal that closed mid-quiet-spell would sit undrawn until the   |
+//| NEXT trade prints somewhere - the timer guarantees it appears      |
+//| within ~2s of the bar actually closing instead of waiting on a     |
+//| tick (or a manual chart refresh/scroll).                           |
 //| Idempotent: g_lastBarTime guards it, so whichever of OnTick/OnTimer |
 //| notices the new bar first runs it, and the other is a no-op.        |
 //+------------------------------------------------------------------+
@@ -4422,48 +3670,27 @@ void CheckNewBar()
    if(t0 == 0) return;
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
-   //--- v2.14: compute + draw every overlay FIRST, with no purge scans in
-   //--- between - each overlay used to be followed by its own full-chart
-   //--- purge scan, so a Rejection/Continuation arrow (computed late in
-   //--- this list) waited behind ~5 of those scans before it was even
-   //--- created, and behind all 7 before the ChartRedraw below showed it.
-   //--- Old-object housekeeping now runs at the END of this function,
-   //--- after the redraw - see HousekeepOldObjects().
    if(InpShowStochSignals)     ComputeStochSignals(false);
    if(InpShowCandleSignals)    ComputeCandleSignals(false);
    if(InpShowDivSignals)       ComputeDivSignals(false);
    if(InpShowBBSignals)        ComputeBBSignals(false);
    if(InpShowFVG)              ComputeFvgSignals(false);
    if(InpShowLiquidity)        ComputeLiquiditySignals(false);
-   //--- skip the rebuild while actively dragging - recreating the title
-   //--- bar object out from under an in-progress drag is asking for
-   //--- trouble. The next new bar after the drag ends reclaims paint
-   //--- order instead; one bar's delay is harmless.
-   //--- SAME reasoning for an in-progress edit: ObjectsDeleteAll inside
-   //--- RebuildPanel() destroys the slEdit/tpEdit/etc. object the user
-   //--- is mid-keystroke in, which silently drops keyboard focus (the
-   //--- freshly recreated object of the same name does NOT inherit it).
-   //--- AnyEditFocused() is tracked via g_editFocused, set/cleared on
-   //--- CHARTEVENT_OBJECT_CLICK/ENDEDIT - see its own header for why
-   //--- OBJPROP_SELECTED isn't used for this anymore.
-   if(!g_dragging && !AnyEditFocused()) RebuildPanel();
    //--- a signal drawn here (arrow/dot/level) is a NEW chart object - MT5
    //--- normally paints that on its own next natural cycle, but that cycle
    //--- is itself tick-driven, so in a quiet market force one redraw right
    //--- here to make a just-printed signal actually visible immediately
    //--- rather than only once the next tick (possibly seconds/minutes
    //--- later) happens to arrive. One redraw per NEW BAR only (not per
-   //--- tick, not every 2s) - cheap, not the blanket per-timer redraw
-   //--- that was deliberately removed below for performance.
+   //--- tick, not every 2s) - cheap, not a blanket per-timer redraw.
    ChartRedraw(0);
    //--- v2.14: housekeeping LAST, after this bar's arrows are already on
    //--- screen, and at most once per hour of bar time (every 12th bar on
    //--- M5, every 4th on M15, every bar on H1 and above). Effect of the
-   //--- throttle on what you see: none - between runs, at most ~11 extra
-   //--- MA/VWAP segments per line linger ~8.7 days back on M5 (off the
-   //--- left edge) and signal markers can outlive the InpSigDrawDays cutoff
-   //--- by under an hour. "t0 < g_lastHousekeepBar" catches a timeframe
-   //--- switch to a bigger timeframe, whose bar time can be earlier.
+   //--- throttle on what you see: none - signal markers can outlive the
+   //--- InpSigDrawDays cutoff by under an hour. "t0 < g_lastHousekeepBar"
+   //--- catches a timeframe switch to a bigger timeframe, whose bar time
+   //--- can be earlier.
    if(g_lastHousekeepBar == 0 || t0 < g_lastHousekeepBar || t0 - g_lastHousekeepBar >= 3600)
      {
       g_lastHousekeepBar = t0;
@@ -4474,293 +3701,39 @@ void CheckNewBar()
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   //--- CHART_SHOW_TRADE_LEVELS is a per-CHART property, not per-EA - every
-   //--- strategy EA in this project (Aurelius/Vanguard/Meridian/etc.) sets
-   //--- it FALSE on its own init, by design, for when it runs alone on a
-   //--- chart. When TradePanel shares a chart with one of them, whichever
-   //--- EA's OnTick/OnInit last touches this property wins, so a one-time
-   //--- ChartSetInteger in ApplyTheme() can get silently overwritten back
-   //--- to false by the other EA's own tick. Re-asserting it true every
-   //--- tick here keeps TradePanel's chart winning that fight regardless
-   //--- of EA load order, without having to touch the other EAs (which
-   //--- still default it off correctly for their own solo-chart case).
-   //--- v2.14: only WRITE it when it actually differs. Writing it
-   //--- unconditionally on every tick was itself a chart-property change
-   //--- per tick - which (see the v2.09 notes) MT5 answers with a
-   //--- CHARTEVENT_CHART_CHANGE event each time, i.e. a stream of
-   //--- pointless events/refreshes on a chart holding ~7,000 objects. Still
-   //--- re-asserted within one tick if anything else flips it.
-   if((bool)ChartGetInteger(0, CHART_SHOW_TRADE_LEVELS) != InpShowTradeLevels)
-      ChartSetInteger(0, CHART_SHOW_TRADE_LEVELS, InpShowTradeLevels);
    MaintainOverlaySync();   // v2.09: before CheckNewBar, so a new bar is never drawn with old-timeframe handles
    CheckNewBar();
-   //--- v2.38: belt-and-suspenders - still-unresolved panel z-order report
-   //--- (arrows rendering through the panel) persisted even after the
-   //--- g_editFocused fix (v2.35), with no further code bug found despite
-   //--- two passes over every call path that can create an arrow. Rather
-   //--- than keep guessing at a cause, reclaim paint order every TICK here
-   //--- (not just once per new bar, which is all CheckNewBar() does) - the
-   //--- panel is only ~15-30 small objects, cheap to rebuild this often,
-   //--- and this closes any remaining timing gap regardless of where it
-   //--- actually comes from.
-   if(!g_dragging && !AnyEditFocused()) RebuildPanel();
   }
 
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   UpdateStats();
-   UpdateMarketLabel();
-   if(g_armed && TimeCurrent() >= g_armedUntil)
-      SetArmed(false);
-   //--- safety net: if the mouse button was released outside the chart
-   //--- entirely, no further CHARTEVENT_MOUSE_MOVE fires here and the drag
-   //--- (and the CHART_MOUSE_SCROLL=false lock) could otherwise get stuck.
-   if(g_dragging && GetTickCount64() - g_dragStartMs > 5000)
-     {
-      g_dragging = false;
-      ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
-     }
    //--- v2.09: the guaranteed backstop for a timeframe switch - whatever
    //--- the terminal does or doesn't send (reinit, CHART_CHANGE, ticks),
-   //--- this checks every 2s and fixes the MAs if they don't match the
-   //--- chart. A no-op (one comparison) whenever they already match.
+   //--- this checks every 2s and fixes the overlays if they don't match
+   //--- the chart. A no-op (one comparison) whenever they already match.
    MaintainOverlaySync();
    //--- catches a bar close during a quiet spell between ticks - see
    //--- CheckNewBar()'s own header. g_lastBarTime guards it so this is a
    //--- cheap no-op on every 2s tick except the one right after a new bar.
    CheckNewBar();
-   //--- NOT calling ChartRedraw() unconditionally here otherwise - this ran
-   //--- every single second/2s, forcing MT5 to repaint the whole chart
-   //--- (including every background MA/VWAP object) regardless of whether
-   //--- anything actually changed. ObjectSetString/ObjectSetInteger changes
-   //--- still show up on the terminal's own natural paint cycle (driven by
-   //--- ticks); an explicit redraw beyond CheckNewBar()'s own is only
-   //--- needed right after a batch change the user is actively looking at -
-   //--- RebuildPanel(), SetArmed(), and the button click handlers already
-   //--- call it where it matters.
   }
 
 //+------------------------------------------------------------------+
-void DragPanel(int newX, int newY)
-  {
-   //--- clamp so the title bar always stays reachable - keeps at least
-   //--- TITLE_BAR_H of vertical room and 60px of horizontal room on screen,
-   //--- so a drag can never strand the panel somewhere it can't be dragged
-   //--- back from.
-   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   if(newX < 0) newX = 0;
-   if(newY < 0) newY = 0;
-   if(chartW > 0 && newX > chartW - 60) newX = chartW - 60;
-   if(chartH > 0 && newY > chartH - TITLE_BAR_H) newY = chartH - TITLE_BAR_H;
-
-   int dx = newX - g_panelX;
-   int dy = newY - g_panelY;
-   g_panelX = newX;
-   g_panelY = newY;
-   long bgX = ObjectGetInteger(0, PFX + "bg", OBJPROP_XDISTANCE);
-   long bgY = ObjectGetInteger(0, PFX + "bg", OBJPROP_YDISTANCE);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, bgX + dx);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, bgY + dy);
-   for(int i = 0; i < g_nCtrls; i++)
-     {
-      long curX = ObjectGetInteger(0, g_ctrls[i].name, OBJPROP_XDISTANCE);
-      long curY = ObjectGetInteger(0, g_ctrls[i].name, OBJPROP_YDISTANCE);
-      ObjectSetInteger(0, g_ctrls[i].name, OBJPROP_XDISTANCE, curX + dx);
-      ObjectSetInteger(0, g_ctrls[i].name, OBJPROP_YDISTANCE, curY + dy);
-     }
-   ChartRedraw(0);
-  }
-
-//+------------------------------------------------------------------+
-bool PointOverTitleBar(int mx, int my)
-  {
-   return(mx >= g_panelX && mx <= g_panelX + g_panelW && my >= g_panelY && my <= g_panelY + TITLE_BAR_H);
-  }
-
+//| v2.39: the manual-trading panel (and the drag/click handlers below |
+//| that only existed to serve it) is gone - the only chart event this |
+//| indicator-like EA still needs to react to is a timeframe switch.   |
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
   {
-   if(id == CHARTEVENT_MOUSE_MOVE)
-     {
-      int mx = (int)lparam;
-      int my = (int)dparam;
-      int flags = (int)StringToInteger(sparam);
-      bool leftDown = (flags & 1) != 0;
-      if(!g_dragging && leftDown && PointOverTitleBar(mx, my))
-        {
-         g_dragging = true;
-         g_dragOffX = mx - g_panelX;
-         g_dragOffY = my - g_panelY;
-         //--- MT5's native left-drag-to-scroll is still live underneath this
-         //--- handler and would pan the chart at the same time the panel
-         //--- moves - suspend it for the duration of the drag, restore on
-         //--- release below.
-         ChartSetInteger(0, CHART_MOUSE_SCROLL, false);
-         g_dragStartMs = GetTickCount64();
-        }
-      if(g_dragging)
-        {
-         if(!leftDown)
-           {
-            g_dragging = false;
-            ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
-            //--- reclaim top paint order THE MOMENT the drag ends, rather than
-            //--- waiting for the next new bar - otherwise, on a slower
-            //--- timeframe, the panel can sit buried under any MA/VWAP segment
-            //--- drawn in the gap (visibly cutting through it) for however long
-            //--- it takes the next bar to arrive.
-            RebuildPanel();
-           }
-         else
-           {
-            //--- throttled: CHARTEVENT_MOUSE_MOVE fires dozens of times a
-            //--- second while dragging, and this used to reposition ~30
-            //--- objects and force a full ChartRedraw() on EVERY one of them -
-            //--- that was the real cause of the chart hanging during a drag.
-            //--- ~30 updates/sec is still visually smooth and far cheaper.
-            ulong now = GetTickCount64();
-            if(now - g_lastDragUpdateMs >= 33)
-              {
-               g_lastDragUpdateMs = now;
-               DragPanel(mx - g_dragOffX, my - g_dragOffY);
-              }
-           }
-        }
-      return;
-     }
-   if(id == CHARTEVENT_OBJECT_ENDEDIT)
-     {
-      if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit" || sparam == PFX + "delayEdit"
-         || sparam == PFX + "slEdit" || sparam == PFX + "tpEdit")
-         g_editFocused = false;
-      return;
-     }
-   //--- v2.34 FIX (real root cause of "arrows project through the panel",
-   //--- confirmed present on the actual last version given, not a stale
-   //--- build): CHARTEVENT_OBJECT_ENDEDIT only fires when Enter is pressed
-   //--- IN the edit box - MT5 has no separate "focus lost" event for edit
-   //--- objects. Click into lotEdit/slEdit/etc, then click a BUTTON or the
-   //--- blank chart instead of pressing Enter (completely normal manual-
-   //--- trading usage), and the old code never cleared g_editFocused -
-   //--- RebuildPanel()'s paint-order reclaim (gated on !AnyEditFocused())
-   //--- then stayed suppressed PERMANENTLY, not "one bar's delay" as the
-   //--- original comment assumed, so every signal arrow drawn from then
-   //--- on kept painting over the panel with nothing ever reclaiming it.
-   //--- CHARTEVENT_CLICK (blank chart, no object under the cursor) needs
-   //--- its own clear here since it never reaches CHARTEVENT_OBJECT_CLICK
-   //--- below.
-   if(id == CHARTEVENT_CLICK)
-     {
-      g_editFocused = false;
-      return;
-     }
    //--- v2.09: CHARTEVENT_CHART_CHANGE fires for FAR more than a timeframe
    //--- switch - every scroll, zoom, resize, autoscroll shift on a new bar,
    //--- price-scale refit as ticks move the range, and programmatic chart
-   //--- property changes. v2.05/v2.06 did a full panel wipe + rebuild (and,
-   //--- outside the 2s debounce window, a full MA/VWAP/signal wipe + 2500-bar
-   //--- redraw) from inside this handler - the "everything keeps flashing"
-   //--- bug. Now it only asks SyncMAOverlays() whether anything ACTUALLY
-   //--- changed, which is a single comparison and draws nothing unless the
-   //--- timeframe really changed (or a pending post-switch backfill is now
-   //--- ready). OnTimer makes the same check every 2s regardless, so this
-   //--- is just the fast path - correctness doesn't depend on this event.
+   //--- property changes. Only asks SyncMAOverlays() whether anything
+   //--- ACTUALLY changed, which is a single comparison and draws nothing
+   //--- unless the timeframe really changed. OnTimer makes the same check
+   //--- every 2s regardless, so this is just the fast path - correctness
+   //--- doesn't depend on this event.
    if(id == CHARTEVENT_CHART_CHANGE)
-     {
       MaintainOverlaySync();
-      return;
-     }
-   if(id != CHARTEVENT_OBJECT_CLICK) return;
-
-   //--- v2.34 FIX: clicking any OTHER panel object (a button, the title
-   //--- bar) while an edit box was previously focused - without pressing
-   //--- Enter in it first - is the other half of the fix above. Clear
-   //--- unconditionally here, then the check right below re-sets it true
-   //--- only if THIS click actually landed on an edit box.
-   g_editFocused = false;
-   if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit" || sparam == PFX + "delayEdit"
-      || sparam == PFX + "slEdit" || sparam == PFX + "tpEdit")
-      g_editFocused = true;
-
-   //--- OnTimer no longer force-redraws every second (that was the real
-   //--- cause of the general lag, including clicks feeling slow - the chart
-   //--- was busy redrawing ~1300 background objects every single second
-   //--- regardless of whether anything changed). Every button/edit handler
-   //--- below still needs its own immediate visible update though, so
-   //--- redraw once here, right after whichever one of them ran.
-   if(sparam == PFX + "lotEdit" || sparam == PFX + "cntEdit")
-     {
-      UpdateExposureLabel();
-      ChartRedraw(0);
-      return;
-     }
-   if(sparam == PFX + "delayEdit") { SyncArmSecondsFromEdit(); ChartRedraw(0); return; }
-   //--- v2.23 FIX (Opus-found): these 6 stepper buttons never reset
-   //--- OBJPROP_STATE after handling the click, unlike every other
-   //--- button on the panel - the action DID run each time, but the
-   //--- button stayed drawn in its pressed state until the NEXT click
-   //--- popped it back up, which reads as "the +/- buttons aren't
-   //--- working" even though they were.
-   if(sparam == PFX + "lotMinus") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustLot(-SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
-   if(sparam == PFX + "lotPlus")  { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustLot(+SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP)); ChartRedraw(0); return; }
-   if(sparam == PFX + "cntMinus") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustCount(-1); ChartRedraw(0); return; }
-   if(sparam == PFX + "cntPlus")  { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustCount(+1); ChartRedraw(0); return; }
-   if(sparam == PFX + "delayMinus") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustArmSeconds(-1); ChartRedraw(0); return; }
-   if(sparam == PFX + "delayPlus")  { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); AdjustArmSeconds(+1); ChartRedraw(0); return; }
-   if(sparam == PFX + "armBtn")
-     {
-      SetArmed(!g_armed);
-      return;
-     }
-   if(sparam == PFX + "buyBtn")
-     {
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-      PlaceBatch(true);
-      UpdateStats();
-      ChartRedraw(0);
-      return;
-     }
-   if(sparam == PFX + "sellBtn")
-     {
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-      PlaceBatch(false);
-      UpdateStats();
-      ChartRedraw(0);
-      return;
-     }
-   for(int k = 1; k <= 9; k++)
-      if(sparam == PFX + "cN" + IntegerToString(k))
-        {
-         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-         ClosePositionCount(k);
-         UpdateStats();
-         ChartRedraw(0);
-         return;
-        }
-   if(sparam == PFX + "cAll") { ObjectSetInteger(0, sparam, OBJPROP_STATE, false); CloseAll(); UpdateStats(); ChartRedraw(0); return; }
-   if(sparam == PFX + "slEdit" || sparam == PFX + "tpEdit") return;
-   if(sparam == PFX + "setSL")
-     {
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-      SetSLForAll(StringToDouble(ObjectGetString(0, PFX + "slEdit", OBJPROP_TEXT)));
-      ChartRedraw(0);
-      return;
-     }
-   if(sparam == PFX + "setTP")
-     {
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-      SetTPForAll(StringToDouble(ObjectGetString(0, PFX + "tpEdit", OBJPROP_TEXT)));
-      ChartRedraw(0);
-      return;
-     }
-   if(sparam == PFX + "fillCur")
-     {
-      ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-      FillCurrentSLTP();
-      ChartRedraw(0);
-      return;
-     }
   }
-//+------------------------------------------------------------------+
