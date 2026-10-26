@@ -60,9 +60,18 @@
 //|   doubles as the Line-chart-type's own line color) - never touched |
 //|   until now, which is exactly why the real candles' wicks kept      |
 //|   showing through the HA candles the whole time.                    |
+//|  1.03 - FIX (real bug, per report - "making price pause"): OnCalculate|
+//|   called HideRealCandles() on every tick (several times a second on  |
+//|   a fast market), on top of the 500ms timer already doing the same    |
+//|   job - each call forces a ChartRedraw(0) whenever another EA on the  |
+//|   chart (e.g. TradePanel_EA's ApplyTheme(), which sets these exact      |
+//|   same 4 chart properties) had touched the same properties. Redrawing   |
+//|   at tick frequency on a chart also carrying another EA's thousands of   |
+//|   objects is a real, visible stutter - removed the per-tick copy, kept    |
+//|   only the 500ms timer's.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 5
 #property indicator_plots   1
@@ -186,11 +195,21 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                  const double &open[], const double &high[], const double &low[], const double &close[],
                  const long &tick_volume[], const long &volume[], const int &spread[])
   {
-   //--- re-assert the hide every recalc too - another indicator/EA
-   //--- changing chart colors after this one's OnInit (load order isn't
-   //--- guaranteed) would otherwise silently bring the real candles back.
-   HideRealCandles();
-
+   //--- v1.03 FIX (real bug, per report - "making price pause"): this used
+   //--- to call HideRealCandles() here too, on EVERY TICK, not just from
+   //--- the 500ms timer. OnCalculate fires on every tick, which on a fast
+   //--- market can be several times a SECOND - each call re-checks 5 chart
+   //--- properties and, whenever anything else on the chart touched them
+   //--- (e.g. another EA on the same chart re-asserting ITS OWN theme
+   //--- colors - TradePanel_EA's ApplyTheme() sets these exact same 4
+   //--- properties), forces a synchronous ChartRedraw(0). On a chart also
+   //--- carrying thousands of another EA's objects, a ChartRedraw() at
+   //--- tick frequency is a real, visible stutter - this project's own
+   //--- TradePanel_EA has hit and fixed the identical mistake before (see
+   //--- its v2.09/v2.14 notes on per-tick force-redraws). The 500ms timer
+   //--- (OnTimer) already re-asserts the hide twice a second, which is
+   //--- more than fast enough for a cosmetic color property - removed the
+   //--- redundant, far more frequent copy here.
    int start = (prev_calculated > 1) ? prev_calculated - 1 : 0;
    for(int i = start; i < rates_total; i++)
      {
