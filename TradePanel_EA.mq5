@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.41"
+#property version   "2.42"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -2039,9 +2039,22 @@ bool IsAtrElevated(const double &atr[], const int i, const int avgPeriod, const 
   {
    if(minRatio <= 0.0) return true;   // filter disabled
    if(atr[i] == SIG_NA || atr[i] <= 0.0) return false;
-   int lo = (int)MathMax(0, i - avgPeriod + 1);
+   //--- v2.42 FIX (real design flaw, per direct report - "raised to 1.5,
+   //--- looks the same"): the baseline average used to run [i-avgPeriod+1, i],
+   //--- INCLUDING the current bar itself - but atr[] is Wilder-smoothed
+   //--- ATR(14), already a slow-moving recursive average, so a 50-bar
+   //--- window that includes the very bars responsible for the current
+   //--- elevated reading barely differs from that reading. The ratio was
+   //--- structurally dampened and could essentially never reach 1.5x
+   //--- except in extreme spikes - not a threshold problem, a comparison-
+   //--- window problem. Fixed: baseline now excludes the current bar
+   //--- entirely (strictly PRIOR bars only), so "current" is genuinely
+   //--- compared against "before this started", not against itself.
+   int hi = i - 1;
+   int lo = (int)MathMax(0, hi - avgPeriod + 1);
+   if(hi < lo) return true;   // no prior history yet - don't block early in the window
    int cnt = 0; double sum = 0.0;
-   for(int j = lo; j <= i; j++)
+   for(int j = lo; j <= hi; j++)
      {
       if(atr[j] == SIG_NA) continue;
       sum += atr[j]; cnt++;
