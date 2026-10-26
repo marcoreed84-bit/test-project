@@ -45,7 +45,22 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.23"
+#property version   "1.24"
+//--- 1.24: Per direct request - "give me them all separate, each
+//--- previous day's high and low": new InpShowRecentHLPerDay (default
+//--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
+//--- completed day, each individually labeled ("D-1 Hi/Lo", "D-2
+//--- Hi/Lo", ...). Replaces the old single combined rolling high/low
+//--- (InpShowRecentHL) as the default view, per a direct follow-up
+//--- ("you can replace the existing line otherwise we should have
+//--- duplicate lines") - InpShowRecentHL defaulted OFF, kept available
+//--- if you want the combined line back alongside the per-day ones.
+//--- Fixed the caller gate (OnCalculate used to call ScanRecentHL()
+//--- only when InpShowRecentHL was on - now runs whenever EITHER
+//--- toggle is on, otherwise the new per-day lines would never compute
+//--- with the old one defaulted off) and added object cleanup for both
+//--- layers when their toggle is off or InpRecentHLDays is lowered, so
+//--- no stale lines linger from a config change.
 //--- 1.23: Real bug, confirmed from the actual Experts log sent in a
 //--- freeze report ("the support and resistance indicator is still
 //--- making price freeze") - 3 OnInit events in 2 minutes, each
@@ -601,7 +616,13 @@ input color    InpWeeklySupportColor    = clrDodgerBlue;
 input color    InpWeeklyResistanceColor = clrMagenta;
 
 input group "=== Recent N-day high/low (Aurelius-style rolling channel) ==="
-input bool     InpShowRecentHL      = true;      // A completely different, much simpler construction, lifted
+input bool     InpShowRecentHL      = false;     // v1.24: defaulted OFF - per direct follow-up request,
+                                                  // the new InpShowRecentHLPerDay below REPLACES this as the
+                                                  // default view (each day's own H/L separately) rather than
+                                                  // showing both and duplicating/overlapping lines. Turn
+                                                  // this back on if you want the single combined rolling
+                                                  // high/low ALONGSIDE the per-day lines too.
+                                                  // A completely different, much simpler construction, lifted
                                                   // from Aurelius_EA's own SRLevels()/SRDistanceATR() - just the
                                                   // max high / min low of the prior InpRecentHLDays COMPLETED
                                                   // daily bars, recomputed fresh every day. No fractal
@@ -616,6 +637,16 @@ input bool     InpShowRecentHL      = true;      // A completely different, much
 input int      InpRecentHLDays      = 3;         // Matches Aurelius's own InpSRDays default
 input color    InpRecentHLColor     = C'120,144,176';  // same dimmed silver Aurelius uses, so a static recent
                                                   // level never competes for attention with the live chart
+input bool     InpShowRecentHLPerDay = true;     // v1.24 NEW - per direct request ("give me them all
+                                                  // separate, each previous day's high and low") - draws
+                                                  // InpRecentHLDays SEPARATE high/low line pairs, one per
+                                                  // completed day, each individually labeled ("D-1 Hi/Lo",
+                                                  // "D-2 Hi/Lo", ...) - IN ADDITION to the single combined
+                                                  // rolling high/low above (InpShowRecentHL), not instead of
+                                                  // it. Turn InpShowRecentHL off if you only want the
+                                                  // per-day lines and not the combined overall one too.
+input color    InpRecentHLPerDayColor = C'150,170,190';  // slightly lighter than InpRecentHLColor so the
+                                                  // per-day lines are visually distinct from the combined one
 input bool     InpShowRecentOC      = false;     // v1.10 NEW - per direct request ("include the 3 days high
                                                   // and low, open and close") - two more lines: the OPEN of
                                                   // the OLDEST of the InpRecentHLDays completed days, and the
@@ -731,6 +762,8 @@ double   g_recentHLHi = 0.0;
 double   g_recentHLLo = 0.0;
 double   g_recentOpen  = 0.0;
 double   g_recentClose = 0.0;
+double   g_perDayHi[];   // v1.24: index 0 = D-1 (most recent completed day), 1 = D-2, ...
+double   g_perDayLo[];
 bool     g_recentHLReady = false;
 int      g_atrHandleSig = INVALID_HANDLE;   // v1.18: dedicated chart-timeframe ATR for signals/proximity -
                                              // independent of g_atrHandle (intraday levels' own ATR, only
@@ -850,11 +883,13 @@ int OnInit()
    g_lastWeeklyBarTime = 0;
    g_lastRecentHLBarTime = 0;
    g_recentHLReady = false;
+   ArrayResize(g_perDayHi, 0);
+   ArrayResize(g_perDayLo, 0);
    //--- v1.02: unconditional confirmation line - previously this
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.23 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.24 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1316,29 +1351,109 @@ void ScanRecentHL()
    g_recentClose = iClose(_Symbol, PERIOD_D1, 1);
    g_recentHLReady = true;
 
-   string nmHi = PFX_RHL + "hi", nmLo = PFX_RHL + "lo";
-   for(int pass = 0; pass < 2; pass++)
+   if(InpShowRecentHL)
      {
-      string nm = (pass == 0) ? nmHi : nmLo;
-      double price = (pass == 0) ? hi : lo;
-      if(ObjectFind(0, nm) < 0)
+      string nmHi = PFX_RHL + "hi", nmLo = PFX_RHL + "lo";
+      for(int pass = 0; pass < 2; pass++)
         {
-         if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, price))
+         string nm = (pass == 0) ? nmHi : nmLo;
+         double price = (pass == 0) ? hi : lo;
+         if(ObjectFind(0, nm) < 0)
            {
-            PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
-                        nm, DoubleToString(price, _Digits), GetLastError());
-            continue;
+            if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, price))
+              {
+               PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                           nm, DoubleToString(price, _Digits), GetLastError());
+               continue;
+              }
+            ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
            }
-         ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-         ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLColor);
+         ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DASH);
+         ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+         ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+         ObjectSetString(0, nm, OBJPROP_TOOLTIP,
+                          "Recent " + IntegerToString(n) + "-day " + (pass == 0 ? "high" : "low") + ": " +
+                          DoubleToString(price, _Digits) + " (Aurelius-style rolling S/R)");
         }
-      ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLColor);
-      ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DASH);
-      ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
-      ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
-      ObjectSetString(0, nm, OBJPROP_TOOLTIP,
-                       "Recent " + IntegerToString(n) + "-day " + (pass == 0 ? "high" : "low") + ": " +
-                       DoubleToString(price, _Digits) + " (Aurelius-style rolling S/R)");
+     }
+   else
+     {
+      //--- v1.24: InpShowRecentHL off (the new default) - make sure no
+      //--- stale combined-line objects are left behind from a config
+      //--- change (ObjectCreate is idempotent/ObjectFind-guarded above,
+      //--- but there's no corresponding cleanup path if the toggle was
+      //--- flipped off after lines already existed).
+      ObjectDelete(0, PFX_RHL + "hi");
+      ObjectDelete(0, PFX_RHL + "lo");
+      ObjectDelete(0, PFX_RHL + "lbl_hi");
+      ObjectDelete(0, PFX_RHL + "lbl_lo");
+     }
+
+   //--- v1.24 NEW: per-day lines, per direct request ("give me them all
+   //--- separate, each previous day's high and low") - replaces the
+   //--- combined line as the default view (see InpShowRecentHL/
+   //--- InpShowRecentHLPerDay's own comments).
+   if(InpShowRecentHLPerDay)
+     {
+      ArrayResize(g_perDayHi, n);
+      ArrayResize(g_perDayLo, n);
+      for(int dIdx = 1; dIdx <= n; dIdx++)
+        {
+         double dh = iHigh(_Symbol, PERIOD_D1, dIdx);
+         double dl = iLow(_Symbol, PERIOD_D1, dIdx);
+         g_perDayHi[dIdx - 1] = dh;
+         g_perDayLo[dIdx - 1] = dl;
+         string nmDHi = PFX_RHL + "hi" + IntegerToString(dIdx);
+         string nmDLo = PFX_RHL + "lo" + IntegerToString(dIdx);
+         for(int pass = 0; pass < 2; pass++)
+           {
+            string nm = (pass == 0) ? nmDHi : nmDLo;
+            double price = (pass == 0) ? dh : dl;
+            if(ObjectFind(0, nm) < 0)
+              {
+               if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, price))
+                 {
+                  PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                              nm, DoubleToString(price, _Digits), GetLastError());
+                  continue;
+                 }
+               ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+               ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+              }
+            ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLPerDayColor);
+            ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DASH);
+            ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+            ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+            ObjectSetString(0, nm, OBJPROP_TOOLTIP,
+                             "D-" + IntegerToString(dIdx) + " " + (pass == 0 ? "high" : "low") + ": " +
+                             DoubleToString(price, _Digits));
+           }
+        }
+      //--- if InpRecentHLDays was lowered since the last run, delete any
+      //--- leftover lines from a higher day-count that no longer apply
+      for(int dIdx = n + 1; dIdx <= 30; dIdx++)
+        {
+         string nmDHi = PFX_RHL + "hi" + IntegerToString(dIdx);
+         if(ObjectFind(0, nmDHi) < 0) break;
+         ObjectDelete(0, nmDHi);
+         ObjectDelete(0, PFX_RHL + "lo" + IntegerToString(dIdx));
+         ObjectDelete(0, PFX_RHL + "lbl_hi" + IntegerToString(dIdx));
+         ObjectDelete(0, PFX_RHL + "lbl_lo" + IntegerToString(dIdx));
+        }
+     }
+   else
+     {
+      for(int dIdx = 1; dIdx <= 30; dIdx++)
+        {
+         string nmDHi = PFX_RHL + "hi" + IntegerToString(dIdx);
+         if(ObjectFind(0, nmDHi) < 0) break;
+         ObjectDelete(0, nmDHi);
+         ObjectDelete(0, PFX_RHL + "lo" + IntegerToString(dIdx));
+         ObjectDelete(0, PFX_RHL + "lbl_hi" + IntegerToString(dIdx));
+         ObjectDelete(0, PFX_RHL + "lbl_lo" + IntegerToString(dIdx));
+        }
      }
 
    if(InpShowRecentOC && g_recentOpen > 0.0 && g_recentClose > 0.0)
@@ -1405,6 +1520,46 @@ void RefreshRecentHLLabels(const datetime nowTime)
                        "D " + (pass == 0 ? "Hi" : "Lo"));
       ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLColor);
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, InpLabelFontSize);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| v1.24: right-edge labels for the per-day lines - same pattern as   |
+//| RefreshRecentHLLabels() above, one "D-N Hi"/"D-N Lo" pair per day.  |
+//+------------------------------------------------------------------+
+void RefreshRecentHLPerDayLabels(const datetime nowTime)
+  {
+   if(!InpShowRecentHLPerDay || !InpShowTouchLabels || !g_recentHLReady) return;
+   int n = ArraySize(g_perDayHi);
+   for(int dIdx = 1; dIdx <= n; dIdx++)
+     {
+      double hi = g_perDayHi[dIdx - 1];
+      double lo = g_perDayLo[dIdx - 1];
+      if(hi <= 0.0 || lo <= 0.0) continue;
+      string nmHiLbl = PFX_RHL + "lbl_hi" + IntegerToString(dIdx);
+      string nmLoLbl = PFX_RHL + "lbl_lo" + IntegerToString(dIdx);
+      for(int pass = 0; pass < 2; pass++)
+        {
+         string nm = (pass == 0) ? nmHiLbl : nmLoLbl;
+         double price = (pass == 0) ? hi : lo;
+         if(ObjectFind(0, nm) < 0)
+           {
+            if(!ObjectCreate(0, nm, OBJ_TEXT, 0, nowTime, price))
+              {
+               PrintFormat("Important_SR_Levels: ObjectCreate FAILED for %s at price %s - error %d",
+                           nm, DoubleToString(price, _Digits), GetLastError());
+               continue;
+              }
+            ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+            ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+           }
+         ObjectSetInteger(0, nm, OBJPROP_TIME, 0, nowTime);
+         ObjectSetDouble(0, nm, OBJPROP_PRICE, price);
+         ObjectSetString(0, nm, OBJPROP_TEXT, " D-" + IntegerToString(dIdx) + " " + (pass == 0 ? "Hi" : "Lo"));
+         ObjectSetInteger(0, nm, OBJPROP_COLOR, InpRecentHLPerDayColor);
+         ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, InpLabelFontSize);
+        }
      }
   }
 
@@ -2068,7 +2223,11 @@ int OnCalculate(const int rates_total,
          if(fresh) freshBudgetUsed = true;
         }
      }
-   if(InpShowRecentHL)
+   //--- v1.24 FIX: used to be gated on InpShowRecentHL alone - with that
+   //--- now defaulted OFF (per-day replaces it as the default view), the
+   //--- new per-day lines need ScanRecentHL() to still run whenever
+   //--- EITHER toggle is on, not just the old combined one.
+   if(InpShowRecentHL || InpShowRecentHLPerDay)
       ScanRecentHL();
 
    //--- v1.11 FIX: everything below this point (TopN filter + every
@@ -2109,6 +2268,7 @@ int OnCalculate(const int rates_total,
    RefreshRightEdgeLabels(g_levelsD,  InpDWMinTouchesToShow, nowTime);
    RefreshRightEdgeLabels(g_levelsW,  InpDWMinTouchesToShow, nowTime);
    RefreshRecentHLLabels(nowTime);
+   RefreshRecentHLPerDayLabels(nowTime);
    RefreshRecentOCLabels(nowTime);
 
    //--- v1.18: level-reaction signals, evaluated once per new CLOSED
