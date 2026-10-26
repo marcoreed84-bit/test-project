@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.39"
+#property version   "2.40"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1367,6 +1367,29 @@ input int    InpSigMarkerLookbackBars = 5;    // only markers within this many b
                                                // alone even if coincidentally close in price
 input string InpSigSoundFile       = "alert.wav";   // must exist in the terminal's Sounds folder - leave
                                                      // blank to disable the sound (push notification still fires)
+
+input group "=== Meaningful-move filter (v2.40, per direct request) - BB/Stoch/Divergence only ==="
+input bool   InpRequireElevatedATR = true;    // skip drawing a BB/Stochastic/Divergence signal unless
+                                               // current ATR is at least InpMinAtrRatio x its own recent
+                                               // average (InpAtrAvgPeriod bars) - per this session's own
+                                               // research (stoch_move_magnitude_test.py /
+                                               // div_move_magnitude_test.py), current ATR is the one thing
+                                               // that actually predicts how BIG the eventual move is
+                                               // (correlation ~0.4-0.56, confirmed out-of-sample, doesn't
+                                               // decay) - stochastic depth, hour of day, and regular-vs-
+                                               // hidden divergence all showed ~zero correlation. This filters
+                                               // for MOVE SIZE only, not direction - it does not make these
+                                               // signals validated/tested as trades, same UNVALIDATED status
+                                               // as before. Candle/engulfing signals are NOT filtered by
+                                               // this (not part of the direct request, and Candle already
+                                               // has its own validated-on-GOLD construction - see its own
+                                               // input group).
+input int    InpAtrAvgPeriod       = 50;      // how many bars' worth of ATR to average for the "recent
+                                               // normal" baseline each signal's own ATR is compared against
+input double InpMinAtrRatio        = 1.0;     // current ATR must be at least this multiple of that average
+                                               // to count as "elevated enough to matter" - 1.0 = at least
+                                               // average, 1.2-1.5 = meaningfully above average (fewer,
+                                               // bigger-move signals), 0 = filter off (old behavior)
 input int    InpMaxSlLines          = 3;      // v2.28: per direct request - only the last N SL lines stay
                                                // on the chart IN TOTAL, across every signal type combined
                                                // (EMA cross, Stoch, Candle, Divergence, BB, FVG, Liquidity all
@@ -1993,6 +2016,42 @@ void SigATR(const double &h[], const double &l[], const double &c[], const int n
   }
 
 //+------------------------------------------------------------------+
+//| v2.40 (per direct request): "only give me the signals for trades  |
+//| that are more meaningful" - from this session's own research      |
+//| (stoch_move_magnitude_test.py / div_move_magnitude_test.py,        |
+//| correlation of move size against ATR, Stochastic depth, hour,      |
+//| day-of-week): current ATR relative to its own recent average is    |
+//| the ONE thing that actually predicts move size out-of-sample (corr |
+//| ~0.4-0.56, holds up OOS, doesn't decay) - how deep the stochastic   |
+//| extreme was, hour of day, and day of week all showed ~zero          |
+//| correlation. This does NOT predict DIRECTION (no edge claim here,    |
+//| same as every signal in this file) - only that elevated current      |
+//| volatility means the eventual move (whichever way it goes) tends to   |
+//| be bigger. Used here as a pure visual noise filter: skip drawing a     |
+//| signal that fires during a below-average-volatility stretch, same       |
+//| "fires but current ATR isn't high enough to matter" idea as every        |
+//| Inp*ArrowOffsetATR/InpSigMinMarkerGapATR filter already in this file.     |
+//+------------------------------------------------------------------+
+bool IsAtrElevated(const double &atr[], const int i, const int avgPeriod, const double minRatio)
+  {
+   if(minRatio <= 0.0) return true;   // filter disabled
+   if(atr[i] == SIG_NA || atr[i] <= 0.0) return false;
+   int lo = (int)MathMax(0, i - avgPeriod + 1);
+   int cnt = 0; double sum = 0.0;
+   for(int j = lo; j <= i; j++)
+     {
+      if(atr[j] == SIG_NA) continue;
+      sum += atr[j]; cnt++;
+     }
+   //--- not enough history yet to judge "average" meaningfully - don't
+   //--- block signals early in the chart's visible window over this.
+   if(cnt < avgPeriod / 2) return true;
+   double avg = sum / cnt;
+   if(avg <= 0.0) return true;
+   return (atr[i] / avg) >= minRatio;
+  }
+
+//+------------------------------------------------------------------+
 //| v1.47: self-contained EMA, same style as SigATR() above (computed   |
 //| directly off the CopyRates-loaded close array, not an iMA handle -   |
 //| avoids any indexing-direction mismatch) - seeded with the SMA of the |
@@ -2397,7 +2456,7 @@ void ComputeStochSignals(const bool backfill)
         }
       lastDir = dir;
 
-      if(draw)
+      if(draw && (!InpRequireElevatedATR || IsAtrElevated(atr, i, InpAtrAvgPeriod, InpMinAtrRatio)))
         {
          double stop = swing;
          double tp   = c[i] + dir * InpStochRR * risk;
@@ -2714,7 +2773,7 @@ void ComputeDivSignals(const bool backfill)
                if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpDivCooldownBars * perSec)
                  {
                   if(regular) g_divLastRegBuyAt = t_i; else g_divLastHidBuyAt = t_i;
-                  if(draw)
+                  if(draw && (!InpRequireElevatedATR || IsAtrElevated(atr, i, InpAtrAvgPeriod, InpMinAtrRatio)))
                     {
                      string id = IntegerToString((long)t_i);
                      //--- v2.21 FIX (Opus-found): "buy"/"sell" added - a single bar CAN be
@@ -2782,7 +2841,7 @@ void ComputeDivSignals(const bool backfill)
                if(lastAt == 0 || (t_i - lastAt) >= (datetime)InpDivCooldownBars * perSec)
                  {
                   if(regular) g_divLastRegSellAt = t_i; else g_divLastHidSellAt = t_i;
-                  if(draw)
+                  if(draw && (!InpRequireElevatedATR || IsAtrElevated(atr, i, InpAtrAvgPeriod, InpMinAtrRatio)))
                     {
                      string id = IntegerToString((long)t_i);
                      string nm = g_div + (regular ? "reg_sell_" : "hid_sell_") + id;
@@ -2953,7 +3012,7 @@ void ComputeBBSignals(const bool backfill)
       double risk = dir * (c[i] - swing);
       if(risk <= 0.0) continue;
 
-      if(draw)
+      if(draw && (!InpRequireElevatedATR || IsAtrElevated(atr, i, InpAtrAvgPeriod, InpMinAtrRatio)))
         {
          bool isBuy = dir > 0;
          double offEntry = (atr[i] == SIG_NA) ? 0.0 : InpBBArrowOffsetATR * atr[i];
