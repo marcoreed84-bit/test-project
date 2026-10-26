@@ -76,24 +76,29 @@
 //|  regardless of InpMinMoveATR. Also lowered InpMinMoveATR 1.5->0.8 in v1.03.  |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
 #property indicator_plots 0
 
 input group "=== Swing detection ==="
-input int    InpPivotWindow      = 5;       // bars on EACH side a pivot high/low must beat to confirm -
-                                             // same default as this project's existing Divergence/
-                                             // Liquidity overlays (InpDivPivotWindow/InpLiqPivotWindow)
+input int    InpPivotWindow      = 15;      // v1.06: raised from 5 - per direct report, "each and every
+                                             // bump" was still getting labeled. 5 (this project's
+                                             // Divergence/Liquidity overlay default) is tuned for THOSE
+                                             // overlays' own purpose (fast confirmation), not for "the
+                                             // bigger moves only" read this indicator is for - 15 bars
+                                             // each side is a much coarser, less twitchy base swing size
+                                             // before InpMinMoveATR below even applies on top of it.
 input int    InpDaysToShow       = 10;      // how many calendar days of history to label
 
 input group "=== Noise filters (v1.03) - STACK: a pivot needs BOTH on to pass, not either/or ==="
-input double InpMinMoveATR       = 0.8;     // v1.03: lowered from 1.5 - per direct report, 1.5 combined
-                                             // WITH InpRequireStochExtreme below was filtering out real
-                                             // swings, not just noise (both filters must pass for a pivot
-                                             // to count, so they compound - 1.5 ATR was already strict on
-                                             // its own). A pivot only counts as a real swing if it's at
-                                             // least this many ATR away from the previous CONFIRMED swing
-                                             // of the OPPOSITE type (a classic "ZigZag deviation" filter -
+input double InpMinMoveATR       = 2.5;     // v1.06: raised from 0.8 - per direct report, still labeling
+                                             // every bump. With InpRequireStochExtreme now OFF by default
+                                             // (v1.05), this is the ONE filter doing the work, so it needs
+                                             // to actually be strict enough on its own - 0.8 ATR is a tiny
+                                             // move on M5 gold, barely bigger than normal noise. A pivot
+                                             // only counts as a real swing if it's at least this many ATR
+                                             // away from the previous CONFIRMED swing of the OPPOSITE type
+                                             // (a classic "ZigZag deviation" filter -
                                              // unlike InpPivotWindow, which only filters by bar-count, this
                                              // filters by actual price MAGNITUDE). 0 = disable this filter
                                              // (keep only the Stochastic one below, if that one's on).
@@ -145,6 +150,18 @@ input int    InpSigLineBars      = 8;       // how many bars the SL/TP reference
 
 #define MSW_PFX "MSW_"
 #define SIG_NA EMPTY_VALUE
+
+//--- v1.06 FIX (real bug, per direct report "the signals still flash"):
+//--- OnCalculate fires on EVERY TICK, not just once per new bar - but
+//--- this indicator was doing ObjectsDeleteAll() + a full rescan +
+//--- ChartRedraw() on every single one of those calls, so every label/
+//--- arrow/zigzag segment visibly disappeared and reappeared on every
+//--- tick. Same anti-pattern this project already diagnosed and fixed
+//--- in TradePanel_EA (its own v2.09+ "only redraw on a new bar, not
+//--- every tick" notes) and HeikinAshi_Overlay (v1.03, same session).
+//--- g_lastBarTime gates the heavy work to once per NEW bar only -
+//--- an intrabar tick is now a cheap no-op (one comparison).
+datetime g_lastBarTime = 0;
 
 //+------------------------------------------------------------------+
 //| Simple causal ATR over the scanned window - only used for label   |
@@ -281,6 +298,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
   {
    int minBars = InpPivotWindow * 2 + 20;
    if(rates_total < minBars) return(0);
+
+   //--- v1.06: skip the heavy recompute entirely on an intrabar tick -
+   //--- only a genuine new bar needs the labels/signals re-evaluated.
+   datetime t0 = time[rates_total - 1];
+   if(t0 == g_lastBarTime) return(rates_total);
+   g_lastBarTime = t0;
 
    datetime lastDay = time[rates_total - 1] - (time[rates_total - 1] % 86400);
    datetime cutoff  = lastDay - (datetime)((long)(InpDaysToShow - 1) * 86400);
