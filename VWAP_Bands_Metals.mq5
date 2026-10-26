@@ -44,12 +44,42 @@
 //|  OOS PF 0.895) - worse than random timing. NOT implemented as a  |
 //|  signal anywhere - this indicator's 3SD band is a visual         |
 //|  reference only, same as every other level here.                 |
+//|                                                                   |
+//|  v1.12 (per direct request, 2026-10-26): added Weekly and Monthly|
+//|  VWAP lines (InpShowWeeklyVWAP/InpShowMonthlyVWAP, each           |
+//|  independently toggleable) - same accumulation logic as the daily|
+//|  VWAP above, just reset at the week/month boundary instead of the|
+//|  calendar day. No deviation bands on these two - line only, for  |
+//|  visually judging multi-timeframe confluence against the daily   |
+//|  VWAP/bands. A "daily+weekly+monthly VWAP confluence" touch-     |
+//|  reject construction was tested as a TradePanel signal the same  |
+//|  day this was added: looked the most internally consistent of    |
+//|  any VWAP construction tried this session (every year 2022-2026  |
+//|  individually profitable) but did NOT clear significance on its  |
+//|  own (p(net)=0.064, p(PF)=0.184 against a random-timing null),   |
+//|  and fails outright once honestly corrected for the ~5 VWAP      |
+//|  constructions already tried this session (Sidak-corrected       |
+//|  p=~0.28) - NOT implemented as a signal; these two lines are a    |
+//|  visual reference only, same status as the SD bands above.       |
+//|  CAVEAT: the weekly/monthly accumulator only has InpDaysToShow+1  |
+//|  days of history to work with (same window the daily VWAP uses) - |
+//|  if that's less than a full week/month (the usual case), the      |
+//|  OLDEST visible week/month segment starts accumulating from       |
+//|  wherever the visible window happens to begin, not from that      |
+//|  week/month's own true calendar start - a real, visible           |
+//|  understatement of that one segment's early history, same         |
+//|  category of edge case as the daily VWAP's own history-available   |
+//|  limit (just more likely to matter here, since a week/month is     |
+//|  longer than the typical few-day display window). Increase          |
+//|  InpDaysToShow to a full week (7+) or month (31+) if you need the     |
+//|  weekly/monthly line itself to be clean from its very first visible    |
+//|  bar, rather than just "close enough" after the first visible day/week.|
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.11"
+#property version   "1.12"
 #property indicator_chart_window
-#property indicator_buffers 17
-#property indicator_plots   12
+#property indicator_buffers 19
+#property indicator_plots   14
 
 //--- fills FIRST (drawn behind the lines)
 #property indicator_label1  "Inner band fill"
@@ -115,6 +145,18 @@
 #property indicator_width12 1
 #property indicator_style12 STYLE_DASH
 
+#property indicator_label13 "Weekly VWAP"
+#property indicator_type13  DRAW_LINE
+#property indicator_color13 clrMagenta
+#property indicator_width13 2
+#property indicator_style13 STYLE_SOLID
+
+#property indicator_label14 "Monthly VWAP"
+#property indicator_type14  DRAW_LINE
+#property indicator_color14 clrLime
+#property indicator_width14 2
+#property indicator_style14 STYLE_SOLID
+
 input group "=== VWAP settings ==="
 input int    InpDaysToShow      = 5;        // how many calendar days of independently-anchored
                                              // VWAP+band segments to keep visible at once
@@ -137,6 +179,10 @@ input bool   InpShadeInnerOnly  = false;    // true: skip BOTH outer (SD1<->SD2,
 input bool   InpShadeOuterOnly  = false;    // true: skip the inner (VWAP<->SD1) shading, keep the
                                              // outer band(s) shaded (lighter-looking around VWAP)
 
+input group "=== Weekly / Monthly VWAP (per direct request) - confluence reference, no bands ==="
+input bool   InpShowWeeklyVWAP  = true;     // resets at the start of each week (Monday 00:00)
+input bool   InpShowMonthlyVWAP = true;     // resets at the start of each calendar month
+
 //--- fill buffers (indices 0-9, matching plots 1-5 above, 2 buffers each)
 double g_fillInnerUp[], g_fillInnerDn[];
 double g_fillOuterUpHi[], g_fillOuterUpLo[];
@@ -145,6 +191,8 @@ double g_fillOuter2UpHi[], g_fillOuter2UpLo[];
 double g_fillOuter2DnHi[], g_fillOuter2DnLo[];
 //--- line buffers (indices 10-16, matching plots 6-12 above)
 double g_vwap[], g_u1[], g_l1[], g_u2[], g_l2[], g_u3[], g_l3[];
+//--- weekly/monthly VWAP line buffers (indices 17-18, matching plots 13-14)
+double g_vwapW[], g_vwapM[];
 
 int OnInit()
   {
@@ -165,6 +213,8 @@ int OnInit()
    SetIndexBuffer(14, g_l2,             INDICATOR_DATA);
    SetIndexBuffer(15, g_u3,             INDICATOR_DATA);
    SetIndexBuffer(16, g_l3,             INDICATOR_DATA);
+   SetIndexBuffer(17, g_vwapW,          INDICATOR_DATA);
+   SetIndexBuffer(18, g_vwapM,          INDICATOR_DATA);
 
    PlotIndexSetString(5, PLOT_LABEL, "VWAP");
    IndicatorSetString(INDICATOR_SHORTNAME, "VWAP Bands (Metals, " + IntegerToString(InpDaysToShow) + "d)");
@@ -207,6 +257,15 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- the whole chart history) and avoids any incremental-state bugs across new bars/ticks.
    double sumV = 0.0, sumPV = 0.0, sumPV2V = 0.0;
    datetime curDay = 0;
+   //--- independent accumulators for the weekly/monthly lines - same
+   //--- reset-on-boundary-change pattern as the daily one above, just
+   //--- keyed on a coarser boundary. See file header's v1.12 note for
+   //--- the known edge case when InpDaysToShow is shorter than a
+   //--- week/month.
+   double sumVW = 0.0, sumPVW = 0.0;
+   datetime curWeek = 0;
+   double sumVM = 0.0, sumPVM = 0.0;
+   datetime curMonth = 0;
 
    for(int i = start; i < rates_total; i++)
      {
@@ -217,6 +276,28 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          sumV = 0.0; sumPV = 0.0; sumPV2V = 0.0;
         }
 
+      //--- week boundary = that same calendar-day floor, stepped back to its
+      //--- own Monday (day_of_week: 0=Sunday..6=Saturday; Monday=1, so days
+      //--- since Monday = (day_of_week + 6) % 7).
+      MqlDateTime mdt;
+      TimeToStruct(d, mdt);
+      int daysSinceMonday = (mdt.day_of_week + 6) % 7;
+      datetime weekStart = d - (datetime)daysSinceMonday * 86400;
+      if(weekStart != curWeek)
+        {
+         curWeek = weekStart;
+         sumVW = 0.0; sumPVW = 0.0;
+        }
+
+      //--- month boundary = the 1st of that same calendar month, 00:00.
+      mdt.day = 1; mdt.hour = 0; mdt.min = 0; mdt.sec = 0;
+      datetime monthStart = StructToTime(mdt);
+      if(monthStart != curMonth)
+        {
+         curMonth = monthStart;
+         sumVM = 0.0; sumPVM = 0.0;
+        }
+
       double vol = InpUseRealVolume ? (double)volume[i] : (double)tick_volume[i];
       double tp  = (high[i] + low[i] + close[i]) / 3.0;
 
@@ -225,9 +306,14 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          sumV    += vol;
          sumPV   += tp * vol;
          sumPV2V += tp * tp * vol;
+         sumVW   += vol;  sumPVW += tp * vol;
+         sumVM   += vol;  sumPVM += tp * vol;
         }
       //--- vol<=0 (shouldn't normally happen): carry the running VWAP/bands forward unchanged
       //--- rather than divide by zero or show a gap.
+
+      g_vwapW[i] = (InpShowWeeklyVWAP  && sumVW > 0.0) ? (sumPVW / sumVW) : EMPTY_VALUE;
+      g_vwapM[i] = (InpShowMonthlyVWAP && sumVM > 0.0) ? (sumPVM / sumVM) : EMPTY_VALUE;
 
       if(sumV <= 0.0)
         {
