@@ -45,7 +45,29 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.22"
+#property version   "1.23"
+//--- 1.23: Real bug, confirmed from the actual Experts log sent in a
+//--- freeze report ("the support and resistance indicator is still
+//--- making price freeze") - 3 OnInit events in 2 minutes, each
+//--- immediately followed by ALL THREE of H4/daily/weekly doing a full
+//--- rescan in the SAME OnCalculate call (g_lastH4BarTime/
+//--- g_lastDailyBarTime/g_lastWeeklyBarTime are all reset to 0 together
+//--- in OnInit). That's up to ~11,300 bars of fractal+ATR+clustering
+//--- work done synchronously in one blocking call - genuinely heavy
+//--- enough to freeze the terminal for however long it takes, and it
+//--- happens every time OnInit re-fires (attach, any input change, or a
+//--- timeframe/symbol switch) - worse with 3 reinits close together, as
+//--- the log showed. The steady-state (no fresh backfill needed) case
+//--- was always cheap and correctly throttled already - this only ever
+//--- hit the three-layers-at-once case right after a reinit, which none
+//--- of the prior 14 rounds of freeze fixes (v1.09-v1.22) had covered,
+//--- since they were all found by reasoning about per-TICK cost, not
+//--- the one-time cost of a reinit itself. Fixed in OnCalculate: a
+//--- fresh (lastBarTime==0) layer only gets its backfill if no OTHER
+//--- layer has already used this call's one-fresh-backfill budget - the
+//--- other(s) simply wait one extra tick and try again, spreading 3
+//--- heavy backfills across 3 ticks instead of stacking them in 1. Zero
+//--- effect on steady-state behavior.
 //--- 1.22: Final Opus audit of today's changes confirmed v1.20's two
 //--- freeze fixes are present and correct, the ATR index fixes hand-
 //--- trace correctly, and the v1.21 struct-field init is correct. Two
@@ -832,7 +854,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.22 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.23 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -1995,15 +2017,57 @@ int OnCalculate(const int rates_total,
    if(InpShowIntradayLevels)
       intradayOk = ComputeIntradayLevels(rates_total, prev_calculated, time, high, low);
 
+   //--- v1.23 FIX (real bug, confirmed from the actual Experts log - 3
+   //--- OnInit events in 2 minutes, each immediately followed by ALL
+   //--- THREE of H4/daily/weekly doing a full rescan in the SAME
+   //--- OnCalculate call): g_lastH4BarTime/g_lastDailyBarTime/
+   //--- g_lastWeeklyBarTime are all reset to 0 together in OnInit, so the
+   //--- very next tick sees all three as "needs a fresh backfill" and
+   //--- ScanHigherTF() runs full-history (up to 4995 bars each) for all
+   //--- three, back to back, in ONE blocking call - ~11,300 bars of
+   //--- fractal+ATR+clustering work synchronously, which is genuinely
+   //--- heavy enough to freeze the terminal for however long it takes,
+   //--- worse every time OnInit re-fires (attach, any input change, or a
+   //--- timeframe/symbol switch). A steady-state call (no fresh backfill
+   //--- needed) was always cheap - this only ever hit the three-at-once
+   //--- case right after a reinit. Fixed: a fresh (lastBarTime==0) layer
+   //--- only gets its backfill if no OTHER layer has already used this
+   //--- call's one-fresh-backfill budget - the other(s) simply wait one
+   //--- extra tick (lastBarTime stays 0, tried again next call), spreading
+   //--- 3 heavy backfills across 3 ticks instead of stacking them in 1.
+   //--- Zero effect on steady-state behavior (a non-fresh layer is
+   //--- unaffected either way).
+   bool freshBudgetUsed = false;
    if(InpShowH4Levels)
-      ScanHigherTF(PERIOD_H4, g_levelsH4, PFX_H4, InpH4SupportColor, InpH4ResistanceColor,
-                   g_atrHandleH4, g_lastH4BarTime);
+     {
+      bool fresh = (g_lastH4BarTime == 0);
+      if(!fresh || !freshBudgetUsed)
+        {
+         ScanHigherTF(PERIOD_H4, g_levelsH4, PFX_H4, InpH4SupportColor, InpH4ResistanceColor,
+                      g_atrHandleH4, g_lastH4BarTime);
+         if(fresh) freshBudgetUsed = true;
+        }
+     }
    if(InpShowDailyLevels)
-      ScanHigherTF(PERIOD_D1, g_levelsD, PFX_D, InpDailySupportColor, InpDailyResistanceColor,
-                   g_atrHandleD, g_lastDailyBarTime);
+     {
+      bool fresh = (g_lastDailyBarTime == 0);
+      if(!fresh || !freshBudgetUsed)
+        {
+         ScanHigherTF(PERIOD_D1, g_levelsD, PFX_D, InpDailySupportColor, InpDailyResistanceColor,
+                      g_atrHandleD, g_lastDailyBarTime);
+         if(fresh) freshBudgetUsed = true;
+        }
+     }
    if(InpShowWeeklyLevels)
-      ScanHigherTF(PERIOD_W1, g_levelsW, PFX_W, InpWeeklySupportColor, InpWeeklyResistanceColor,
-                   g_atrHandleW, g_lastWeeklyBarTime);
+     {
+      bool fresh = (g_lastWeeklyBarTime == 0);
+      if(!fresh || !freshBudgetUsed)
+        {
+         ScanHigherTF(PERIOD_W1, g_levelsW, PFX_W, InpWeeklySupportColor, InpWeeklyResistanceColor,
+                      g_atrHandleW, g_lastWeeklyBarTime);
+         if(fresh) freshBudgetUsed = true;
+        }
+     }
    if(InpShowRecentHL)
       ScanRecentHL();
 
