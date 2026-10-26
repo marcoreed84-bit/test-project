@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.40"
+#property version   "2.41"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1386,7 +1386,10 @@ input bool   InpRequireElevatedATR = true;    // skip drawing a BB/Stochastic/Di
                                                // input group).
 input int    InpAtrAvgPeriod       = 50;      // how many bars' worth of ATR to average for the "recent
                                                // normal" baseline each signal's own ATR is compared against
-input double InpMinAtrRatio        = 1.0;     // current ATR must be at least this multiple of that average
+input double InpMinAtrRatio        = 1.5;     // v2.41: raised from 1.0 per direct request - 1.0 (ATR only
+                                               // needs to be at/above its own average) was too mild a cut
+                                               // to look visibly different. current ATR must be at least
+                                               // this multiple of that average
                                                // to count as "elevated enough to matter" - 1.0 = at least
                                                // average, 1.2-1.5 = meaningfully above average (fewer,
                                                // bigger-move signals), 0 = filter off (old behavior)
