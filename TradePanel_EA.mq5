@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.45"
+#property version   "2.46"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -3836,6 +3836,13 @@ void CheckNewBar()
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   //--- v2.45b: per-tick, not just per-bar - once-per-bar still let
+   //--- whatever else is on this chart win the outline color back on a
+   //--- tick in between (user: recompiled v2.45, outline still teal).
+   //--- ApplyCandleTheme() diff-guards every ChartSetInteger call, so on
+   //--- every tick where nothing else has touched these properties this
+   //--- is just 3 cheap ChartGetInteger comparisons, not a redraw/flash.
+   ApplyCandleTheme();
    MaintainOverlaySync();   // v2.09: before CheckNewBar, so a new bar is never drawn with old-timeframe handles
    CheckNewBar();
   }
@@ -3843,6 +3850,8 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
+   //--- v2.45b: same reasoning as OnTick - see there.
+   ApplyCandleTheme();
    //--- v2.09: the guaranteed backstop for a timeframe switch - whatever
    //--- the terminal does or doesn't send (reinit, CHART_CHANGE, ticks),
    //--- this checks every 2s and fixes the overlays if they don't match
