@@ -101,7 +101,6 @@
 //|  so VWAP updates up to once a minute regardless of chart timeframe, which      |
 //|  is already far more granular than an H1/H4 chart's own bar closes.             |
 //+------------------------------------------------------------------+
-#property copyright--------------------------------------------------+
 #property copyright "Marco"
 #property version   "1.14"
 #property indicator_chart_window
