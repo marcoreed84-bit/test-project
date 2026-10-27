@@ -45,7 +45,7 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.26"
+#property version   "1.27"
 //--- 1.24: Per direct request - "give me them all separate, each
 //--- previous day's high and low": new InpShowRecentHLPerDay (default
 //--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
@@ -584,6 +584,12 @@ input bool     InpShowTouchLabels  = true;  // small "xN" text label showing eac
                                              // its most recent touch
 input color    InpLabelColor       = clrWhite;
 input int      InpLabelFontSize    = 8;
+input int      InpLabelRightOffsetBars = 8;   // v1.27: per direct report - labels pinned exactly at "now"
+                                             // sat right on top of the current candle whenever price was
+                                             // actually AT a level (the moment you'd most want to read the
+                                             // label clearly). Shifts every right-edge label this many bars
+                                             // further right of the current time instead - 0 restores the
+                                             // old at-now behavior.
 
 input group "=== Intraday levels (the chart's own timeframe) ==="
 input bool     InpShowIntradayLevels = false;  // v1.10: default OFF - per direct request ("maybe just change
@@ -933,7 +939,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.26 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.27 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s  %s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -2347,7 +2353,9 @@ int OnCalculate(const int rates_total,
 
    //--- v1.08: refresh every visible label's position to the right edge
    //--- every call, not just when a level is actually touched
-   datetime nowTime = TimeCurrent();
+   //--- v1.27: pushed InpLabelRightOffsetBars bars further right than
+   //--- "now" - see that input's own comment.
+   datetime nowTime = TimeCurrent() + (datetime)((long)InpLabelRightOffsetBars * PeriodSeconds());
    RefreshRightEdgeLabels(g_levels,   InpMinTouchesToShow,   nowTime);
    RefreshRightEdgeLabels(g_levelsH4, InpDWMinTouchesToShow, nowTime);
    RefreshRightEdgeLabels(g_levelsD,  InpDWMinTouchesToShow, nowTime);
