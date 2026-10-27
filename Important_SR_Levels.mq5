@@ -45,7 +45,7 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.24"
+#property version   "1.25"
 //--- 1.24: Per direct request - "give me them all separate, each
 //--- previous day's high and low": new InpShowRecentHLPerDay (default
 //--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
@@ -743,6 +743,17 @@ struct SRLevel
    //--- own comment. 0 = no pending approach being watched.
    int      rejPendingSide;
    int      rejPendingAge;
+   //--- v1.25: Opus audit finding C - RedrawLevelG was re-setting color/
+   //--- style/width/tooltip (ObjectSetInteger/ObjectSetString, each a
+   //--- synchronous chart-thread call) on EVERY throttled refresh even
+   //--- when nothing about this level had changed since the last one -
+   //--- across up to ~80 shown levels (4 layers), once a second, forever,
+   //--- stacked on top of HeikinAshi's own synchronous per-tick chart
+   //--- calls sharing the same indicator thread. Caches what was last
+   //--- actually written so a steady-state level (the common case) costs
+   //--- one ObjectFind and nothing else.
+   int      drawnTouches;
+   double   drawnPrice;
   };
 
 SRLevel  g_levels[];
@@ -889,7 +900,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.24 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.25 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -941,7 +952,14 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
         }
       ObjectSetInteger(0, lvl.lineName, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, lvl.lineName, OBJPROP_HIDDEN, true);
+      lvl.drawnTouches = -1;   // force the "changed" path below for a brand-new object
+      lvl.drawnPrice   = 0.0;
      }
+   //--- v1.25: see SRLevel.drawnTouches' own comment - color/style/width
+   //--- never change after creation, and price/touches only change on a
+   //--- merge (RegisterTouchG), so skip every setter below entirely once
+   //--- this level has already been drawn with its current values.
+   if(lvl.drawnTouches == lvl.touches && lvl.drawnPrice == lvl.price) return;
    ObjectSetInteger(0, lvl.lineName, OBJPROP_COLOR, col);
    ObjectSetInteger(0, lvl.lineName, OBJPROP_STYLE, STYLE_SOLID);
    ObjectSetInteger(0, lvl.lineName, OBJPROP_WIDTH, InpLineWidth);
@@ -951,6 +969,8 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
                     "  touches=" + IntegerToString(lvl.touches) +
                     "  first=" + TimeToString(lvl.firstTime, TIME_DATE) +
                     "  last=" + TimeToString(lvl.lastTime, TIME_DATE));
+   lvl.drawnTouches = lvl.touches;
+   lvl.drawnPrice   = lvl.price;
 
    if(InpShowTouchLabels)
      {
@@ -1294,6 +1314,8 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
    levels[n].lastProxAlertAt = 0;
    levels[n].rejPendingSide = 0;
    levels[n].rejPendingAge  = 0;
+   levels[n].drawnTouches   = -1;   // see RedrawLevelG - forces the first real draw to actually write
+   levels[n].drawnPrice     = 0.0;
    if(drawInline) RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
   }
 
@@ -2192,6 +2214,19 @@ int OnCalculate(const int rates_total,
    //--- 3 heavy backfills across 3 ticks instead of stacking them in 1.
    //--- Zero effect on steady-state behavior (a non-fresh layer is
    //--- unaffected either way).
+   //--- v1.25 FIX (Opus audit found, real bug in the v1.23 fix itself):
+   //--- freshBudgetUsed used to be set to true just because this layer's
+   //--- backfill was ATTEMPTED while fresh, not because it actually
+   //--- SUCCEEDED (ScanHigherTF returns early, lastBarTime left at 0, on
+   //--- "ATR not ready yet" or too little history - see its own early
+   //--- returns). If H4's ATR handle happens to still be warming up right
+   //--- after attach, H4 keeps "using" the budget every tick while
+   //--- failing, and Daily/Weekly's own fresh backfills never get a turn
+   //--- at all - not just delayed one tick as the budget was meant to do,
+   //--- but starved indefinitely, each retry still paying for its own
+   //--- 5000-bar CopyRates. Now only counted as using the budget if
+   //--- lastBarTime actually changed from 0, i.e. the backfill genuinely
+   //--- completed.
    bool freshBudgetUsed = false;
    if(InpShowH4Levels)
      {
@@ -2200,7 +2235,7 @@ int OnCalculate(const int rates_total,
         {
          ScanHigherTF(PERIOD_H4, g_levelsH4, PFX_H4, InpH4SupportColor, InpH4ResistanceColor,
                       g_atrHandleH4, g_lastH4BarTime);
-         if(fresh) freshBudgetUsed = true;
+         if(fresh && g_lastH4BarTime != 0) freshBudgetUsed = true;
         }
      }
    if(InpShowDailyLevels)
@@ -2210,7 +2245,7 @@ int OnCalculate(const int rates_total,
         {
          ScanHigherTF(PERIOD_D1, g_levelsD, PFX_D, InpDailySupportColor, InpDailyResistanceColor,
                       g_atrHandleD, g_lastDailyBarTime);
-         if(fresh) freshBudgetUsed = true;
+         if(fresh && g_lastDailyBarTime != 0) freshBudgetUsed = true;
         }
      }
    if(InpShowWeeklyLevels)
@@ -2220,7 +2255,7 @@ int OnCalculate(const int rates_total,
         {
          ScanHigherTF(PERIOD_W1, g_levelsW, PFX_W, InpWeeklySupportColor, InpWeeklyResistanceColor,
                       g_atrHandleW, g_lastWeeklyBarTime);
-         if(fresh) freshBudgetUsed = true;
+         if(fresh && g_lastWeeklyBarTime != 0) freshBudgetUsed = true;
         }
      }
    //--- v1.24 FIX: used to be gated on InpShowRecentHL alone - with that
