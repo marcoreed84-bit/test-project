@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.44"
+#property version   "2.45"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -3674,15 +3674,31 @@ bool SyncMAOverlays()
 //+------------------------------------------------------------------+
 //| v2.43: colors the chart's own candles (NOT the old full ApplyTheme()|
 //| - background/grid/chart-mode are untouched, candle colors only).    |
-//| Set once here, never reasserted per-tick/per-bar - see              |
-//| InpApplyCandleTheme's own comment for why that matters.             |
+//| v2.45 FIX (real bug, per direct report - "still not working", a     |
+//| screenshot showed teal/green candles, not blue/white): v2.43/v2.44   |
+//| only ever called this ONCE, from OnInit - deliberately, to avoid       |
+//| the per-tick reassertion fight that caused the original HeikinAshi      |
+//| flashing problem. But on a chart that also runs another EA/indicator     |
+//| which touches candle colors at ITS OWN init (a strategy EA, e.g.          |
+//| Aurelius/Vanguard/etc, or any other indicator with its own theme),         |
+//| that other program silently wins whenever its own OnInit happens to        |
+//| run AFTER TradePanel's - and since TradePanel never checks again,           |
+//| the override is permanent. Now also called once per NEW BAR (from            |
+//| CheckNewBar(), not per tick) with a SetIfDiff-style guard below (only          |
+//| actually writes a chart property when it's genuinely different) - low          |
+//| enough frequency to not reproduce the HeikinAshi per-tick fight, but            |
+//| frequent enough to reliably win back the colors from anything else on            |
+//| the chart within one bar.                                                        |
 //+------------------------------------------------------------------+
 void ApplyCandleTheme()
   {
    if(!InpApplyCandleTheme) return;
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpThemeBullCol);
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpThemeBearCol);
-   ChartSetInteger(0, CHART_COLOR_CHART_LINE, InpThemeOutlineCol);
+   if(ChartGetInteger(0, CHART_COLOR_CANDLE_BULL) != InpThemeBullCol)
+      ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpThemeBullCol);
+   if(ChartGetInteger(0, CHART_COLOR_CANDLE_BEAR) != InpThemeBearCol)
+      ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpThemeBearCol);
+   if(ChartGetInteger(0, CHART_COLOR_CHART_LINE) != InpThemeOutlineCol)
+      ChartSetInteger(0, CHART_COLOR_CHART_LINE, InpThemeOutlineCol);
   }
 
 //+------------------------------------------------------------------+
@@ -3781,6 +3797,14 @@ void CheckNewBar()
    if(t0 == 0) return;
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
+   //--- v2.45: re-assert the candle theme once per new bar (not once-only
+   //--- at OnInit, which another EA/indicator's LATER OnInit can silently
+   //--- override - confirmed by user screenshot showing teal/green candles
+   //--- on a confirmed-v2.44 chart). ApplyCandleTheme() itself diff-guards
+   //--- each ChartSetInteger, so this is a cheap no-op on every bar where
+   //--- nothing else has touched these properties, and only costs real
+   //--- work on the rare bar where something else won them back.
+   ApplyCandleTheme();
    if(InpShowStochSignals)     ComputeStochSignals(false);
    if(InpShowCandleSignals)    ComputeCandleSignals(false);
    if(InpShowDivSignals)       ComputeDivSignals(false);
