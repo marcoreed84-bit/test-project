@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.47"
+#property version   "2.48"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1342,17 +1342,16 @@
 //--- in this version's commit message if you need to resurrect any of
 //--- it later (git history, not a backup kept in this file).
 
-input group "=== Chart theme (v2.43, per direct request - re-added as its own feature) ==="
-input bool   InpApplyCandleTheme = true;    // per direct request, after the panel removal (v2.39) took
-                                             // ApplyTheme() with it: colors the chart's own candles
-                                             // InpThemeBullCol/InpThemeBearCol. Deliberately minimal
-                                             // compared to the old ApplyTheme() (candle colors ONLY - no
-                                             // background/grid/chart-mode changes) and set ONCE in OnInit,
-                                             // not reasserted every tick/bar, so it can't get into the
-                                             // same repeated fight with HeikinAshi_Overlay that caused
-                                             // v2.39's removal in the first place - if HeikinAshi is ever
-                                             // attached to the same chart, its own hide/reassert logic
-                                             // will still win on every tick regardless of this.
+input group "=== Chart theme (v2.48: default OFF - see why below) ==="
+input bool   InpApplyCandleTheme = false;   // v2.43's own comment already warned this could get into a
+                                             // repeated fight with HeikinAshi_Overlay's per-tick
+                                             // HideRealCandles() - v2.45/2.46 ignored that warning and
+                                             // made this reassert every bar, then every tick, to chase a
+                                             // "colors keep getting overridden" report, which is exactly
+                                             // the fight the original comment predicted (confirmed live:
+                                             // user reported HeikinAshi itself started flashing). Defaulted
+                                             // OFF - this is cosmetic, live trading stability is not. Only
+                                             // turn on if HeikinAshi_Overlay is NOT attached to this chart.
 input color  InpThemeBullCol     = C'0,150,255';   // same "family-standard neon blue" HeikinAshi_Overlay
                                              // uses by default, per direct request ("I like the blue
                                              // used in the HeikinAshi candles")
