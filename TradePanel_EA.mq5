@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.46"
+#property version   "2.47"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -3699,6 +3699,20 @@ void ApplyCandleTheme()
       ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpThemeBearCol);
    if(ChartGetInteger(0, CHART_COLOR_CHART_LINE) != InpThemeOutlineCol)
       ChartSetInteger(0, CHART_COLOR_CHART_LINE, InpThemeOutlineCol);
+   //--- v2.47 FIX (real gap): Vanguard/Aurelius/HeadShoulders/Ratchet/
+   //--- Meridian's own PTheme()/ApplyTheme() all ALSO set
+   //--- CHART_COLOR_CHART_UP and CHART_COLOR_CHART_DOWN to the bull/bear
+   //--- colors - TradePanel's theme never touched these two. They are
+   //--- nominally "Bars mode only" per this project's own HeikinAshi
+   //--- v1.02 comment, but leaving them at their terminal default (which
+   //--- is what was actually rendering as the persistent "teal" outline
+   //--- the user kept reporting through v2.44/2.45/2.46) is exactly the
+   //--- kind of untested assumption that comment never covers. Matching
+   //--- the rest of the family exactly, not guessing further.
+   if(ChartGetInteger(0, CHART_COLOR_CHART_UP) != InpThemeBullCol)
+      ChartSetInteger(0, CHART_COLOR_CHART_UP, InpThemeBullCol);
+   if(ChartGetInteger(0, CHART_COLOR_CHART_DOWN) != InpThemeBearCol)
+      ChartSetInteger(0, CHART_COLOR_CHART_DOWN, InpThemeBearCol);
   }
 
 //+------------------------------------------------------------------+
