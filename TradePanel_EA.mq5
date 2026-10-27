@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.43"
+#property version   "2.44"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1358,6 +1358,21 @@ input color  InpThemeBullCol     = C'0,150,255';   // same "family-standard neon
                                              // used in the HeikinAshi candles")
 input color  InpThemeBearCol     = clrWhite;       // same "family-standard neon white" HeikinAshi_Overlay
                                              // uses by default
+input color  InpThemeOutlineCol  = C'138,152,178'; // v2.44 FIX (real gap, per direct report - "only
+                                             // changed the fill, not the outline, standard green
+                                             // outline"): candle body FILL (InpThemeBullCol/
+                                             // InpThemeBearCol, CHART_COLOR_CANDLE_BULL/BEAR) and the
+                                             // candle OUTLINE+WICK are two entirely separate MT5 chart
+                                             // properties in Candles mode - outline/wick is
+                                             // CHART_COLOR_CHART_LINE, a single shared color for both
+                                             // bull and bear (MT5 has no separate bull-outline/bear-
+                                             // outline property), and v2.43 never touched it, so the
+                                             // default green outline was always still showing through.
+                                             // This exact distinction was already found and documented
+                                             // once in this project (HeikinAshi_Overlay's own v1.02 fix)
+                                             // - should have been applied here the first time. Default
+                                             // matches the original pre-v2.39 ApplyTheme()'s own choice
+                                             // for this same property.
 
 input group "=== Shared internal settings (used by multiple signal overlays, no display of their own) ==="
 input int    InpMA21 = 21;    // used internally by Candle (arrow-nudge "too close to an MA" check) and
@@ -3667,6 +3682,7 @@ void ApplyCandleTheme()
    if(!InpApplyCandleTheme) return;
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpThemeBullCol);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpThemeBearCol);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE, InpThemeOutlineCol);
   }
 
 //+------------------------------------------------------------------+
