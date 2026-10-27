@@ -45,7 +45,7 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.25"
+#property version   "1.26"
 //--- 1.24: Per direct request - "give me them all separate, each
 //--- previous day's high and low": new InpShowRecentHLPerDay (default
 //--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
@@ -768,6 +768,16 @@ datetime g_lastH4BarTime     = 0;
 datetime g_lastDailyBarTime  = 0;
 datetime g_lastWeeklyBarTime = 0;
 datetime g_lastRecentHLBarTime = 0;
+//--- v1.26: which symbol OnInit last ran for - MT5 keeps a program's own
+//--- global variables across a same-chart reinit (confirmed, already
+//--- relied on elsewhere in this project - see TradePanel_EA's own
+//--- v2.09 OnInit comment), including the reinit a TIMEFRAME SWITCH
+//--- triggers. The H4/Daily/Weekly/recent-HL layers scan PERIOD_H4/D1/
+//--- W1 directly via CopyRates - none of them depend on the CHART's own
+//--- period at all, so there was never any reason for a plain
+//--- timeframe flip to force-reset and fully re-rescan all three
+//--- (4995+4995+1321 bars) - see this var's use in OnInit.
+string   g_lastSymbol = "";
 ulong    g_lastUiRefreshMs = 0;   // v1.11 FIX - see its own use in OnCalculate
 double   g_recentHLHi = 0.0;
 double   g_recentHLLo = 0.0;
@@ -885,38 +895,78 @@ int OnInit()
          return(INIT_FAILED);
         }
      }
+   //--- intraday genuinely depends on the chart's own period, so it
+   //--- always resets on any reinit, timeframe switch included.
    ArrayResize(g_levels, 0);
-   ArrayResize(g_levelsH4, 0);
-   ArrayResize(g_levelsD, 0);
-   ArrayResize(g_levelsW, 0);
-   g_lastH4BarTime     = 0;
-   g_lastDailyBarTime  = 0;
-   g_lastWeeklyBarTime = 0;
-   g_lastRecentHLBarTime = 0;
-   g_recentHLReady = false;
-   ArrayResize(g_perDayHi, 0);
-   ArrayResize(g_perDayLo, 0);
+
+   //--- v1.26 FIX (real cause of "freezes when flipping timeframes" -
+   //--- user-confirmed): H4/Daily/Weekly/recent-HL are entirely
+   //--- independent of the CHART's own period, so only wipe/rescan them
+   //--- on a genuine first attach or an actual SYMBOL change - a plain
+   //--- timeframe flip on the same symbol now reuses whatever these
+   //--- layers already had (MT5 preserves the globals across that
+   //--- reinit), skipping the 4995+4995+1321-bar triple rescan entirely.
+   bool sameSymbol = (g_lastSymbol == _Symbol);
+   if(!sameSymbol)
+     {
+      ArrayResize(g_levelsH4, 0);
+      ArrayResize(g_levelsD, 0);
+      ArrayResize(g_levelsW, 0);
+      g_lastH4BarTime     = 0;
+      g_lastDailyBarTime  = 0;
+      g_lastWeeklyBarTime = 0;
+      g_lastRecentHLBarTime = 0;
+      g_recentHLReady = false;
+      ArrayResize(g_perDayHi, 0);
+      ArrayResize(g_perDayLo, 0);
+      //--- stale lines from the OLD symbol (OnDeinit no longer clears
+      //--- these - see its own comment) must go now, before this
+      //--- symbol's own fresh scan draws its replacements.
+      ObjectsDeleteAll(0, PFX_H4);
+      ObjectsDeleteAll(0, PFX_D);
+      ObjectsDeleteAll(0, PFX_W);
+      ObjectsDeleteAll(0, PFX_RHL);
+     }
+   g_lastSymbol = _Symbol;
+
    //--- v1.02: unconditional confirmation line - previously this
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.25 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
-               "intraday=%s  H4=%s  daily=%s  weekly=%s",
+   PrintFormat("Important_SR_Levels v1.26 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+               "intraday=%s  H4=%s  daily=%s  weekly=%s  %s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
                InpShowIntradayLevels ? "on" : "off", InpShowH4Levels ? "on" : "off",
-               InpShowDailyLevels ? "on" : "off", InpShowWeeklyLevels ? "on" : "off");
+               InpShowDailyLevels ? "on" : "off", InpShowWeeklyLevels ? "on" : "off",
+               sameSymbol ? "(same-symbol reinit - H4/daily/weekly/recent-HL reused, not rescanned)"
+                          : "(new symbol - full H4/daily/weekly/recent-HL rescan will run)");
    return(INIT_SUCCEEDED);
   }
 
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   //--- v1.26: PFX (intraday) always gets wiped - it genuinely depends on
+   //--- the chart's own period, which a reinit may have just changed.
+   //--- PFX_H4/PFX_D/PFX_W/PFX_RHL are independent of chart period, and
+   //--- OnInit now only clears/redraws them on an actual symbol change
+   //--- (see g_lastSymbol's own comment) - NOT on a plain timeframe
+   //--- switch, parameter change, recompile, or template reload reinit,
+   //--- all of which keep this same chart+symbol alive and would
+   //--- otherwise force deleting these objects here just to have
+   //--- ApplyTopNFilter immediately re-create the identical ones again
+   //--- on the very next OnCalculate. Only delete them here when the
+   //--- chart/program is actually going away for good - otherwise a real
+   //--- removal would leave stale lines on the chart forever.
+   if(reason == REASON_REMOVE || reason == REASON_CHARTCLOSE || reason == REASON_CLOSE)
+     {
+      ObjectsDeleteAll(0, PFX_H4);
+      ObjectsDeleteAll(0, PFX_D);
+      ObjectsDeleteAll(0, PFX_W);
+      ObjectsDeleteAll(0, PFX_RHL);
+     }
    ObjectsDeleteAll(0, PFX);
-   ObjectsDeleteAll(0, PFX_H4);
-   ObjectsDeleteAll(0, PFX_D);
-   ObjectsDeleteAll(0, PFX_W);
-   ObjectsDeleteAll(0, PFX_RHL);
    ObjectsDeleteAll(0, PFX_SIG);
    if(g_atrHandle   != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
    if(g_atrHandleH4 != INVALID_HANDLE) IndicatorRelease(g_atrHandleH4);
