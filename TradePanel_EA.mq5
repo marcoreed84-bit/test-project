@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.48"
+#property version   "2.49"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1342,16 +1342,18 @@
 //--- in this version's commit message if you need to resurrect any of
 //--- it later (git history, not a backup kept in this file).
 
-input group "=== Chart theme (v2.48: default OFF - see why below) ==="
-input bool   InpApplyCandleTheme = false;   // v2.43's own comment already warned this could get into a
-                                             // repeated fight with HeikinAshi_Overlay's per-tick
-                                             // HideRealCandles() - v2.45/2.46 ignored that warning and
-                                             // made this reassert every bar, then every tick, to chase a
-                                             // "colors keep getting overridden" report, which is exactly
-                                             // the fight the original comment predicted (confirmed live:
-                                             // user reported HeikinAshi itself started flashing). Defaulted
-                                             // OFF - this is cosmetic, live trading stability is not. Only
-                                             // turn on if HeikinAshi_Overlay is NOT attached to this chart.
+input group "=== Chart theme (v2.49: back to default ON, OnInit-only) ==="
+input bool   InpApplyCandleTheme = true;    // per direct request - default blue/white candles. v2.45/46
+                                             // made this reassert every bar then every tick to chase a
+                                             // "colors keep getting overridden" report - that directly
+                                             // caused a real fight with HeikinAshi_Overlay's own per-tick
+                                             // HideRealCandles() (confirmed: user saw HeikinAshi itself
+                                             // start flashing). Reverted to v2.43's original design: set
+                                             // ONCE, from OnInit only, never reasserted. If HeikinAshi (or
+                                             // any of the other family EAs' own ApplyTheme/PTheme) is
+                                             // attached and its OnInit runs AFTER this one, it can still
+                                             // silently win these colors back - that's a real tradeoff of
+                                             // not fighting for them, not a bug in this fix.
 input color  InpThemeBullCol     = C'0,150,255';   // same "family-standard neon blue" HeikinAshi_Overlay
                                              // uses by default, per direct request ("I like the blue
                                              // used in the HeikinAshi candles")
@@ -3810,14 +3812,6 @@ void CheckNewBar()
    if(t0 == 0) return;
    if(t0 == g_lastBarTime) return;
    g_lastBarTime = t0;
-   //--- v2.45: re-assert the candle theme once per new bar (not once-only
-   //--- at OnInit, which another EA/indicator's LATER OnInit can silently
-   //--- override - confirmed by user screenshot showing teal/green candles
-   //--- on a confirmed-v2.44 chart). ApplyCandleTheme() itself diff-guards
-   //--- each ChartSetInteger, so this is a cheap no-op on every bar where
-   //--- nothing else has touched these properties, and only costs real
-   //--- work on the rare bar where something else won them back.
-   ApplyCandleTheme();
    if(InpShowStochSignals)     ComputeStochSignals(false);
    if(InpShowCandleSignals)    ComputeCandleSignals(false);
    if(InpShowDivSignals)       ComputeDivSignals(false);
@@ -3849,13 +3843,6 @@ void CheckNewBar()
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   //--- v2.45b: per-tick, not just per-bar - once-per-bar still let
-   //--- whatever else is on this chart win the outline color back on a
-   //--- tick in between (user: recompiled v2.45, outline still teal).
-   //--- ApplyCandleTheme() diff-guards every ChartSetInteger call, so on
-   //--- every tick where nothing else has touched these properties this
-   //--- is just 3 cheap ChartGetInteger comparisons, not a redraw/flash.
-   ApplyCandleTheme();
    MaintainOverlaySync();   // v2.09: before CheckNewBar, so a new bar is never drawn with old-timeframe handles
    CheckNewBar();
   }
@@ -3863,8 +3850,6 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   //--- v2.45b: same reasoning as OnTick - see there.
-   ApplyCandleTheme();
    //--- v2.09: the guaranteed backstop for a timeframe switch - whatever
    //--- the terminal does or doesn't send (reinit, CHART_CHANGE, ticks),
    //--- this checks every 2s and fixes the overlays if they don't match
