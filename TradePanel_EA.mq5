@@ -18,7 +18,7 @@
 //|  draws objects, never opens/closes/modifies a position.           |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "2.42"
+#property version   "2.43"
 //--- 2.33: Opus audit of v2.32, requested after "i dont want to find more
 //--- bugs again later" - found real bugs, not a rubber stamp:
 //--- (1) CRITICAL: v2.31's EMA-cross removal left 3 dead functions
@@ -1341,6 +1341,23 @@
 //--- this implies are gone with it - see the removed functions listed
 //--- in this version's commit message if you need to resurrect any of
 //--- it later (git history, not a backup kept in this file).
+
+input group "=== Chart theme (v2.43, per direct request - re-added as its own feature) ==="
+input bool   InpApplyCandleTheme = true;    // per direct request, after the panel removal (v2.39) took
+                                             // ApplyTheme() with it: colors the chart's own candles
+                                             // InpThemeBullCol/InpThemeBearCol. Deliberately minimal
+                                             // compared to the old ApplyTheme() (candle colors ONLY - no
+                                             // background/grid/chart-mode changes) and set ONCE in OnInit,
+                                             // not reasserted every tick/bar, so it can't get into the
+                                             // same repeated fight with HeikinAshi_Overlay that caused
+                                             // v2.39's removal in the first place - if HeikinAshi is ever
+                                             // attached to the same chart, its own hide/reassert logic
+                                             // will still win on every tick regardless of this.
+input color  InpThemeBullCol     = C'0,150,255';   // same "family-standard neon blue" HeikinAshi_Overlay
+                                             // uses by default, per direct request ("I like the blue
+                                             // used in the HeikinAshi candles")
+input color  InpThemeBearCol     = clrWhite;       // same "family-standard neon white" HeikinAshi_Overlay
+                                             // uses by default
 
 input group "=== Shared internal settings (used by multiple signal overlays, no display of their own) ==="
 input int    InpMA21 = 21;    // used internally by Candle (arrow-nudge "too close to an MA" check) and
@@ -3640,19 +3657,22 @@ bool SyncMAOverlays()
 
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| Builds every panel object fresh. MT5 paints chart objects in      |
-//| CREATION ORDER, not by OBJPROP_ZORDER (that property only decides |
-//| mouse-click priority, not paint order - a real mistake in v1.03). |
-//| The MA/VWAP trend segments get a brand-new object created every   |
-//| single new bar (UpdateOverlayLines), so they will always paint on |
-//| top of a panel that was only ever built once in OnInit. The only  |
-//| real fix is to rebuild the panel (so it becomes the newest set of |
-//| objects again) after every new-bar redraw - see RebuildPanel()    |
-//| and its call from OnTick. Same reasoning Aurelius_EA.mq5's own    |
-//| comments already describe for its UpdateMALines/DrawPanel order.  |
+//| v2.43: colors the chart's own candles (NOT the old full ApplyTheme()|
+//| - background/grid/chart-mode are untouched, candle colors only).    |
+//| Set once here, never reasserted per-tick/per-bar - see              |
+//| InpApplyCandleTheme's own comment for why that matters.             |
+//+------------------------------------------------------------------+
+void ApplyCandleTheme()
+  {
+   if(!InpApplyCandleTheme) return;
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpThemeBullCol);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpThemeBearCol);
+  }
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   ApplyCandleTheme();
    //--- v2.09: MT5 keeps global variables across a timeframe-switch
    //--- reinit, so force a full rebuild here explicitly rather than
    //--- trusting whatever g_maPeriod the previous instance left behind.
