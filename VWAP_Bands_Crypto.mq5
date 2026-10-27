@@ -80,8 +80,30 @@
 //|  InpDaysToShow to a full week (7+) or month (31+) if you need the        |
 //|  weekly/monthly line itself to be clean from its very first visible bar.|
 //+------------------------------------------------------------------+
+//|  v1.14 (per direct request/observation - "would VWAP not be at the|
+//|  same price levels whether I attach it to 5min, 15min, or 1 hour?"|
+//|  / "I thought it has to be the same price level on any timeframe"):|
+//|  CORRECT in principle - a true VWAP depends only on the underlying |
+//|  trades in the period, not on which chart you view it from. v1.13  |
+//|  and earlier computed VWAP from whatever bars the CHART ITSELF was  |
+//|  on (an M5 bar's own typical price on an M5 chart, an H1 bar's own   |
+//|  typical price on an H1 chart) - a cruder approximation the bigger    |
+//|  the bars get, which is what caused different timeframes to show       |
+//|  visibly different VWAP levels. Fixed: VWAP/bands are now ALWAYS        |
+//|  computed from M1 bars internally (via CopyRates(PERIOD_M1), fully       |
+//|  independent of whatever timeframe the chart/indicator is actually        |
+//|  attached to), then mapped onto whichever chart bars are being drawn -     |
+//|  so M5/M15/H1/etc. now converge to the same VWAP at the same moment,       |
+//|  matching what VWAP is supposed to mean. InpUseM1Source (default true)      |
+//|  is the escape hatch back to the old per-chart-bar behavior if you ever     |
+//|  need it (e.g. M1 history unavailable for this symbol/broker). Recomputes    |
+//|  at most once per newly CLOSED M1 bar (not per tick, not per chart bar) -     |
+//|  so VWAP updates up to once a minute regardless of chart timeframe, which      |
+//|  is already far more granular than an H1/H4 chart's own bar closes.             |
+//+------------------------------------------------------------------+
+#property copyright--------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.13"
+#property version   "1.14"
 #property indicator_chart_window
 #property indicator_buffers 19
 #property indicator_plots   14
@@ -195,6 +217,14 @@ input group "=== Weekly / Monthly VWAP (per direct request) - confluence referen
 input bool   InpShowWeeklyVWAP  = true;     // resets at the start of each week (Monday 00:00)
 input bool   InpShowMonthlyVWAP = true;     // resets at the start of each calendar month
 
+input group "=== VWAP source (v1.14, per direct request) ==="
+input bool   InpUseM1Source     = true;     // compute VWAP/bands from M1 bars always, independent of
+                                             // the chart's own timeframe, so M5/M15/H1/etc. all show the
+                                             // SAME VWAP at the same moment (see file header's v1.14
+                                             // note). false = old per-chart-bar behavior (escape hatch -
+                                             // only needed if M1 history isn't available for this
+                                             // symbol/broker).
+
 //--- fill buffers (indices 0-9, matching plots 1-5 above, 2 buffers each)
 double g_fillInnerUp[], g_fillInnerDn[];
 double g_fillOuterUpHi[], g_fillOuterUpLo[];
@@ -205,6 +235,15 @@ double g_fillOuter2DnHi[], g_fillOuter2DnLo[];
 double g_vwap[], g_u1[], g_l1[], g_u2[], g_l2[], g_u3[], g_l3[];
 //--- weekly/monthly VWAP line buffers (indices 17-18, matching plots 13-14)
 double g_vwapW[], g_vwapM[];
+
+//--- v1.14: M1-computed source arrays (chronological, index 0 = oldest),
+//--- rebuilt at most once per newly closed M1 bar, then mapped onto
+//--- whatever chart bars are actually being drawn - see ComputeFromM1()
+//--- and MapM1ToChart() below.
+datetime g_m1Time[];
+double   g_m1Vwap[], g_m1U1[], g_m1L1[], g_m1U2[], g_m1L2[], g_m1U3[], g_m1L3[];
+double   g_m1VwapW[], g_m1VwapM[];
+datetime g_lastM1Time = 0;
 
 int OnInit()
   {
@@ -235,102 +274,221 @@ int OnInit()
   }
 
 //+------------------------------------------------------------------+
-//| Volume-weighted VWAP + std-dev bands, reset at every new calendar |
-//| day, computed over the last InpDaysToShow days of chart history   |
-//| (plus a small margin so the oldest visible day's accumulator      |
-//| doesn't start mid-day on a partial recalculation).                |
+//| Calendar-day-aligned cutoff: InpDaysToShow FULL calendar days      |
+//| ending on `lastDay`'s own day. Shared by both compute paths.       |
 //+------------------------------------------------------------------+
-int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
-                 const double &open[], const double &high[], const double &low[], const double &close[],
-                 const long &tick_volume[], const long &volume[], const int &spread[])
+datetime VwapCutoff(const datetime lastBarTime)
   {
-   if(rates_total < 2) return(0);
+   datetime lastDay = lastBarTime - (lastBarTime % 86400);
+   return lastDay - (datetime)((long)(InpDaysToShow - 1) * 86400);
+  }
 
-   //--- find how far back to (re)compute: InpDaysToShow FULL calendar days ending today.
-   //--- v1.11 FIX (Opus-found): the old cutoff (last bar's time minus N+1 days, no midnight
-   //--- alignment) landed mid-day, not on a day boundary - so the oldest shown day's VWAP
-   //--- accumulator started partway through that day instead of at its own open, understating
-   //--- its early bars' influence, and as `start` drifted forward on later calls, that same
-   //--- day's values got silently recomputed from a later starting point, drawing a visible
-   //--- step in what should be one continuous segment. Anchoring to the last bar's own
-   //--- calendar-day midnight first, then stepping back exactly InpDaysToShow-1 more full days,
-   //--- means `cutoff` itself IS a day boundary, so the earliest included day always starts
-   //--- cleanly at its own open.
-   datetime lastDay = time[rates_total - 1] - (time[rates_total - 1] % 86400);
-   datetime cutoff = lastDay - (datetime)((long)(InpDaysToShow - 1) * 86400);
+//+------------------------------------------------------------------+
+//| Fills one bar's worth of VWAP/band/fill output, given that bar's   |
+//| running sums - shared by the M1 path and the legacy chart-bar path |
+//| so the math can never drift apart between the two.                 |
+//+------------------------------------------------------------------+
+void VwapBarOutput(const double sumV, const double sumPV, const double sumPV2V,
+                    const double sumVW, const double sumPVW, const double sumVM, const double sumPVM,
+                    double &vwapOut, double &u1Out, double &l1Out, double &u2Out, double &l2Out,
+                    double &u3Out, double &l3Out, double &vwapWOut, double &vwapMOut,
+                    double &fillInnerUp, double &fillInnerDn, double &fillOuterUpHi, double &fillOuterUpLo,
+                    double &fillOuterDnHi, double &fillOuterDnLo, double &fillOuter2UpHi, double &fillOuter2UpLo,
+                    double &fillOuter2DnHi, double &fillOuter2DnLo)
+  {
+   vwapWOut = (InpShowWeeklyVWAP  && sumVW > 0.0) ? (sumPVW / sumVW) : EMPTY_VALUE;
+   vwapMOut = (InpShowMonthlyVWAP && sumVM > 0.0) ? (sumPVM / sumVM) : EMPTY_VALUE;
+
+   if(sumV <= 0.0)
+     {
+      vwapOut = EMPTY_VALUE; u1Out = EMPTY_VALUE; l1Out = EMPTY_VALUE;
+      u2Out = EMPTY_VALUE; l2Out = EMPTY_VALUE; u3Out = EMPTY_VALUE; l3Out = EMPTY_VALUE;
+      fillInnerUp = EMPTY_VALUE; fillInnerDn = EMPTY_VALUE;
+      fillOuterUpHi = EMPTY_VALUE; fillOuterUpLo = EMPTY_VALUE;
+      fillOuterDnHi = EMPTY_VALUE; fillOuterDnLo = EMPTY_VALUE;
+      fillOuter2UpHi = EMPTY_VALUE; fillOuter2UpLo = EMPTY_VALUE;
+      fillOuter2DnHi = EMPTY_VALUE; fillOuter2DnLo = EMPTY_VALUE;
+      return;
+     }
+
+   double vwap = sumPV / sumV;
+   double variance = sumPV2V / sumV - vwap * vwap;
+   if(variance < 0.0) variance = 0.0;
+   double sd = MathSqrt(variance);
+   double up1 = vwap + sd,       dn1 = vwap - sd;
+   double up2 = vwap + 2.0 * sd, dn2 = vwap - 2.0 * sd;
+   double up3 = vwap + 3.0 * sd, dn3 = vwap - 3.0 * sd;
+
+   vwapOut = vwap;
+   u1Out = InpShowSD1 ? up1 : EMPTY_VALUE;
+   l1Out = InpShowSD1 ? dn1 : EMPTY_VALUE;
+   u2Out = InpShowSD2 ? up2 : EMPTY_VALUE;
+   l2Out = InpShowSD2 ? dn2 : EMPTY_VALUE;
+   u3Out = InpShowSD3 ? up3 : EMPTY_VALUE;
+   l3Out = InpShowSD3 ? dn3 : EMPTY_VALUE;
+
+   bool doInner  = InpShowShading && !InpShadeOuterOnly && InpShowSD1;
+   bool doOuter1 = InpShowShading && !InpShadeInnerOnly && InpShowSD1 && InpShowSD2;
+   bool doOuter2 = InpShowShading && !InpShadeInnerOnly && InpShowSD2 && InpShowSD3;
+
+   fillInnerUp = doInner ? up1 : EMPTY_VALUE;
+   fillInnerDn = doInner ? dn1 : EMPTY_VALUE;
+   fillOuterUpHi = doOuter1 ? up2 : EMPTY_VALUE;
+   fillOuterUpLo = doOuter1 ? up1 : EMPTY_VALUE;
+   fillOuterDnHi = doOuter1 ? dn1 : EMPTY_VALUE;
+   fillOuterDnLo = doOuter1 ? dn2 : EMPTY_VALUE;
+   fillOuter2UpHi = doOuter2 ? up3 : EMPTY_VALUE;
+   fillOuter2UpLo = doOuter2 ? up2 : EMPTY_VALUE;
+   fillOuter2DnHi = doOuter2 ? dn2 : EMPTY_VALUE;
+   fillOuter2DnLo = doOuter2 ? dn3 : EMPTY_VALUE;
+  }
+
+//+------------------------------------------------------------------+
+//| Legacy path (InpUseM1Source=false): VWAP computed from whatever    |
+//| bars the CHART ITSELF is on - the pre-v1.14 behavior, kept as an   |
+//| escape hatch. Writes directly into the display buffers.            |
+//+------------------------------------------------------------------+
+void ComputeFromChartBars(const int rates_total, const datetime &time[],
+                           const double &high[], const double &low[], const double &close[],
+                           const long &tick_volume[], const long &volume[])
+  {
+   datetime cutoff = VwapCutoff(time[rates_total - 1]);
    int start = 0;
    for(int i = rates_total - 1; i >= 0; i--)
-     {
       if(time[i] < cutoff) { start = i + 1; break; }
-     }
    if(start < 0) start = 0;
 
-   //--- full recompute from `start` every call - cheap (InpDaysToShow+1 days of bars only, not
-   //--- the whole chart history) and avoids any incremental-state bugs across new bars/ticks.
    double sumV = 0.0, sumPV = 0.0, sumPV2V = 0.0;
    datetime curDay = 0;
-   //--- independent accumulators for the weekly/monthly lines - same
-   //--- reset-on-boundary-change pattern as the daily one above, just
-   //--- keyed on a coarser boundary. See file header's v1.12 note for
-   //--- the known edge case when InpDaysToShow is shorter than a
-   //--- week/month.
-   double sumVW = 0.0, sumPVW = 0.0;
-   datetime curWeek = 0;
-   double sumVM = 0.0, sumPVM = 0.0;
-   datetime curMonth = 0;
+   double sumVW = 0.0, sumPVW = 0.0; datetime curWeek = 0;
+   double sumVM = 0.0, sumPVM = 0.0; datetime curMonth = 0;
 
    for(int i = start; i < rates_total; i++)
      {
-      datetime d = time[i] - (time[i] % 86400);   // calendar-day floor, UTC/server time
-      if(d != curDay)
-        {
-         curDay = d;
-         sumV = 0.0; sumPV = 0.0; sumPV2V = 0.0;
-        }
+      datetime d = time[i] - (time[i] % 86400);
+      if(d != curDay) { curDay = d; sumV = 0.0; sumPV = 0.0; sumPV2V = 0.0; }
 
-      //--- week boundary = that same calendar-day floor, stepped back to its
-      //--- own Monday (day_of_week: 0=Sunday..6=Saturday; Monday=1, so days
-      //--- since Monday = (day_of_week + 6) % 7).
       MqlDateTime mdt;
       TimeToStruct(d, mdt);
       int daysSinceMonday = (mdt.day_of_week + 6) % 7;
       datetime weekStart = d - (datetime)daysSinceMonday * 86400;
-      if(weekStart != curWeek)
-        {
-         curWeek = weekStart;
-         sumVW = 0.0; sumPVW = 0.0;
-        }
+      if(weekStart != curWeek) { curWeek = weekStart; sumVW = 0.0; sumPVW = 0.0; }
 
-      //--- month boundary = the 1st of that same calendar month, 00:00.
       mdt.day = 1; mdt.hour = 0; mdt.min = 0; mdt.sec = 0;
       datetime monthStart = StructToTime(mdt);
-      if(monthStart != curMonth)
-        {
-         curMonth = monthStart;
-         sumVM = 0.0; sumPVM = 0.0;
-        }
+      if(monthStart != curMonth) { curMonth = monthStart; sumVM = 0.0; sumPVM = 0.0; }
 
       double vol = InpUseRealVolume ? (double)volume[i] : (double)tick_volume[i];
       double tp  = (high[i] + low[i] + close[i]) / 3.0;
-
       if(vol > 0.0)
         {
-         sumV    += vol;
-         sumPV   += tp * vol;
-         sumPV2V += tp * tp * vol;
-         sumVW   += vol;  sumPVW += tp * vol;
-         sumVM   += vol;  sumPVM += tp * vol;
+         sumV += vol; sumPV += tp * vol; sumPV2V += tp * tp * vol;
+         sumVW += vol; sumPVW += tp * vol;
+         sumVM += vol; sumPVM += tp * vol;
         }
-      //--- vol<=0 (shouldn't normally happen): carry the running VWAP/bands forward unchanged
-      //--- rather than divide by zero or show a gap.
 
-      g_vwapW[i] = (InpShowWeeklyVWAP  && sumVW > 0.0) ? (sumPVW / sumVW) : EMPTY_VALUE;
-      g_vwapM[i] = (InpShowMonthlyVWAP && sumVM > 0.0) ? (sumPVM / sumVM) : EMPTY_VALUE;
+      VwapBarOutput(sumV, sumPV, sumPV2V, sumVW, sumPVW, sumVM, sumPVM,
+                    g_vwap[i], g_u1[i], g_l1[i], g_u2[i], g_l2[i], g_u3[i], g_l3[i], g_vwapW[i], g_vwapM[i],
+                    g_fillInnerUp[i], g_fillInnerDn[i], g_fillOuterUpHi[i], g_fillOuterUpLo[i],
+                    g_fillOuterDnHi[i], g_fillOuterDnLo[i], g_fillOuter2UpHi[i], g_fillOuter2UpLo[i],
+                    g_fillOuter2DnHi[i], g_fillOuter2DnLo[i]);
+     }
+  }
 
-      if(sumV <= 0.0)
+//+------------------------------------------------------------------+
+//| v1.14: rebuilds the M1-sourced g_m1* arrays from scratch - called  |
+//| only when a new M1 bar has closed (see OnCalculate), never per      |
+//| tick. Same day/week/month accumulation logic as the legacy path,     |
+//| just driven by M1 bars instead of whatever the chart is on, so       |
+//| EVERY chart timeframe converges on the same VWAP.                     |
+//+------------------------------------------------------------------+
+bool ComputeFromM1(const datetime cutoff)
+  {
+   int needed = (int)MathMin(100000, ((long)(InpDaysToShow + 2)) * 1440);
+   MqlRates m1[];
+   ArraySetAsSeries(m1, false);
+   int count = CopyRates(_Symbol, PERIOD_M1, 0, needed, m1);
+   if(count < 2) return false;   // M1 history not ready yet - retry next call
+
+   int start = 0;
+   for(int i = count - 1; i >= 0; i--)
+      if(m1[i].time < cutoff) { start = i + 1; break; }
+   if(start < 0) start = 0;
+
+   int n = count - start;
+   ArrayResize(g_m1Time, n);
+   ArrayResize(g_m1Vwap, n); ArrayResize(g_m1U1, n); ArrayResize(g_m1L1, n);
+   ArrayResize(g_m1U2, n); ArrayResize(g_m1L2, n); ArrayResize(g_m1U3, n); ArrayResize(g_m1L3, n);
+   ArrayResize(g_m1VwapW, n); ArrayResize(g_m1VwapM, n);
+
+   double sumV = 0.0, sumPV = 0.0, sumPV2V = 0.0; datetime curDay = 0;
+   double sumVW = 0.0, sumPVW = 0.0; datetime curWeek = 0;
+   double sumVM = 0.0, sumPVM = 0.0; datetime curMonth = 0;
+   //--- unused fill outputs for this pass - the M1 arrays only need VWAP/bands,
+   //--- fills are derived at display-mapping time for the (far fewer) chart bars
+   double fIU, fID, fOUH, fOUL, fODH, fODL, fO2UH, fO2UL, fO2DH, fO2DL;
+
+   for(int j = start; j < count; j++)
+     {
+      int oi = j - start;
+      datetime t = m1[j].time;
+      g_m1Time[oi] = t;
+      datetime d = t - (t % 86400);
+      if(d != curDay) { curDay = d; sumV = 0.0; sumPV = 0.0; sumPV2V = 0.0; }
+
+      MqlDateTime mdt;
+      TimeToStruct(d, mdt);
+      int daysSinceMonday = (mdt.day_of_week + 6) % 7;
+      datetime weekStart = d - (datetime)daysSinceMonday * 86400;
+      if(weekStart != curWeek) { curWeek = weekStart; sumVW = 0.0; sumPVW = 0.0; }
+
+      mdt.day = 1; mdt.hour = 0; mdt.min = 0; mdt.sec = 0;
+      datetime monthStart = StructToTime(mdt);
+      if(monthStart != curMonth) { curMonth = monthStart; sumVM = 0.0; sumPVM = 0.0; }
+
+      double vol = InpUseRealVolume ? (double)m1[j].real_volume : (double)m1[j].tick_volume;
+      double tp  = (m1[j].high + m1[j].low + m1[j].close) / 3.0;
+      if(vol > 0.0)
         {
+         sumV += vol; sumPV += tp * vol; sumPV2V += tp * tp * vol;
+         sumVW += vol; sumPVW += tp * vol;
+         sumVM += vol; sumPVM += tp * vol;
+        }
+
+      VwapBarOutput(sumV, sumPV, sumPV2V, sumVW, sumPVW, sumVM, sumPVM,
+                    g_m1Vwap[oi], g_m1U1[oi], g_m1L1[oi], g_m1U2[oi], g_m1L2[oi], g_m1U3[oi], g_m1L3[oi],
+                    g_m1VwapW[oi], g_m1VwapM[oi],
+                    fIU, fID, fOUH, fOUL, fODH, fODL, fO2UH, fO2UL, fO2DH, fO2DL);
+     }
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| Maps the M1-sourced arrays onto whatever chart bars are actually   |
+//| being drawn - for chart bar i (spanning [time[i], time[i]+perSec)),|
+//| uses the M1-computed value as of the LAST M1 bar within that span, |
+//| i.e. "VWAP as of the end of this chart bar". Both arrays are        |
+//| chronological, so a single forward-advancing pointer is O(n) total. |
+//+------------------------------------------------------------------+
+void MapM1ToChart(const int rates_total, const datetime &time[], const int start)
+  {
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   int m1n = ArraySize(g_m1Time);
+   if(m1n == 0) return;
+   int m1ptr = 0;
+
+   for(int i = start; i < rates_total; i++)
+     {
+      datetime spanEnd = time[i] + perSec - 1;
+      while(m1ptr + 1 < m1n && g_m1Time[m1ptr + 1] <= spanEnd)
+         m1ptr++;
+      if(g_m1Time[m1ptr] > spanEnd && m1ptr == 0)
+        {
+         //--- this chart bar is entirely BEFORE the earliest M1 bar we have
+         //--- (can happen right at the edge of the lookback window) - leave blank
          g_vwap[i] = EMPTY_VALUE; g_u1[i] = EMPTY_VALUE; g_l1[i] = EMPTY_VALUE;
          g_u2[i] = EMPTY_VALUE; g_l2[i] = EMPTY_VALUE; g_u3[i] = EMPTY_VALUE; g_l3[i] = EMPTY_VALUE;
+         g_vwapW[i] = EMPTY_VALUE; g_vwapM[i] = EMPTY_VALUE;
          g_fillInnerUp[i] = EMPTY_VALUE; g_fillInnerDn[i] = EMPTY_VALUE;
          g_fillOuterUpHi[i] = EMPTY_VALUE; g_fillOuterUpLo[i] = EMPTY_VALUE;
          g_fillOuterDnHi[i] = EMPTY_VALUE; g_fillOuterDnLo[i] = EMPTY_VALUE;
@@ -339,37 +497,62 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          continue;
         }
 
-      double vwap = sumPV / sumV;
-      double variance = sumPV2V / sumV - vwap * vwap;
-      if(variance < 0.0) variance = 0.0;   // guards against float rounding on a near-zero-vol bar
-      double sd = MathSqrt(variance);
-      double up1 = vwap + sd,       dn1 = vwap - sd;
-      double up2 = vwap + 2.0 * sd, dn2 = vwap - 2.0 * sd;
-      double up3 = vwap + 3.0 * sd, dn3 = vwap - 3.0 * sd;
+      double vwap = g_m1Vwap[m1ptr], u1 = g_m1U1[m1ptr], l1 = g_m1L1[m1ptr];
+      double u2 = g_m1U2[m1ptr], l2 = g_m1L2[m1ptr], u3 = g_m1U3[m1ptr], l3 = g_m1L3[m1ptr];
+      g_vwap[i] = vwap; g_u1[i] = u1; g_l1[i] = l1; g_u2[i] = u2; g_l2[i] = l2; g_u3[i] = u3; g_l3[i] = l3;
+      g_vwapW[i] = g_m1VwapW[m1ptr]; g_vwapM[i] = g_m1VwapM[m1ptr];
 
-      g_vwap[i] = vwap;
-      g_u1[i] = InpShowSD1 ? up1 : EMPTY_VALUE;
-      g_l1[i] = InpShowSD1 ? dn1 : EMPTY_VALUE;
-      g_u2[i] = InpShowSD2 ? up2 : EMPTY_VALUE;
-      g_l2[i] = InpShowSD2 ? dn2 : EMPTY_VALUE;
-      g_u3[i] = InpShowSD3 ? up3 : EMPTY_VALUE;
-      g_l3[i] = InpShowSD3 ? dn3 : EMPTY_VALUE;
+      bool doInner  = InpShowShading && !InpShadeOuterOnly && InpShowSD1 && vwap != EMPTY_VALUE;
+      bool doOuter1 = InpShowShading && !InpShadeInnerOnly && InpShowSD1 && InpShowSD2 && vwap != EMPTY_VALUE;
+      bool doOuter2 = InpShowShading && !InpShadeInnerOnly && InpShowSD2 && InpShowSD3 && vwap != EMPTY_VALUE;
+      g_fillInnerUp[i] = doInner ? u1 : EMPTY_VALUE;
+      g_fillInnerDn[i] = doInner ? l1 : EMPTY_VALUE;
+      g_fillOuterUpHi[i] = doOuter1 ? u2 : EMPTY_VALUE;
+      g_fillOuterUpLo[i] = doOuter1 ? u1 : EMPTY_VALUE;
+      g_fillOuterDnHi[i] = doOuter1 ? l1 : EMPTY_VALUE;
+      g_fillOuterDnLo[i] = doOuter1 ? l2 : EMPTY_VALUE;
+      g_fillOuter2UpHi[i] = doOuter2 ? u3 : EMPTY_VALUE;
+      g_fillOuter2UpLo[i] = doOuter2 ? u2 : EMPTY_VALUE;
+      g_fillOuter2DnHi[i] = doOuter2 ? l2 : EMPTY_VALUE;
+      g_fillOuter2DnLo[i] = doOuter2 ? l3 : EMPTY_VALUE;
+     }
+  }
 
-      bool doInner  = InpShowShading && !InpShadeOuterOnly && InpShowSD1;
-      bool doOuter1 = InpShowShading && !InpShadeInnerOnly && InpShowSD1 && InpShowSD2;
-      bool doOuter2 = InpShowShading && !InpShadeInnerOnly && InpShowSD2 && InpShowSD3;
+//+------------------------------------------------------------------+
+//| Volume-weighted VWAP + std-dev bands, reset at every new calendar |
+//| day. v1.14: by default (InpUseM1Source=true) always computed from  |
+//| M1 bars regardless of the chart's own timeframe, so every timeframe|
+//| shows the same VWAP at the same moment - see file header's v1.14   |
+//| note. Falls back to the pre-v1.14 per-chart-bar computation if      |
+//| InpUseM1Source is turned off.                                       |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
+                 const double &open[], const double &high[], const double &low[], const double &close[],
+                 const long &tick_volume[], const long &volume[], const int &spread[])
+  {
+   if(rates_total < 2) return(0);
 
-      g_fillInnerUp[i] = doInner ? up1 : EMPTY_VALUE;
-      g_fillInnerDn[i] = doInner ? dn1 : EMPTY_VALUE;
-      g_fillOuterUpHi[i] = doOuter1 ? up2 : EMPTY_VALUE;
-      g_fillOuterUpLo[i] = doOuter1 ? up1 : EMPTY_VALUE;
-      g_fillOuterDnHi[i] = doOuter1 ? dn1 : EMPTY_VALUE;
-      g_fillOuterDnLo[i] = doOuter1 ? dn2 : EMPTY_VALUE;
-      g_fillOuter2UpHi[i] = doOuter2 ? up3 : EMPTY_VALUE;
-      g_fillOuter2UpLo[i] = doOuter2 ? up2 : EMPTY_VALUE;
-      g_fillOuter2DnHi[i] = doOuter2 ? dn2 : EMPTY_VALUE;
-      g_fillOuter2DnLo[i] = doOuter2 ? dn3 : EMPTY_VALUE;
+   if(!InpUseM1Source)
+     {
+      ComputeFromChartBars(rates_total, time, high, low, close, tick_volume, volume);
+      return(rates_total);
      }
 
+   datetime cutoff = VwapCutoff(time[rates_total - 1]);
+   int start = 0;
+   for(int i = rates_total - 1; i >= 0; i--)
+      if(time[i] < cutoff) { start = i + 1; break; }
+   if(start < 0) start = 0;
+
+   //--- rebuild the M1 source only when a new M1 bar has actually closed
+   //--- (or on the very first call) - NOT per tick, NOT per chart bar.
+   datetime m1now = iTime(_Symbol, PERIOD_M1, 0);
+   if(m1now != 0 && (m1now != g_lastM1Time || ArraySize(g_m1Time) == 0))
+     {
+      if(ComputeFromM1(cutoff))
+         g_lastM1Time = m1now;
+     }
+
+   MapM1ToChart(rates_total, time, start);
    return(rates_total);
   }
