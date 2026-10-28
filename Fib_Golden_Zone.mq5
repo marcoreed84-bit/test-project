@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -43,9 +43,18 @@ input group "=== Golden zone ==="
 input double   InpFibLow    = 0.618;     // shallow edge of the pocket
 input double   InpFibHigh   = 0.65;      // deep edge of the pocket - per direct request, ONLY this band
                                           // is drawn, no other fib levels
-input color    InpBullColor = C'20,60,35';   // lightly shaded - bullish leg (retracement expected DOWN
-                                              // into the zone before continuation up)
-input color    InpBearColor = C'60,25,25';   // bearish leg
+input color    InpBullColor = C'80,65,10';   // v1.02 FIX - real usability bug (per direct report, user
+                                              // circled an unrelated box and asked "where does this come
+                                              // from"): the old default C'20,60,35'/C'60,25,25' were
+                                              // nearly identical to FVG_Liquidity_Zones.mq5's own default
+                                              // FVG colors (C'25,55,40'/C'55,25,25') - with both
+                                              // indicators on the same chart, an old FVG from a totally
+                                              // unrelated consolidation was indistinguishable from this
+                                              // file's own golden-pocket zone. Now a distinct gold/amber
+                                              // tint (matching the name) that doesn't collide with either
+                                              // FVG or liquidity zone colors. Bullish leg (retracement
+                                              // expected DOWN into the zone before continuation up).
+input color    InpBearColor = C'90,55,15';   // bearish leg - same gold/amber family, slightly warmer
 input int      InpMaxZones  = 60;
 input int      InpMaxAgeDays = 14;       // FROZEN (finished) zones older than this are pruned (0 = never).
                                           // A still-extending (live) zone is never pruned by age.
@@ -105,7 +114,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.01 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.02 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
