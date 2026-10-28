@@ -1,10 +1,12 @@
 //+------------------------------------------------------------------+
 //|                                          Fib_Golden_Zone.mq5      |
-//|  Standalone indicator - draws ONLY the Fibonacci "golden pocket"  |
-//|  (0.618-0.65 retracement), lightly shaded, and ONLY on a leg that  |
-//|  just broke market structure. Per direct description: a fib drawn |
-//|  on just any swing is noise - the point is to catch a retracement |
-//|  into the zone after a confirmed break, not label every wiggle.   |
+//|  Standalone indicator - draws ONLY the Fibonacci "golden zone"     |
+//|  (the full 38.2-61.8 retracement range by default, split into two  |
+//|  separately-coloured bands at the 50.0 midpoint), lightly shaded,  |
+//|  and ONLY on a leg that just broke market structure. Per direct    |
+//|  description: a fib drawn on just any swing is noise - the point   |
+//|  is to catch a retracement into the zone after a confirmed break,  |
+//|  not label every wiggle.                                           |
 //|                                                                    |
 //|  Reuses the same swing-high/swing-low + Break-of-Structure logic   |
 //|  as MarketStructure_Break.mq5 (fractal pivots, ATR-filtered for    |
@@ -21,9 +23,9 @@
 //|  extending. The zone is drawn for the first time at the moment it  |
 //|  freezes: a NEW swing forms in the OPPOSITE direction after the    |
 //|  break (the impulse is read as finished). Bearish BOS is the       |
-//|  mirror. Zone = [extreme - 0.65*range, extreme - 0.618*range] for   |
-//|  a bullish leg (mirrored for bearish) - the golden pocket only, no |
-//|  other fib levels drawn. Visual only, no signals/alerts.           |
+//|  mirror. Two bands drawn per leg: InpFibA-InpFibB (38.2-50.0 by     |
+//|  default) and InpFibB-InpFibC (50.0-61.8 by default), each its own |
+//|  colour - no other fib levels drawn. Visual only, no signals.      |
 //|                                                                    |
 //|  Timeframe-flip safety: entirely chart-timeframe-native (like      |
 //|  MarketStructure_Break.mq5 and the other new standalone             |
@@ -32,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.07"
+#property version   "1.08"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -43,10 +45,13 @@ input double   InpMinMoveATR   = 1.5;    // a pivot only counts as a new swing i
                                           // ATR away from the previously tracked swing of the same type
 
 input group "=== Golden zone ==="
-input double   InpFibLow    = 0.618;     // shallow edge of the pocket
-input double   InpFibHigh   = 0.65;      // deep edge of the pocket - per direct request, ONLY this band
-                                          // is drawn, no other fib levels
-input color    InpBullColor = C'80,65,10';   // v1.02 FIX - real usability bug (per direct report, user
+input double   InpFibA = 0.382;   // v1.08: per direct request - the zone is now the FULL 38.2-61.8
+                                   // range (the common wider definition of "the golden zone"), split
+                                   // into two separately-coloured bands at the 50.0 midpoint, not just
+                                   // the narrow 0.618-0.65 pocket.
+input double   InpFibB = 0.5;
+input double   InpFibC = 0.618;
+input color    InpBand1Color = C'70,55,10';   // v1.02 FIX - real usability bug (per direct report, user
                                               // circled an unrelated box and asked "where does this come
                                               // from"): the old default C'20,60,35'/C'60,25,25' were
                                               // nearly identical to FVG_Liquidity_Zones.mq5's own default
@@ -54,10 +59,11 @@ input color    InpBullColor = C'80,65,10';   // v1.02 FIX - real usability bug (
                                               // indicators on the same chart, an old FVG from a totally
                                               // unrelated consolidation was indistinguishable from this
                                               // file's own golden-pocket zone. Now a distinct gold/amber
-                                              // tint (matching the name) that doesn't collide with either
-                                              // FVG or liquidity zone colors. Bullish leg (retracement
-                                              // expected DOWN into the zone before continuation up).
-input color    InpBearColor = C'90,55,15';   // bearish leg - same gold/amber family, slightly warmer
+                                              // family that doesn't collide with either FVG or liquidity
+                                              // zone colors. Band 1 = InpFibA-InpFibB (38.2-50.0 by default).
+input color    InpBand2Color = C'95,70,15';   // Band 2 = InpFibB-InpFibC (50.0-61.8 by default) - same
+                                              // gold/amber family, slightly brighter so the two bands
+                                              // are distinguishable at a glance.
 input bool     InpShowLegLines = true;   // v1.05: per direct request - "show me how it was calculated,
                                           // a line at the bottom and top" - draws the leg's own two
                                           // anchor prices (the swing it started at, and the extreme it
@@ -111,9 +117,9 @@ int OnInit()
       Print("Fib_Golden_Zone: InpPivotWindow must be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   if(InpFibLow <= 0.0 || InpFibHigh <= InpFibLow)
+   if(InpFibA <= 0.0 || InpFibB <= InpFibA || InpFibC <= InpFibB)
      {
-      Print("Fib_Golden_Zone: InpFibHigh must be greater than InpFibLow, both > 0.");
+      Print("Fib_Golden_Zone: InpFibA < InpFibB < InpFibC must all hold, and InpFibA must be > 0.");
       return(INIT_PARAMETERS_INCORRECT);
      }
    g_atrHandle = iATR(_Symbol, PERIOD_CURRENT, InpAtrPeriod);
@@ -127,9 +133,9 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.07 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.08 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  zone=%.3f-%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
-               InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
+               InpPivotWindow, InpMinMoveATR, InpFibA, InpFibB, InpFibC);
    return(INIT_SUCCEEDED);
   }
 
@@ -141,23 +147,29 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
-void DrawZone(const int idx)
+//+------------------------------------------------------------------+
+//| One retracement level -> price, for either leg direction.         |
+//+------------------------------------------------------------------+
+double FibPrice(const int idx, const double level)
   {
-   double top, bottom;
    if(g_zones[idx].bullish)
      {
       double range = g_zones[idx].extreme - g_zones[idx].legStart;
-      top    = g_zones[idx].extreme - InpFibLow  * range;
-      bottom = g_zones[idx].extreme - InpFibHigh * range;
+      return g_zones[idx].extreme - level * range;
      }
-   else
-     {
-      double range = g_zones[idx].legStart - g_zones[idx].extreme;
-      bottom = g_zones[idx].extreme + InpFibLow  * range;
-      top    = g_zones[idx].extreme + InpFibHigh * range;
-     }
-   color col = g_zones[idx].bullish ? InpBullColor : InpBearColor;
-   string nm = g_zones[idx].rectName;
+   double range = g_zones[idx].legStart - g_zones[idx].extreme;
+   return g_zones[idx].extreme + level * range;
+  }
+
+//+------------------------------------------------------------------+
+void DrawBand(const string nm, const int idx, const double levelLo, const double levelHi, const color col)
+  {
+   //--- the two price endpoints of a band depend on leg direction -
+   //--- FibPrice(levelLo) and FibPrice(levelHi) aren't consistently
+   //--- "top"/"bottom" between bullish and bearish legs, so sort them.
+   double p1 = FibPrice(idx, levelLo);
+   double p2 = FibPrice(idx, levelHi);
+   double top = MathMax(p1, p2), bottom = MathMin(p1, p2);
    if(ObjectFind(0, nm) < 0)
      {
       if(!ObjectCreate(0, nm, OBJ_RECTANGLE, 0, g_zones[idx].startTime, top, g_zones[idx].endTime, bottom))
@@ -176,8 +188,20 @@ void DrawZone(const int idx)
    ObjectMove(0, nm, 0, g_zones[idx].startTime, top);
    ObjectMove(0, nm, 1, g_zones[idx].endTime, bottom);
    ObjectSetString(0, nm, OBJPROP_TOOLTIP,
-                    StringFormat("%s golden pocket %.3f-%.3f: %s..%s", g_zones[idx].bullish ? "Bullish" : "Bearish",
-                                 InpFibLow, InpFibHigh, DoubleToString(bottom, _Digits), DoubleToString(top, _Digits)));
+                    StringFormat("%s %.3f-%.3f: %s..%s", g_zones[idx].bullish ? "Bullish" : "Bearish",
+                                 levelLo, levelHi, DoubleToString(bottom, _Digits), DoubleToString(top, _Digits)));
+  }
+
+//+------------------------------------------------------------------+
+void DrawZone(const int idx)
+  {
+   string nm = g_zones[idx].rectName;
+   //--- v1.08: two bands per direct request - the full InpFibA-InpFibC
+   //--- range (38.2-61.8 by default, the common wider "golden zone"),
+   //--- split at InpFibB (50.0) into two separately-coloured halves,
+   //--- instead of the old single narrow 0.618-0.65 pocket.
+   DrawBand(nm + "_b1", idx, InpFibA, InpFibB, InpBand1Color);
+   DrawBand(nm + "_b2", idx, InpFibB, InpFibC, InpBand2Color);
 
    //--- v1.05: the leg's own two anchor prices - legStart (the swing the
    //--- leg began at) and extreme (the frozen high/low it reached) -
@@ -239,7 +263,8 @@ void PruneZones(const datetime lastBarTime)
         {
          if(!g_zones[k].live && g_zones[k].endTime < cutoff)
            {
-            ObjectDelete(0, g_zones[k].rectName);
+            ObjectDelete(0, g_zones[k].rectName + "_b1");
+            ObjectDelete(0, g_zones[k].rectName + "_b2");
             ObjectDelete(0, g_zones[k].rectName + "_legstart");
             ObjectDelete(0, g_zones[k].rectName + "_legend");
             g_zones[k] = g_zones[ArraySize(g_zones) - 1];
@@ -255,7 +280,8 @@ void PruneZones(const datetime lastBarTime)
       for(int k = 0; k < ArraySize(g_zones); k++)
          if(!g_zones[k].live && (oldest < 0 || g_zones[k].startTime < g_zones[oldest].startTime)) oldest = k;
       if(oldest < 0) break;
-      ObjectDelete(0, g_zones[oldest].rectName);
+      ObjectDelete(0, g_zones[oldest].rectName + "_b1");
+      ObjectDelete(0, g_zones[oldest].rectName + "_b2");
       ObjectDelete(0, g_zones[oldest].rectName + "_legstart");
       ObjectDelete(0, g_zones[oldest].rectName + "_legend");
       g_zones[oldest] = g_zones[ArraySize(g_zones) - 1];
@@ -283,17 +309,8 @@ void StartZone(const bool bullish, const double legStart, const double extreme,
    //--- appears once this leg is finished and retracement has started
    //--- (see the freeze point in OnCalculate's own comment). Nothing on
    //--- the chart yet, this just starts tracking the leg internally.
-   //--- v1.03: diagnostic per direct report ("the fib indicator logic is
-   //--- off") - prints exactly which leg this zone anchored to, so a
-   //--- mismatch against MarketStructure_Break.mq5's own BOS line can be
-   //--- confirmed from the Experts log instead of guessed from a
-   //--- screenshot. Fib_Golden_Zone requires the tracked opposite swing
-   //--- to be MORE RECENT than the swing being broken (so it knows which
-   //--- low/high actually anchors the leg) - MarketStructure_Break has
-   //--- no such requirement, so the two can legitimately pick different
-   //--- break points on the same chart if Fib's own tracked opposite
-   //--- swing hasn't caught up yet (most likely cause: InpMinMoveATR
-   //--- filtering out a genuinely newer swing as "not different enough").
+   //--- v1.03: diagnostic - prints exactly which leg this zone anchored
+   //--- to, checkable against MarketStructure_Break.mq5's own BOS line.
    PrintFormat("Fib_Golden_Zone: new %s leg - start=%s @ %s, break/extreme=%s @ %s",
                bullish ? "BULLISH" : "BEARISH",
                DoubleToString(legStart, _Digits), TimeToString(startTime, TIME_DATE | TIME_MINUTES),
