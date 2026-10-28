@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -89,6 +89,9 @@ bool     g_swingLowBroken  = true;
 
 int      g_liveZone = -1;   // index of the one currently-live zone, or -1 - only one at a time, same
                              // "at most one active" convention as Consolidation_Zones.mq5
+datetime g_lastOrderWarnTime = 0;   // v1.03: throttles the "break withheld by ordering" diagnostic
+                                     // below to at most once/hour, so a long-withheld break doesn't
+                                     // spam the log every single bar while it stays withheld
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -114,7 +117,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.02 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.03 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
@@ -214,6 +217,21 @@ void StartZone(const bool bullish, const double legStart, const double extreme,
    g_zones[zi].rectName  = g_pfx + (bullish ? "up_" : "dn_") + IntegerToString((long)startTime);
    g_liveZone = zi;
    DrawZone(zi);
+   //--- v1.03: diagnostic per direct report ("the fib indicator logic is
+   //--- off") - prints exactly which leg this zone anchored to, so a
+   //--- mismatch against MarketStructure_Break.mq5's own BOS line can be
+   //--- confirmed from the Experts log instead of guessed from a
+   //--- screenshot. Fib_Golden_Zone requires the tracked opposite swing
+   //--- to be MORE RECENT than the swing being broken (so it knows which
+   //--- low/high actually anchors the leg) - MarketStructure_Break has
+   //--- no such requirement, so the two can legitimately pick different
+   //--- break points on the same chart if Fib's own tracked opposite
+   //--- swing hasn't caught up yet (most likely cause: InpMinMoveATR
+   //--- filtering out a genuinely newer swing as "not different enough").
+   PrintFormat("Fib_Golden_Zone: new %s leg - start=%s @ %s, break/extreme=%s @ %s",
+               bullish ? "BULLISH" : "BEARISH",
+               DoubleToString(legStart, _Digits), TimeToString(startTime, TIME_DATE | TIME_MINUTES),
+               DoubleToString(extreme, _Digits), TimeToString(endTime, TIME_DATE | TIME_MINUTES));
   }
 
 //+------------------------------------------------------------------+
@@ -323,19 +341,36 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          //--- skipped. Now requires the opposite swing to be the MORE
          //--- RECENT of the two, which is what actually makes it "the
          //--- low that started this impulse" rather than a stale one.
-         if(!g_swingHighBroken && g_swingHighTime != 0 && close[lastClosed] > g_swingHighPrice &&
-            g_swingLowTime != 0 && g_swingLowTime > g_swingHighTime)
+         bool bullBreakPrice = !g_swingHighBroken && g_swingHighTime != 0 && close[lastClosed] > g_swingHighPrice;
+         bool bearBreakPrice = !g_swingLowBroken  && g_swingLowTime  != 0 && close[lastClosed] < g_swingLowPrice;
+         if(bullBreakPrice && g_swingLowTime != 0 && g_swingLowTime > g_swingHighTime)
            {
             g_swingHighBroken = true;
             StartZone(true, g_swingLowPrice, MathMax(g_swingHighPrice, high[lastClosed]),
                       g_swingLowTime, time[lastClosed]);
            }
-         else if(!g_swingLowBroken && g_swingLowTime != 0 && close[lastClosed] < g_swingLowPrice &&
-                 g_swingHighTime != 0 && g_swingHighTime > g_swingLowTime)
+         else if(bearBreakPrice && g_swingHighTime != 0 && g_swingHighTime > g_swingLowTime)
            {
             g_swingLowBroken = true;
             StartZone(false, g_swingHighPrice, MathMin(g_swingLowPrice, low[lastClosed]),
                       g_swingHighTime, time[lastClosed]);
+           }
+         //--- v1.03 diagnostic, per direct report: this is the exact
+         //--- mismatch case that explains a stale/old zone instead of
+         //--- the leg MarketStructure_Break.mq5 just confirmed as broken
+         //--- - the PRICE already broke the tracked swing, but Fib's own
+         //--- extra ordering requirement (needs the opposite swing to be
+         //--- the more recent one, to know which low/high anchors the
+         //--- leg) is withholding the zone because its own tracked
+         //--- opposite swing hasn't caught up yet.
+         else if((bullBreakPrice || bearBreakPrice) && (datetime)(time[i] - g_lastOrderWarnTime) >= 3600)
+           {
+            g_lastOrderWarnTime = time[i];
+            PrintFormat("Fib_Golden_Zone: price broke the tracked %s swing at %s but the zone was WITHHELD - "
+                        "tracked high=%s @ %s, tracked low=%s @ %s (opposite swing isn't more recent yet)",
+                        bullBreakPrice ? "HIGH" : "LOW", TimeToString(time[i], TIME_DATE | TIME_MINUTES),
+                        DoubleToString(g_swingHighPrice, _Digits), TimeToString(g_swingHighTime, TIME_DATE | TIME_MINUTES),
+                        DoubleToString(g_swingLowPrice, _Digits), TimeToString(g_swingLowTime, TIME_DATE | TIME_MINUTES));
            }
         }
      }
