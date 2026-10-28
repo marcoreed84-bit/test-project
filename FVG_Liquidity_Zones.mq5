@@ -28,7 +28,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -136,7 +136,7 @@ int OnInit()
    ArrayResize(g_liqPivots, 0);
    g_lastBarTime = 0;
    g_lastDrawMs  = 0;
-   PrintFormat("FVG_Liquidity_Zones v1.00 OnInit: %s %s  FVG=%s  Liquidity=%s  scanLookback=%dd",
+   PrintFormat("FVG_Liquidity_Zones v1.01 OnInit: %s %s  FVG=%s  Liquidity=%s  scanLookback=%dd",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpShowFVG ? "on" : "off", InpShowLiquidity ? "on" : "off", InpScanLookbackDays);
    return(INIT_SUCCEEDED);
@@ -260,11 +260,32 @@ int FindLiquidityPair(const bool isHigh, const double price, const datetime t, c
 //| on each bar. Only ever called with a bounded, already-bar-gated    |
 //| range (see OnCalculate) - never the whole chart history at once.   |
 //+------------------------------------------------------------------+
+//--- v1.01 FIX (Opus audit): `atr[]` here is offset-aligned to `from`
+//--- (atr[0] == bar `from`), NOT a full rates_total-sized array indexed
+//--- by absolute bar number - see the call site's own comment for why.
 void ProcessBars(const int from, const int n, const datetime &time[], const double &high[],
                   const double &low[], const double &close[], const double &atr[])
   {
    int w = InpLiqPivotWindow;
-   for(int i = MathMax(from, 2); i < n; i++)
+   //--- v1.01 FIX (Opus audit - real bugs): this loop used to run up to
+   //--- i<n, which lets i reach the STILL-FORMING bar (n-1) - a gap
+   //--- could be created from a forming bar's momentary high/low (never
+   //--- undone if the bar closed differently), and far worse, the very
+   //--- next tick re-checked that SAME zone's fill condition against
+   //--- its own creation bar and found `close > top` true almost every
+   //--- time (the zone's own top/bottom ARE that bar's low/high), so
+   //--- nearly every live FVG flipped to "filled" about one tick after
+   //--- appearing. Combined with no bar-change gate at all (this file
+   //--- never had one, unlike the other new indicators), the same
+   //--- forming bar's gap got re-created as a FRESH duplicate zone on
+   //--- every single tick too. Bounding the loop to i<n-1-w (excluding
+   //--- the forming bar, with the margin the liquidity side's i+w
+   //--- lookahead needs) fixes both: no decision is ever made from an
+   //--- unclosed bar, and on a tick where nothing new has closed, `from`
+   //--- (computed in OnCalculate from prev_calculated) already equals
+   //--- this same upper bound, so the loop naturally runs zero times -
+   //--- same self-gating pattern as this project's other new indicators.
+   for(int i = MathMax(from, MathMax(2, w)); i < n - 1 - w; i++)
      {
       datetime t_i = time[i];
 
@@ -295,6 +316,16 @@ void ProcessBars(const int from, const int n, const datetime &time[], const doub
             DrawZoneRect(g_fvgZones[zi].rectName, g_fvgZones[zi].startTime, t_i,
                          g_fvgZones[zi].top, g_fvgZones[zi].bottom,
                          bullGap ? InpFvgBullCol : InpFvgBearCol);
+            //--- v1.01 FIX (Opus audit, real bug - same shape as
+            //--- TradePanel_EA's own v2.21 freeze): pruning used to only
+            //--- run once, AFTER this whole function returned - during a
+            //--- many-day backfill every FVG ever found stayed in the
+            //--- array the whole time, and every later bar's fill-check
+            //--- loop scanned all of them, filled ones included. Enforced
+            //--- here too so the array can never grow past InpFvgMaxZones
+            //--- mid-backfill, bounding the real cost to O(bars x
+            //--- InpFvgMaxZones) instead of O(bars x every zone ever seen).
+            if(ArraySize(g_fvgZones) > InpFvgMaxZones) PruneZones(g_fvgZones, InpFvgMaxZones, InpFvgMaxAgeDays, t_i);
            }
         }
 
@@ -316,8 +347,9 @@ void ProcessBars(const int from, const int n, const datetime &time[], const doub
             if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
             if(!isPeak && !isTrough) break;
            }
-         double tolerance = (atr[i] != EMPTY_VALUE && atr[i] > 0.0) ? InpLiqTolATR * atr[i] : 0.0;
-         double thickness = (atr[i] != EMPTY_VALUE && atr[i] > 0.0) ? InpLiqZoneThickATR * atr[i] : 0.0;
+         double atrHere = atr[i - from];
+         double tolerance = (atrHere != EMPTY_VALUE && atrHere > 0.0) ? InpLiqTolATR * atrHere : 0.0;
+         double thickness = (atrHere != EMPTY_VALUE && atrHere > 0.0) ? InpLiqZoneThickATR * atrHere : 0.0;
          if(tolerance > 0.0 && (isPeak || isTrough))
            {
             datetime pivotTime = time[i];
@@ -342,6 +374,9 @@ void ProcessBars(const int from, const int n, const datetime &time[], const doub
                g_liqZones[zi].rectName   = g_pfxLiq + (isPeak ? "sell_" : "buy_") + IntegerToString((long)pivotTime);
                DrawZoneRect(g_liqZones[zi].rectName, g_liqPivots[pair].t, pivotTime, top, bottom,
                             isPeak ? InpLiqBearCol : InpLiqBullCol);
+               //--- v1.01 FIX (Opus audit) - same reasoning as the FVG
+               //--- side's own fix just above.
+               if(ArraySize(g_liqZones) > InpLiqMaxZones) PruneZones(g_liqZones, InpLiqMaxZones, InpLiqMaxAgeDays, pivotTime);
               }
             int pIdx = ArraySize(g_liqPivots);
             ArrayResize(g_liqPivots, pIdx + 1);
@@ -428,19 +463,20 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
      }
    //--- atr[] above was copied as series (atr[0]=newest); ProcessBars
    //--- indexes forward like time[]/high[]/low[] (non-series), so build
-   //--- a forward-aligned array matching time[from..rates_total-1]
+   //--- a forward-aligned array matching time[from..rates_total-1].
+   //--- v1.01 FIX (Opus audit, real bug): this used to then also wrap
+   //--- atrFwd into a SEPARATE rates_total-sized array just so ProcessBars
+   //--- could index it by absolute bar number - an O(history) allocation
+   //--- EVERY call (every tick, since this runs even on a self-gated
+   //--- no-op call), the same cost-scaling shape as the old TradePanel
+   //--- v2.21 freeze on a large chart history. ProcessBars now indexes
+   //--- atrFwd directly as atr[i-from] instead, so only the small,
+   //--- bounded atrCount-sized array is ever allocated.
    double atrFwd[];
    ArrayResize(atrFwd, atrCount);
    for(int k = 0; k < atrCount; k++) atrFwd[k] = atr[atrCount - 1 - k];
 
-   //--- ProcessBars expects an array where atrFwd[i-from] lines up with
-   //--- bar i - wrap in a full-length array so the i-indexed access in
-   //--- ProcessBars doesn't need a separate offset parameter
-   double atrAligned[];
-   ArrayResize(atrAligned, rates_total);
-   for(int k = 0; k < atrCount; k++) atrAligned[from + k] = atrFwd[k];
-
-   ProcessBars(from, rates_total, time, high, low, close, atrAligned);
+   ProcessBars(from, rates_total, time, high, low, close, atrFwd);
 
    //--- v1.00: right-edge extend of active zones, throttled to once/sec -
    //--- same reasoning as Important_SR_Levels' RefreshRightEdgeLabels.

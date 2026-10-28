@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -105,7 +105,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.00 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.01 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
@@ -217,15 +217,20 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    int minBars = 2 * w + 10;
    if(rates_total < minBars) return(0);
 
-   datetime t0 = time[rates_total - 1];
-   if(t0 == g_lastBarTime) return(rates_total);
+   //--- v1.01 FIX (Opus audit - real bugs, same root causes already
+   //--- fixed in MarketStructure_Break.mq5 v1.01, see that file's own
+   //--- comment for the full mechanism): (a) g_lastBarTime committed
+   //--- before confirming the ATR fetch actually succeeded could
+   //--- silently skip the entire backfill forever; (b) `from` based on
+   //--- a fixed "last 3 bars" window instead of prev_calculated could
+   //--- silently drop bars after any gap; (c) the pivot loop could
+   //--- judge a bar against the STILL-FORMING bar's momentary high/low.
    bool freshAttach = (prev_calculated <= 0);
-   g_lastBarTime = t0;
-
+   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);   // nothing new
    int lookbackBars = (InpScanLookbackDays > 0)
                        ? (int)((long)InpScanLookbackDays * 86400 / PeriodSeconds(PERIOD_CURRENT)) + minBars
                        : rates_total;
-   int from = freshAttach ? MathMax(w, rates_total - lookbackBars) : MathMax(w, rates_total - 3 - w);
+   int from = freshAttach ? MathMax(w, rates_total - lookbackBars) : MathMax(w, prev_calculated - 1 - w);
    if(freshAttach)
      {
       ObjectsDeleteAll(0, g_pfx);
@@ -234,7 +239,6 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
       g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
      }
-   if(from >= rates_total) return(rates_total);
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, true);
@@ -242,7 +246,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    if(CopyBuffer(g_atrHandle, 0, 0, atrCount, atrBuf) < atrCount)
       return(0);
 
-   for(int i = MathMax(from, w); i < rates_total - w; i++)
+   for(int i = MathMax(from, w); i < rates_total - 1 - w; i++)
      {
       double atrHere = atrBuf[rates_total - 1 - i];
       if(atrHere <= 0.0) continue;
@@ -300,15 +304,25 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       int lastClosed = i;
       if(g_liveZone < 0)
         {
+         //--- v1.01 FIX (Opus audit - real bug, confirmed by hand-trace):
+         //--- this used to require the tracked opposite swing to be
+         //--- OLDER than the swing being broken - backwards. The normal
+         //--- case (low, then high, then a newer higher-low pullback,
+         //--- then breakout above the high) has the tracked low NEWER
+         //--- than the tracked high, which the old `<` rejected outright
+         //--- - the first real BOS of almost any genuine leg was silently
+         //--- skipped. Now requires the opposite swing to be the MORE
+         //--- RECENT of the two, which is what actually makes it "the
+         //--- low that started this impulse" rather than a stale one.
          if(!g_swingHighBroken && g_swingHighTime != 0 && close[lastClosed] > g_swingHighPrice &&
-            g_swingLowTime != 0 && g_swingLowTime < g_swingHighTime)
+            g_swingLowTime != 0 && g_swingLowTime > g_swingHighTime)
            {
             g_swingHighBroken = true;
             StartZone(true, g_swingLowPrice, MathMax(g_swingHighPrice, high[lastClosed]),
                       g_swingLowTime, time[lastClosed]);
            }
          else if(!g_swingLowBroken && g_swingLowTime != 0 && close[lastClosed] < g_swingLowPrice &&
-                 g_swingHighTime != 0 && g_swingHighTime < g_swingLowTime)
+                 g_swingHighTime != 0 && g_swingHighTime > g_swingLowTime)
            {
             g_swingLowBroken = true;
             StartZone(false, g_swingHighPrice, MathMin(g_swingLowPrice, low[lastClosed]),
@@ -317,6 +331,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
      }
 
-   PruneZones(t0);
+   g_lastBarTime = time[rates_total - 1];
+   PruneZones(g_lastBarTime);
    return(rates_total);
   }

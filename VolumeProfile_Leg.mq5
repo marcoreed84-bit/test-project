@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -74,6 +74,11 @@ struct Leg
    datetime endTime;
    bool     finished;      // profile already computed+drawn for this leg
    bool     live;          // still extending - mirrors Fib_Golden_Zone.mq5's own "live" state
+   bool     bullish;       // v1.01 FIX (Opus audit, real bug): freezing used to fire on ANY pivot
+                            // in either direction with no direction check at all - a bullish leg
+                            // froze at its own first swing HIGH instead of waiting for the next
+                            // swing LOW like Fib_Golden_Zone.mq5 correctly does. Added so the
+                            // freeze check can require the OPPOSITE-direction pivot, same rule.
    double   extreme;       // running extreme while live
   };
 
@@ -101,6 +106,16 @@ int OnInit()
       Print("VolumeProfile_Leg: InpPivotWindow must be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
+   //--- v1.01 FIX (Opus audit): InpBuckets<=0 was never validated -
+   //--- DrawLegProfile divides by InpBuckets to get bucket width, and
+   //--- indexes vol[0]/ArrayResize(vol, InpBuckets) - a 0 or negative
+   //--- value is a divide-by-zero / invalid-array-size crash, not caught
+   //--- until a leg actually finishes and tries to draw.
+   if(InpBuckets <= 0)
+     {
+      Print("VolumeProfile_Leg: InpBuckets must be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
    g_atrHandle = iATR(_Symbol, PERIOD_CURRENT, InpAtrPeriod);
    if(g_atrHandle == INVALID_HANDLE)
      {
@@ -112,7 +127,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.00 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.01 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -261,15 +276,18 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    int minBars = 2 * w + 10;
    if(rates_total < minBars) return(0);
 
-   datetime t0 = time[rates_total - 1];
-   if(t0 == g_lastBarTime) return(rates_total);
+   //--- v1.01 FIX (Opus audit - real bugs, same root causes already
+   //--- fixed in MarketStructure_Break.mq5 v1.01, see that file's own
+   //--- comment for the full mechanism): g_lastBarTime committed before
+   //--- confirming the ATR fetch succeeded; `from` based on a fixed
+   //--- window instead of prev_calculated; the pivot loop reading the
+   //--- still-forming bar.
    bool freshAttach = (prev_calculated <= 0);
-   g_lastBarTime = t0;
-
+   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);   // nothing new
    int lookbackBars = (InpScanLookbackDays > 0)
                        ? (int)((long)InpScanLookbackDays * 86400 / PeriodSeconds(PERIOD_CURRENT)) + minBars
                        : rates_total;
-   int from = freshAttach ? MathMax(w, rates_total - lookbackBars) : MathMax(w, rates_total - 3 - w);
+   int from = freshAttach ? MathMax(w, rates_total - lookbackBars) : MathMax(w, prev_calculated - 1 - w);
    if(freshAttach)
      {
       ObjectsDeleteAll(0, g_pfx);
@@ -278,7 +296,6 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
       g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
      }
-   if(from >= rates_total) return(rates_total);
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, true);
@@ -288,7 +305,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
 
    int perSec = PeriodSeconds(PERIOD_CURRENT);
 
-   for(int i = MathMax(from, w); i < rates_total - w; i++)
+   for(int i = MathMax(from, w); i < rates_total - 1 - w; i++)
      {
       double atrHere = atrBuf[rates_total - 1 - i];
       if(atrHere <= 0.0) continue;
@@ -302,17 +319,13 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          if(!isPeak && !isTrough) break;
         }
 
-      //--- a fresh opposite swing freezes the live leg - its profile is
-      //--- computed and drawn exactly here, once, over its final bars
-      if(isTrough && g_liveLeg >= 0 && g_legs[g_liveLeg].live)
-        {
-         g_legs[g_liveLeg].live     = false;
-         g_legs[g_liveLeg].finished = true;
-         g_legs[g_liveLeg].endIdx   = i - 1;
-         DrawLegProfile(g_liveLeg, high, low, close, tick_volume, volume, time, perSec);
-         g_liveLeg = -1;
-        }
-      else if(isPeak && g_liveLeg >= 0 && g_legs[g_liveLeg].live)
+      //--- v1.01 FIX (Opus audit, real bug): used to freeze the live leg
+      //--- on ANY pivot in either direction - a bullish leg could freeze
+      //--- at its OWN first swing high instead of waiting for the next
+      //--- swing LOW (the actual sign the impulse is over). Now checks
+      //--- the leg's own direction, same rule Fib_Golden_Zone.mq5 uses.
+      if(g_liveLeg >= 0 && g_legs[g_liveLeg].live &&
+         ((g_legs[g_liveLeg].bullish && isTrough) || (!g_legs[g_liveLeg].bullish && isPeak)))
         {
          g_legs[g_liveLeg].live     = false;
          g_legs[g_liveLeg].finished = true;
@@ -336,10 +349,16 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          g_swingLowBroken = false;
         }
 
+      //--- v1.01 FIX (Opus audit - real bug, same mechanism as
+      //--- Fib_Golden_Zone.mq5's own v1.01 fix): these index comparisons
+      //--- used to require the tracked opposite swing to be OLDER
+      //--- (smaller index) than the swing being broken - backwards, for
+      //--- the same reason explained in that file's own comment. Flipped
+      //--- to require it be the MORE RECENT of the two.
       if(g_liveLeg < 0)
         {
          if(!g_swingHighBroken && g_swingHighTime != 0 && close[i] > g_swingHighPrice &&
-            g_swingLowIdx >= 0 && g_swingLowIdx < g_swingHighIdx)
+            g_swingLowIdx >= 0 && g_swingLowIdx > g_swingHighIdx)
            {
             g_swingHighBroken = true;
             int zi = ArraySize(g_legs);
@@ -350,11 +369,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_legs[zi].endTime   = time[i];
             g_legs[zi].finished  = false;
             g_legs[zi].live      = true;
+            g_legs[zi].bullish   = true;
             g_legs[zi].extreme   = high[i];
             g_liveLeg = zi;
            }
          else if(!g_swingLowBroken && g_swingLowTime != 0 && close[i] < g_swingLowPrice &&
-                 g_swingHighIdx >= 0 && g_swingHighIdx < g_swingLowIdx)
+                 g_swingHighIdx >= 0 && g_swingHighIdx > g_swingLowIdx)
            {
             g_swingLowBroken = true;
             int zi = ArraySize(g_legs);
@@ -365,6 +385,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_legs[zi].endTime   = time[i];
             g_legs[zi].finished  = false;
             g_legs[zi].live      = true;
+            g_legs[zi].bullish   = false;
             g_legs[zi].extreme   = low[i];
             g_liveLeg = zi;
            }
@@ -375,6 +396,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
      }
 
-   PruneLegs(t0);
+   g_lastBarTime = time[rates_total - 1];
+   PruneLegs(g_lastBarTime);
    return(rates_total);
   }

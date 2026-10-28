@@ -24,7 +24,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -84,7 +84,7 @@ int OnInit()
    ArrayResize(g_london, 0);
    ArrayResize(g_ny, 0);
    g_lastBarTime = 0;
-   PrintFormat("Session_Boxes v1.00 OnInit: %s %s  Asia=%02d-%02d  London=%02d-%02d  NY=%02d-%02d  drawDays=%d",
+   PrintFormat("Session_Boxes v1.01 OnInit: %s %s  Asia=%02d-%02d  London=%02d-%02d  NY=%02d-%02d  drawDays=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpAsiaStartHour, InpAsiaEndHour, InpLondonStartHour, InpLondonEndHour,
                InpNYStartHour, InpNYEndHour, InpDrawDays);
@@ -205,11 +205,16 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
   {
    if(rates_total < 2) return(0);
 
-   datetime t0 = time[rates_total - 1];
-   if(t0 == g_lastBarTime) return(rates_total);   // once per new CLOSED bar only
+   //--- v1.01 FIX (Opus audit, real bug): `from` used to be a fixed
+   //--- "last 3 bars" window regardless of prev_calculated - after any
+   //--- gap longer than that (reconnect, missed ticks), bars in between
+   //--- were silently never scanned into a session box, with no rescan
+   //--- ever triggered. Now derived from prev_calculated itself, so it
+   //--- always covers however many bars actually elapsed. Also moved
+   //--- g_lastBarTime's commit to after the loop runs (not before) so a
+   //--- call that bails out early never falsely marks this bar "done".
    bool freshAttach = (prev_calculated <= 0);
-   g_lastBarTime = t0;
-
+   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);   // nothing new
    int lookbackBars = (int)((long)(InpDrawDays + 1) * 86400 / PeriodSeconds(PERIOD_CURRENT)) + 5;
    int from;
    if(freshAttach)
@@ -221,7 +226,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       from = MathMax(0, rates_total - lookbackBars);
      }
    else
-      from = MathMax(0, rates_total - 3);
+      from = MathMax(0, prev_calculated - 1);
 
    MqlDateTime dt;
    for(int i = from; i < rates_total - 1; i++)   // rates_total-1 is still forming, process closed bars only
@@ -239,9 +244,10 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                t, high[i], low[i], hour, dayStart);
      }
 
-   PruneBoxes(g_asia,   "Asia",   t0);
-   PruneBoxes(g_london, "London", t0);
-   PruneBoxes(g_ny,     "NY",     t0);
+   g_lastBarTime = time[rates_total - 1];
+   PruneBoxes(g_asia,   "Asia",   g_lastBarTime);
+   PruneBoxes(g_london, "London", g_lastBarTime);
+   PruneBoxes(g_ny,     "NY",     g_lastBarTime);
 
    return(rates_total);
   }

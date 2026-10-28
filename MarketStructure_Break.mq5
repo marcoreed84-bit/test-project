@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -96,7 +96,7 @@ int OnInit()
    g_swingLowPrice    = 0.0;
    g_swingLowTime     = 0;
    g_swingLowBroken   = true;
-   PrintFormat("MarketStructure_Break v1.00 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
+   PrintFormat("MarketStructure_Break v1.01 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBosDrawDays);
    return(INIT_SUCCEEDED);
@@ -194,15 +194,45 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- would just repeat identical work for nothing. Same once-per-bar
    //--- gate used throughout this project (MarketStructure_Swings,
    //--- TradePanel_EA's CheckNewBar, etc).
-   datetime t0 = time[rates_total - 1];
-   if(t0 == g_lastBarTime) return(rates_total);
+   //--- v1.01 FIX (Opus audit - real bugs, confirmed by hand-trace):
+   //--- (a) g_lastBarTime used to be committed BEFORE the ATR CopyBuffer
+   //--- below was confirmed to succeed - a transient "not ready yet" on
+   //--- the very first tick after attach/reinit (routine, especially
+   //--- right after a timeframe switch) got silently treated as "this
+   //--- bar is done", so prev_calculated went non-zero with NOTHING
+   //--- ever actually scanned - no historical BOS lines, ever, until the
+   //--- next genuinely new bar. Now only committed after a successful
+   //--- ATR read.
+   //--- (b) `from` used to be a fixed "last 3 bars" window regardless of
+   //--- prev_calculated - after any gap longer than that (reconnect,
+   //--- missed ticks), bars in between were silently never scanned, with
+   //--- no rescan ever triggered. Now derived from prev_calculated
+   //--- itself, so it always covers however many bars actually elapsed.
+   //--- (c) the pivot loop used to run up to i < rates_total-w, which
+   //--- lets i+w reach rates_total-1 - the STILL-FORMING bar, whose
+   //--- high/low change every tick. A bar got judged a confirmed pivot
+   //--- against a forming neighbor's momentary value, and once accepted
+   //--- it was never un-accepted even after that neighbor's real close
+   //--- turned out different. Loop now stops one bar earlier so i+w
+   //--- can never reach the forming bar.
+   //--- (d) the break check used to run ONCE, after the loop, only
+   //--- against the single newest closed bar - so a backfill/reinit drew
+   //--- NO historical BOS lines at all (every break that happened during
+   //--- the scanned window was skipped), and could draw a FALSE break
+   //--- on the attach bar for a swing that was actually broken much
+   //--- earlier in history. Moved inside the loop so every bar is
+   //--- checked against the swing state as it stood at that exact point
+   //--- in time, in order - exactly how Fib_Golden_Zone.mq5/
+   //--- VolumeProfile_Leg.mq5 already did it correctly.
    bool freshAttach = (prev_calculated <= 0);
-   g_lastBarTime = t0;
-
    int lookbackBars = (InpScanLookbackDays > 0)
                        ? (int)((long)InpScanLookbackDays * 86400 / PeriodSeconds(PERIOD_CURRENT)) + minBars
                        : rates_total;
-   int from = freshAttach ? MathMax(w, rates_total - lookbackBars) : MathMax(w, rates_total - 3 - w);
+   //--- nothing new since the last call (no new bar formed) - the loop
+   //--- below would naturally process zero bars anyway, but skip the
+   //--- ATR fetch too rather than pay for it on every tick for nothing.
+   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);
+   int from = freshAttach ? MathMax(w, rates_total - lookbackBars) : MathMax(w, prev_calculated - 1 - w);
    if(freshAttach)
      {
       ObjectsDeleteAll(0, g_pfx);
@@ -216,7 +246,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    if(CopyBuffer(g_atrHandle, 0, 0, atrCount, atrBuf) < atrCount)
       return(0);   // ATR not ready yet - retry next tick, prev_calculated stays 0
 
-   for(int i = MathMax(from, w); i < rates_total - w; i++)
+   for(int i = MathMax(from, w); i < rates_total - 1 - w; i++)
      {
       double atrHere = atrBuf[rates_total - 1 - i];
       if(atrHere == EMPTY_VALUE || atrHere <= 0.0) continue;
@@ -229,6 +259,21 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          if(low[i]  > low[i - k]  || low[i]  >= low[i + k])  isTrough = false;
          if(!isPeak && !isTrough) break;
         }
+
+      //--- break check FIRST, against the swing state as it stood going
+      //--- into this bar - so a swing that forms and is broken within
+      //--- the same handful of bars is still resolved in the right order
+      if(!g_swingHighBroken && g_swingHighTime != 0 && close[i] > g_swingHighPrice)
+        {
+         g_swingHighBroken = true;
+         DrawBosLine(true, g_swingHighTime, time[i], g_swingHighPrice);
+        }
+      if(!g_swingLowBroken && g_swingLowTime != 0 && close[i] < g_swingLowPrice)
+        {
+         g_swingLowBroken = true;
+         DrawBosLine(false, g_swingLowTime, time[i], g_swingLowPrice);
+        }
+
       //--- a new pivot only replaces the tracked swing if it's at least
       //--- minMove away from the CURRENTLY tracked swing of the same
       //--- type - otherwise it's just noise near the same level, not a
@@ -249,25 +294,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
      }
 
-   //--- break check - evaluated on every closed bar in the processed
-   //--- range against whichever swing is CURRENTLY tracked (not
-   //--- reprocessed historically per bar, since the swing tracked
-   //--- above already reflects the full in-order history up to here)
-   int lastClosed = rates_total - 2;   // rates_total-1 is still forming
-   if(lastClosed >= from && lastClosed >= 0)
-     {
-      if(!g_swingHighBroken && g_swingHighTime != 0 && close[lastClosed] > g_swingHighPrice)
-        {
-         g_swingHighBroken = true;
-         DrawBosLine(true, g_swingHighTime, time[lastClosed], g_swingHighPrice);
-        }
-      if(!g_swingLowBroken && g_swingLowTime != 0 && close[lastClosed] < g_swingLowPrice)
-        {
-         g_swingLowBroken = true;
-         DrawBosLine(false, g_swingLowTime, time[lastClosed], g_swingLowPrice);
-        }
-     }
-
-   PruneOldBos(t0);
+   g_lastBarTime = time[rates_total - 1];
+   PruneOldBos(g_lastBarTime);
    return(rates_total);
   }

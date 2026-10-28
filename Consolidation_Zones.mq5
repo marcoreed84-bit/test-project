@@ -24,7 +24,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -87,7 +87,7 @@ int OnInit()
      }
    ArrayResize(g_boxes, 0);
    g_lastBarTime = 0;
-   PrintFormat("Consolidation_Zones v1.00 OnInit: %s %s  startWindow=%d  rangeATRMax=%.2f  scanLookback=%dd",
+   PrintFormat("Consolidation_Zones v1.01 OnInit: %s %s  startWindow=%d  rangeATRMax=%.2f  scanLookback=%dd",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpStartWindow, InpRangeATRMax, InpScanLookbackDays);
    return(INIT_SUCCEEDED);
@@ -172,12 +172,34 @@ int ActiveBoxIndex()
   }
 
 //+------------------------------------------------------------------+
-void ProcessBars(const int from, const int n, const datetime &time[], const double &high[],
-                  const double &low[], const double &close[], const double &atrAligned[])
+//| v1.01 (Opus audit): guards against appending a true duplicate      |
+//| array entry if a 1-bar processing overlap between calls ever re-   |
+//| detects the same box start - BoxName()'s own ObjectFind guard       |
+//| already made the DRAWN object idempotent, but without this the     |
+//| underlying g_boxes[] array could still grow a second identical     |
+//| struct entry under the same name, corrupting later pruning/lookup. |
+//+------------------------------------------------------------------+
+bool BoxExists(const datetime startTime)
   {
-   for(int i = MathMax(from, InpStartWindow); i < n; i++)
+   for(int k = 0; k < ArraySize(g_boxes); k++)
+      if(g_boxes[k].startTime == startTime) return true;
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//--- v1.01 FIX (Opus audit): `atr[]` is offset-aligned to `from` (atr[0]
+//--- == bar `from`), NOT a full rates_total-sized array indexed by
+//--- absolute bar number - see the call site's own comment for why.
+void ProcessBars(const int from, const int n, const datetime &time[], const double &high[],
+                  const double &low[], const double &close[], const double &atr[])
+  {
+   //--- v1.01 FIX (Opus audit, real bug): used to run up to i<n, which
+   //--- lets this read the STILL-FORMING bar (n-1) as if it were closed
+   //--- - its high/low change every tick, so a box could start/extend/
+   //--- break off a momentary value that never actually closed that way.
+   for(int i = MathMax(from, InpStartWindow); i < n - 1; i++)
      {
-      double atrHere = atrAligned[i];
+      double atrHere = atr[i - from];
       if(atrHere <= 0.0) continue;
       double maxRange = InpRangeATRMax * atrHere;
 
@@ -192,13 +214,14 @@ void ProcessBars(const int from, const int n, const datetime &time[], const doub
             hi = MathMax(hi, high[i - k]);
             lo = MathMin(lo, low[i - k]);
            }
-         if((hi - lo) <= maxRange)
+         datetime newStart = time[i - InpStartWindow + 1];
+         if((hi - lo) <= maxRange && !BoxExists(newStart))
            {
             int zi = ArraySize(g_boxes);
             ArrayResize(g_boxes, zi + 1);
             g_boxes[zi].high      = hi;
             g_boxes[zi].low       = lo;
-            g_boxes[zi].startTime = time[i - InpStartWindow + 1];
+            g_boxes[zi].startTime = newStart;
             g_boxes[zi].endTime   = time[i];
             g_boxes[zi].active    = true;
             g_boxes[zi].brokenUp  = false;
@@ -219,7 +242,19 @@ void ProcessBars(const int from, const int n, const datetime &time[], const doub
          g_boxes[ai].active = false;
          if(haveMinBars)
            {
-            g_boxes[ai].brokenUp = (close[i] >= g_boxes[ai].high);
+            //--- v1.01 FIX (Opus audit, real bug): `close[i] >= box.high`
+            //--- alone mislabels a bar whose close lands BETWEEN the old
+            //--- box's high and low (wick pushed the range over the cap
+            //--- but the close itself is still ambiguous) as "broken
+            //--- down" by default, regardless of which side the range
+            //--- violation actually came from. Now determined by which
+            //--- edge the bar's own wick actually extended past; if both
+            //--- extended in the same bar, fall back to close-vs-midpoint.
+            bool highExpanded = high[i] > g_boxes[ai].high;
+            bool lowExpanded  = low[i]  < g_boxes[ai].low;
+            if(highExpanded && !lowExpanded)      g_boxes[ai].brokenUp = true;
+            else if(lowExpanded && !highExpanded) g_boxes[ai].brokenUp = false;
+            else                                  g_boxes[ai].brokenUp = (close[i] >= (g_boxes[ai].high + g_boxes[ai].low) / 2.0);
             DrawBox(ai, g_boxes[ai].brokenUp ? InpBrokenUpColor : InpBrokenDownColor);
            }
          else
@@ -240,13 +275,14 @@ void ProcessBars(const int from, const int n, const datetime &time[], const doub
             hi = MathMax(hi, high[i - k]);
             lo = MathMin(lo, low[i - k]);
            }
-         if((hi - lo) <= maxRange)
+         datetime newStart2 = time[MathMax(0, i - InpStartWindow + 1)];
+         if((hi - lo) <= maxRange && !BoxExists(newStart2))
            {
             int zi = ArraySize(g_boxes);
             ArrayResize(g_boxes, zi + 1);
             g_boxes[zi].high      = hi;
             g_boxes[zi].low       = lo;
-            g_boxes[zi].startTime = time[MathMax(0, i - InpStartWindow + 1)];
+            g_boxes[zi].startTime = newStart2;
             g_boxes[zi].endTime   = time[i];
             g_boxes[zi].active    = true;
             g_boxes[zi].brokenUp  = false;
@@ -272,11 +308,17 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    int minBars = InpStartWindow + 10;
    if(rates_total < minBars) return(0);
 
-   datetime t0 = time[rates_total - 1];
-   if(t0 == g_lastBarTime) return(rates_total);   // once per new CLOSED bar only - see MarketStructure_Break's own comment on why
+   //--- v1.01 FIX (Opus audit - real bugs, same root causes already
+   //--- fixed in MarketStructure_Break.mq5 v1.01, see that file's own
+   //--- comment for the full mechanism): g_lastBarTime committed before
+   //--- confirming the ATR fetch succeeded; `from` based on a fixed
+   //--- window instead of prev_calculated (here this also meant a box
+   //--- that broke in one call could get spuriously re-detected/re-
+   //--- started by reprocessing the same already-handled bars again in
+   //--- a later call); ProcessBars' own loop reading the still-forming
+   //--- bar (fixed there, not here - see its own updated bound).
    bool freshAttach = (prev_calculated <= 0);
-   g_lastBarTime = t0;
-
+   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);   // nothing new
    int lookbackBars = (InpScanLookbackDays > 0)
                        ? (int)((long)InpScanLookbackDays * 86400 / PeriodSeconds(PERIOD_CURRENT)) + minBars
                        : rates_total;
@@ -288,9 +330,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       from = MathMax(InpStartWindow, rates_total - lookbackBars);
      }
    else
-      from = MathMax(InpStartWindow, rates_total - 3);
-
-   if(from >= rates_total) return(rates_total);
+      //--- consolidation/breakout logic never looks ahead of the bar
+      //--- being processed (unlike the pivot-window indicators), so no
+      //--- "-w" reprocessing margin is needed here - prev_calculated-1
+      //--- already covers the one bar that might not have been final
+      //--- last time.
+      from = MathMax(InpStartWindow, prev_calculated - 1);
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, true);
@@ -298,11 +343,19 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    if(CopyBuffer(g_atrHandle, 0, 0, atrCount, atrBuf) < atrCount)
       return(0);   // ATR not ready yet - retry next tick, prev_calculated stays 0
 
-   double atrAligned[];
-   ArrayResize(atrAligned, rates_total);
-   for(int k = 0; k < atrCount; k++) atrAligned[from + k] = atrBuf[atrCount - 1 - k];
+   //--- v1.01 FIX (Opus audit, real bug): this used to wrap the ATR
+   //--- values into a SEPARATE rates_total-sized array just so ProcessBars
+   //--- could index it by absolute bar number - an O(history) allocation
+   //--- on every call (every tick, since this runs even on a self-gated
+   //--- no-op call), the same cost-scaling shape as the old TradePanel
+   //--- v2.21 freeze on a large chart history. ProcessBars now indexes
+   //--- the small, bounded atrFwd array directly as atr[i-from] instead.
+   double atrFwd[];
+   ArrayResize(atrFwd, atrCount);
+   for(int k = 0; k < atrCount; k++) atrFwd[k] = atrBuf[atrCount - 1 - k];
 
-   ProcessBars(from, rates_total, time, high, low, close, atrAligned);
-   PruneBoxes(t0);
+   ProcessBars(from, rates_total, time, high, low, close, atrFwd);
+   g_lastBarTime = time[rates_total - 1];
+   PruneBoxes(g_lastBarTime);
    return(rates_total);
   }
