@@ -32,7 +32,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -58,6 +58,13 @@ input color    InpBullColor = C'80,65,10';   // v1.02 FIX - real usability bug (
                                               // FVG or liquidity zone colors. Bullish leg (retracement
                                               // expected DOWN into the zone before continuation up).
 input color    InpBearColor = C'90,55,15';   // bearish leg - same gold/amber family, slightly warmer
+input bool     InpShowLegLines = true;   // v1.05: per direct request - "show me how it was calculated,
+                                          // a line at the bottom and top" - draws the leg's own two
+                                          // anchor prices (the swing it started at, and the extreme it
+                                          // reached) as thin lines spanning the same time range as the
+                                          // zone, so the 0.618-0.65 retracement is visibly checkable
+                                          // against the actual leg it was computed from.
+input color    InpLegLineColor = clrSilver;
 input int      InpMaxZones  = 60;
 input int      InpMaxAgeDays = 14;       // FROZEN (finished) zones older than this are pruned (0 = never).
                                           // A still-extending (live) zone is never pruned by age.
@@ -120,7 +127,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.04 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.05 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
@@ -171,6 +178,55 @@ void DrawZone(const int idx)
    ObjectSetString(0, nm, OBJPROP_TOOLTIP,
                     StringFormat("%s golden pocket %.3f-%.3f: %s..%s", g_zones[idx].bullish ? "Bullish" : "Bearish",
                                  InpFibLow, InpFibHigh, DoubleToString(bottom, _Digits), DoubleToString(top, _Digits)));
+
+   //--- v1.05: the leg's own two anchor prices - legStart (the swing the
+   //--- leg began at) and extreme (the frozen high/low it reached) -
+   //--- drawn as thin lines spanning the same time range as the zone
+   //--- rectangle, so the retracement math is directly checkable against
+   //--- the actual leg: top/bottom of the rectangle above should always
+   //--- sit strictly between these two lines, closer to the extreme one.
+   if(InpShowLegLines)
+     {
+      string nmStart = nm + "_legstart";
+      string nmEnd   = nm + "_legend";
+      if(ObjectFind(0, nmStart) < 0)
+        {
+         ObjectCreate(0, nmStart, OBJ_TREND, 0, g_zones[idx].startTime, g_zones[idx].legStart,
+                      g_zones[idx].endTime, g_zones[idx].legStart);
+         ObjectSetInteger(0, nmStart, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, nmStart, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, nmStart, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(0, nmStart, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, nmStart, OBJPROP_RAY_RIGHT, false);
+        }
+      ObjectSetInteger(0, nmStart, OBJPROP_TIME, 0, g_zones[idx].startTime);
+      ObjectSetDouble (0, nmStart, OBJPROP_PRICE, 0, g_zones[idx].legStart);
+      ObjectSetInteger(0, nmStart, OBJPROP_TIME, 1, g_zones[idx].endTime);
+      ObjectSetDouble (0, nmStart, OBJPROP_PRICE, 1, g_zones[idx].legStart);
+      ObjectSetInteger(0, nmStart, OBJPROP_COLOR, InpLegLineColor);
+      ObjectSetString (0, nmStart, OBJPROP_TOOLTIP,
+                        "Leg start (" + (g_zones[idx].bullish ? "low" : "high") + "): " +
+                        DoubleToString(g_zones[idx].legStart, _Digits));
+
+      if(ObjectFind(0, nmEnd) < 0)
+        {
+         ObjectCreate(0, nmEnd, OBJ_TREND, 0, g_zones[idx].startTime, g_zones[idx].extreme,
+                      g_zones[idx].endTime, g_zones[idx].extreme);
+         ObjectSetInteger(0, nmEnd, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, nmEnd, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, nmEnd, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(0, nmEnd, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, nmEnd, OBJPROP_RAY_RIGHT, false);
+        }
+      ObjectSetInteger(0, nmEnd, OBJPROP_TIME, 0, g_zones[idx].startTime);
+      ObjectSetDouble (0, nmEnd, OBJPROP_PRICE, 0, g_zones[idx].extreme);
+      ObjectSetInteger(0, nmEnd, OBJPROP_TIME, 1, g_zones[idx].endTime);
+      ObjectSetDouble (0, nmEnd, OBJPROP_PRICE, 1, g_zones[idx].extreme);
+      ObjectSetInteger(0, nmEnd, OBJPROP_COLOR, InpLegLineColor);
+      ObjectSetString (0, nmEnd, OBJPROP_TOOLTIP,
+                        "Leg extreme (" + (g_zones[idx].bullish ? "high" : "low") + "): " +
+                        DoubleToString(g_zones[idx].extreme, _Digits));
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -184,6 +240,8 @@ void PruneZones(const datetime lastBarTime)
          if(!g_zones[k].live && g_zones[k].endTime < cutoff)
            {
             ObjectDelete(0, g_zones[k].rectName);
+            ObjectDelete(0, g_zones[k].rectName + "_legstart");
+            ObjectDelete(0, g_zones[k].rectName + "_legend");
             g_zones[k] = g_zones[ArraySize(g_zones) - 1];
             ArrayResize(g_zones, ArraySize(g_zones) - 1);
             if(g_liveZone == k) g_liveZone = -1;
@@ -198,6 +256,8 @@ void PruneZones(const datetime lastBarTime)
          if(!g_zones[k].live && (oldest < 0 || g_zones[k].startTime < g_zones[oldest].startTime)) oldest = k;
       if(oldest < 0) break;
       ObjectDelete(0, g_zones[oldest].rectName);
+      ObjectDelete(0, g_zones[oldest].rectName + "_legstart");
+      ObjectDelete(0, g_zones[oldest].rectName + "_legend");
       g_zones[oldest] = g_zones[ArraySize(g_zones) - 1];
       ArrayResize(g_zones, ArraySize(g_zones) - 1);
       if(g_liveZone == oldest) g_liveZone = -1;
