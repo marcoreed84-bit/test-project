@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -127,7 +127,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.01 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.02 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -334,19 +334,40 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          g_liveLeg = -1;
         }
 
-      if(isPeak && (g_swingHighTime == 0 || MathAbs(high[i] - g_swingHighPrice) >= minMove))
+      //--- v1.02 FIX (same real bug confirmed via Experts log in
+      //--- Fib_Golden_Zone.mq5 v1.06, same duplicated logic here): price
+      //--- and time/idx used to update together, gated on the same
+      //--- minMove condition - a same-level retest (not far enough to
+      //--- count as a new price) never refreshed the TIME/INDEX, even
+      //--- though the ordering check below depends on knowing when this
+      //--- level was LAST touched, not just where it first formed. Now a
+      //--- genuinely new/distant pivot replaces price+time+idx and
+      //--- re-arms g_swing*Broken; a same-level retest keeps the more
+      //--- extreme price but always refreshes time/idx. Broken is
+      //--- deliberately NOT reset on a retest alone.
+      if(isPeak)
         {
-         g_swingHighPrice  = high[i];
-         g_swingHighTime   = time[i];
-         g_swingHighIdx    = i;
-         g_swingHighBroken = false;
+         if(g_swingHighTime == 0 || MathAbs(high[i] - g_swingHighPrice) >= minMove)
+           {
+            g_swingHighPrice  = high[i];
+            g_swingHighBroken = false;
+           }
+         else
+            g_swingHighPrice = MathMax(g_swingHighPrice, high[i]);
+         g_swingHighTime = time[i];
+         g_swingHighIdx  = i;
         }
-      if(isTrough && (g_swingLowTime == 0 || MathAbs(low[i] - g_swingLowPrice) >= minMove))
+      if(isTrough)
         {
-         g_swingLowPrice  = low[i];
-         g_swingLowTime   = time[i];
-         g_swingLowIdx    = i;
-         g_swingLowBroken = false;
+         if(g_swingLowTime == 0 || MathAbs(low[i] - g_swingLowPrice) >= minMove)
+           {
+            g_swingLowPrice  = low[i];
+            g_swingLowBroken = false;
+           }
+         else
+            g_swingLowPrice = MathMin(g_swingLowPrice, low[i]);
+         g_swingLowTime = time[i];
+         g_swingLowIdx  = i;
         }
 
       //--- v1.01 FIX (Opus audit - real bug, same mechanism as
