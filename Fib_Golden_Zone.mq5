@@ -14,13 +14,16 @@
 //|                                                                    |
 //|  On a bullish BOS: the "leg" is [swing low that preceded the       |
 //|  break -> the running extreme high since the break]. The extreme   |
-//|  keeps extending as price makes new highs; the leg (and its zone)  |
-//|  freezes the moment a NEW swing low forms after the break (the      |
-//|  impulse is read as finished, a retracement/pullback has started   |
-//|  - which is the whole point of drawing the zone). Bearish BOS is    |
-//|  the mirror. Zone = [extreme - 0.65*range, extreme - 0.618*range]  |
-//|  for a bullish leg (mirrored for bearish) - the golden pocket only,|
-//|  no other fib levels drawn. Visual only, no signals/alerts.        |
+//|  keeps extending IN MEMORY as price makes new highs, but NOTHING   |
+//|  IS DRAWN YET - per direct clarification, the golden zone should   |
+//|  only appear once the leg has actually finished and retracement is |
+//|  under way, not as a live/growing preview while the leg is still   |
+//|  extending. The zone is drawn for the first time at the moment it  |
+//|  freezes: a NEW swing forms in the OPPOSITE direction after the    |
+//|  break (the impulse is read as finished). Bearish BOS is the       |
+//|  mirror. Zone = [extreme - 0.65*range, extreme - 0.618*range] for   |
+//|  a bullish leg (mirrored for bearish) - the golden pocket only, no |
+//|  other fib levels drawn. Visual only, no signals/alerts.           |
 //|                                                                    |
 //|  Timeframe-flip safety: entirely chart-timeframe-native (like      |
 //|  MarketStructure_Break.mq5 and the other new standalone             |
@@ -29,7 +32,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -117,7 +120,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.03 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.04 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
@@ -216,7 +219,10 @@ void StartZone(const bool bullish, const double legStart, const double extreme,
    g_zones[zi].live      = true;
    g_zones[zi].rectName  = g_pfx + (bullish ? "up_" : "dn_") + IntegerToString((long)startTime);
    g_liveZone = zi;
-   DrawZone(zi);
+   //--- v1.04: NOT drawn here - per direct clarification, the zone only
+   //--- appears once this leg is finished and retracement has started
+   //--- (see the freeze point in OnCalculate's own comment). Nothing on
+   //--- the chart yet, this just starts tracking the leg internally.
    //--- v1.03: diagnostic per direct report ("the fib indicator logic is
    //--- off") - prints exactly which leg this zone anchored to, so a
    //--- mismatch against MarketStructure_Break.mq5's own BOS line can be
@@ -287,18 +293,25 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          if(!isPeak && !isTrough) break;
         }
 
-      //--- a fresh swing low after a bullish leg is live = the impulse is
-      //--- read as finished (retracement under way) - freeze that zone
-      //--- BEFORE adopting the new swing low, so the frozen extreme still
-      //--- reflects the leg that actually broke structure.
+      //--- v1.04 FIX (per direct clarification): the zone used to DRAW
+      //--- immediately on the break and visibly grow with the leg - per
+      //--- direct correction, the golden zone should only appear once
+      //--- the leg that broke structure has actually FINISHED and
+      //--- retracement is under way, not as a live/growing preview.
+      //--- Drawing is now deferred entirely to this freeze point (a
+      //--- fresh opposite swing = the impulse is read as finished) -
+      //--- see the now-silent "extend" block below, which still tracks
+      //--- the extreme in memory every bar but no longer renders it.
       if(isTrough && g_liveZone >= 0 && g_zones[g_liveZone].bullish && g_zones[g_liveZone].live)
         {
          g_zones[g_liveZone].live = false;
+         DrawZone(g_liveZone);
          g_liveZone = -1;
         }
       if(isPeak && g_liveZone >= 0 && !g_zones[g_liveZone].bullish && g_zones[g_liveZone].live)
         {
          g_zones[g_liveZone].live = false;
+         DrawZone(g_liveZone);
          g_liveZone = -1;
         }
 
@@ -315,14 +328,15 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          g_swingLowBroken = false;
         }
 
-      //--- extend the live zone's extreme with this bar, same as any
-      //--- other bar in the leg
+      //--- v1.04: still tracks the leg's running extreme/endTime every
+      //--- bar while live (needed so the frozen zone, once drawn, is
+      //--- correct) - just no longer calls DrawZone here. Nothing is
+      //--- rendered until the freeze point above actually draws it.
       if(g_liveZone >= 0 && g_zones[g_liveZone].live)
         {
          if(g_zones[g_liveZone].bullish) g_zones[g_liveZone].extreme = MathMax(g_zones[g_liveZone].extreme, high[i]);
          else                            g_zones[g_liveZone].extreme = MathMin(g_zones[g_liveZone].extreme, low[i]);
          g_zones[g_liveZone].endTime = time[i];
-         DrawZone(g_liveZone);
         }
 
       //--- BOS check - only ever starts a NEW zone when none is
