@@ -32,7 +32,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.06"
+#property version   "1.07"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -127,7 +127,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.06 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.07 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
@@ -437,43 +437,46 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       int lastClosed = i;
       if(g_liveZone < 0)
         {
-         //--- v1.01 FIX (Opus audit - real bug, confirmed by hand-trace):
-         //--- this used to require the tracked opposite swing to be
-         //--- OLDER than the swing being broken - backwards. The normal
-         //--- case (low, then high, then a newer higher-low pullback,
-         //--- then breakout above the high) has the tracked low NEWER
-         //--- than the tracked high, which the old `<` rejected outright
-         //--- - the first real BOS of almost any genuine leg was silently
-         //--- skipped. Now requires the opposite swing to be the MORE
-         //--- RECENT of the two, which is what actually makes it "the
-         //--- low that started this impulse" rather than a stale one.
+         //--- v1.07 FIX (real design bug, confirmed live from the
+         //--- Experts log - v1.01's own ordering requirement, "opposite
+         //--- swing must be more recent than the swing being broken",
+         //--- turned out to be structurally impossible to satisfy for a
+         //--- CONTINUATION break deep into an established trend: in a
+         //--- sustained decline, the tracked swing LOW keeps refreshing
+         //--- to a newer time on every fresh low, while the relevant
+         //--- swing HIGH (the last real pullback top) stays fixed from
+         //--- much earlier - so the low is ALWAYS more recent than the
+         //--- high for the entire length of the trend, and a bearish
+         //--- break could only ever fire right at the very start of a
+         //--- fresh reversal, never on a later continuation break. Live
+         //--- evidence: a 7-day decline produced zero bearish legs, only
+         //--- an unbroken string of WITHHELD lines the whole way down.
+         //--- Dropped the ordering requirement entirely - anchors to
+         //--- whichever opposite swing is CURRENTLY tracked, regardless
+         //--- of its relative age, exactly like MarketStructure_Break.mq5
+         //--- already does (no ordering check there at all).
          bool bullBreakPrice = !g_swingHighBroken && g_swingHighTime != 0 && close[lastClosed] > g_swingHighPrice;
          bool bearBreakPrice = !g_swingLowBroken  && g_swingLowTime  != 0 && close[lastClosed] < g_swingLowPrice;
-         if(bullBreakPrice && g_swingLowTime != 0 && g_swingLowTime > g_swingHighTime)
+         if(bullBreakPrice && g_swingLowTime != 0)
            {
             g_swingHighBroken = true;
             StartZone(true, g_swingLowPrice, MathMax(g_swingHighPrice, high[lastClosed]),
                       g_swingLowTime, time[lastClosed]);
            }
-         else if(bearBreakPrice && g_swingHighTime != 0 && g_swingHighTime > g_swingLowTime)
+         else if(bearBreakPrice && g_swingHighTime != 0)
            {
             g_swingLowBroken = true;
             StartZone(false, g_swingHighPrice, MathMin(g_swingLowPrice, low[lastClosed]),
                       g_swingHighTime, time[lastClosed]);
            }
-         //--- v1.03 diagnostic, per direct report: this is the exact
-         //--- mismatch case that explains a stale/old zone instead of
-         //--- the leg MarketStructure_Break.mq5 just confirmed as broken
-         //--- - the PRICE already broke the tracked swing, but Fib's own
-         //--- extra ordering requirement (needs the opposite swing to be
-         //--- the more recent one, to know which low/high anchors the
-         //--- leg) is withholding the zone because its own tracked
-         //--- opposite swing hasn't caught up yet.
+         //--- v1.03 diagnostic - kept for the one remaining case this can
+         //--- still withhold a break: no opposite swing has EVER been
+         //--- confirmed yet at all (only possible very early in history).
          else if((bullBreakPrice || bearBreakPrice) && (datetime)(time[i] - g_lastOrderWarnTime) >= 3600)
            {
             g_lastOrderWarnTime = time[i];
             PrintFormat("Fib_Golden_Zone: price broke the tracked %s swing at %s but the zone was WITHHELD - "
-                        "tracked high=%s @ %s, tracked low=%s @ %s (opposite swing isn't more recent yet)",
+                        "tracked high=%s @ %s, tracked low=%s @ %s (no opposite swing confirmed yet at all)",
                         bullBreakPrice ? "HIGH" : "LOW", TimeToString(time[i], TIME_DATE | TIME_MINUTES),
                         DoubleToString(g_swingHighPrice, _Digits), TimeToString(g_swingHighTime, TIME_DATE | TIME_MINUTES),
                         DoubleToString(g_swingLowPrice, _Digits), TimeToString(g_swingLowTime, TIME_DATE | TIME_MINUTES));

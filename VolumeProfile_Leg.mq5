@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -127,7 +127,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.02 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.03 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -370,16 +370,20 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          g_swingLowIdx  = i;
         }
 
-      //--- v1.01 FIX (Opus audit - real bug, same mechanism as
-      //--- Fib_Golden_Zone.mq5's own v1.01 fix): these index comparisons
-      //--- used to require the tracked opposite swing to be OLDER
-      //--- (smaller index) than the swing being broken - backwards, for
-      //--- the same reason explained in that file's own comment. Flipped
-      //--- to require it be the MORE RECENT of the two.
+      //--- v1.03 FIX (real design bug, confirmed live via Fib_Golden_
+      //--- Zone.mq5's own identical v1.07 fix - see that file's comment
+      //--- for the full mechanism): requiring the tracked opposite swing
+      //--- to be more recent than the swing being broken is structurally
+      //--- impossible to satisfy for a CONTINUATION break deep into an
+      //--- established trend (the opposite-direction swing keeps
+      //--- refreshing to newer values the whole time, so the swing being
+      //--- broken is always "older"). Dropped the ordering requirement
+      //--- entirely - anchors to whichever opposite swing is currently
+      //--- tracked, regardless of its relative age.
       if(g_liveLeg < 0)
         {
          if(!g_swingHighBroken && g_swingHighTime != 0 && close[i] > g_swingHighPrice &&
-            g_swingLowIdx >= 0 && g_swingLowIdx > g_swingHighIdx)
+            g_swingLowIdx >= 0)
            {
             g_swingHighBroken = true;
             int zi = ArraySize(g_legs);
@@ -395,7 +399,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_liveLeg = zi;
            }
          else if(!g_swingLowBroken && g_swingLowTime != 0 && close[i] < g_swingLowPrice &&
-                 g_swingHighIdx >= 0 && g_swingHighIdx > g_swingLowIdx)
+                 g_swingHighIdx >= 0)
            {
             g_swingLowBroken = true;
             int zi = ArraySize(g_legs);
