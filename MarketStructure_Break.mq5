@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -50,12 +50,15 @@ input int      InpLineWidth        = 1;
 input bool     InpShowLabel        = true;   // small "BOS" text tag at the break point
 input color    InpLabelColor       = clrWhite;
 input int      InpLabelFontSize    = 8;
-input int      InpBosDrawDays      = 2;      // only lines/labels from roughly the last N days are kept
-                                              // on the chart - per direct request ("maybe also for the
-                                              // 2 days is fine"). The underlying swing-tracking state
-                                              // still needs more history than this to know what the
-                                              // current swing high/low actually is; this only limits
-                                              // what stays DRAWN.
+input int      InpBosDrawDays      = 10;     // only lines/labels from roughly the last N days are kept
+                                              // on the chart - raised from the original default of 2
+                                              // per direct report ("on the 1 hour chart it only shows
+                                              // one, we need to go back further"): 2 days on H1 is only
+                                              // ~48 bars, which can genuinely only contain one qualifying
+                                              // break. The underlying swing-tracking state already scans
+                                              // InpScanLookbackDays (default 30) worth of history
+                                              // regardless - this only limits what stays DRAWN, so raise
+                                              // it freely without any extra backfill cost.
 
 input group "=== General ==="
 input int      InpScanLookbackDays = 30;     // how far back the initial backfill scans, in days of the
@@ -96,7 +99,7 @@ int OnInit()
    g_swingLowPrice    = 0.0;
    g_swingLowTime     = 0;
    g_swingLowBroken   = true;
-   PrintFormat("MarketStructure_Break v1.01 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
+   PrintFormat("MarketStructure_Break v1.02 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBosDrawDays);
    return(INIT_SUCCEEDED);
