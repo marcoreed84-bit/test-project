@@ -32,7 +32,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -127,7 +127,7 @@ int OnInit()
    g_lastBarTime      = 0;
    g_swingHighPrice   = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
    g_swingLowPrice    = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
-   PrintFormat("Fib_Golden_Zone v1.05 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
+   PrintFormat("Fib_Golden_Zone v1.06 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  pocket=%.3f-%.3f",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpFibLow, InpFibHigh);
    return(INIT_SUCCEEDED);
@@ -375,17 +375,49 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          g_liveZone = -1;
         }
 
-      if(isPeak && (g_swingHighTime == 0 || MathAbs(high[i] - g_swingHighPrice) >= minMove))
+      //--- v1.06 FIX (real bug, confirmed from the Experts log - a
+      //--- withheld-break diagnostic showed the tracked low's TIME still
+      //--- pointing at an old touch days earlier, even though price had
+      //--- clearly retested that same support level much more recently):
+      //--- this used to only update BOTH price and time together, gated
+      //--- on the new pivot being far enough away (minMove) to count as
+      //--- a genuinely different level. That conflated two different
+      //--- questions - "is this a new price level" (correctly needs the
+      //--- ATR filter, so minor noise doesn't keep redefining the level)
+      //--- and "when did price last touch this level" (should update on
+      //--- ANY confirmed same-type pivot near it, including a retest at
+      //--- essentially the same price) - which is exactly what Fib's own
+      //--- ordering requirement (the opposite swing must be the MORE
+      //--- RECENT of the two) depends on to correctly anchor a leg. Now:
+      //--- a genuinely new/distant pivot replaces price+time as before;
+      //--- a same-level retest keeps the more extreme price but ALWAYS
+      //--- refreshes the time to this latest touch.
+      //--- note: g_swing*Broken is only reset in the genuinely-new-swing
+      //--- branch, NOT on a same-level retest - once a swing has been
+      //--- broken, a later retest of that same old level (now acting as
+      //--- the other side, e.g. former resistance now support) must NOT
+      //--- re-arm it as if it were a fresh, unbroken swing again.
+      if(isPeak)
         {
-         g_swingHighPrice  = high[i];
-         g_swingHighTime   = time[i];
-         g_swingHighBroken = false;
+         if(g_swingHighTime == 0 || MathAbs(high[i] - g_swingHighPrice) >= minMove)
+           {
+            g_swingHighPrice  = high[i];
+            g_swingHighBroken = false;
+           }
+         else
+            g_swingHighPrice = MathMax(g_swingHighPrice, high[i]);
+         g_swingHighTime = time[i];
         }
-      if(isTrough && (g_swingLowTime == 0 || MathAbs(low[i] - g_swingLowPrice) >= minMove))
+      if(isTrough)
         {
-         g_swingLowPrice  = low[i];
-         g_swingLowTime   = time[i];
-         g_swingLowBroken = false;
+         if(g_swingLowTime == 0 || MathAbs(low[i] - g_swingLowPrice) >= minMove)
+           {
+            g_swingLowPrice  = low[i];
+            g_swingLowBroken = false;
+           }
+         else
+            g_swingLowPrice = MathMin(g_swingLowPrice, low[i]);
+         g_swingLowTime = time[i];
         }
 
       //--- v1.04: still tracks the leg's running extreme/endTime every
