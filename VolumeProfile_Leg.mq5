@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -140,7 +140,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.05 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.06 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -473,7 +473,25 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                          g_swingLowIdx >= 0);
       bool bearBreak = (!g_swingLowBroken && g_swingLowTime != 0 && close[i] < g_swingLowPrice &&
                          g_swingHighIdx >= 0);
-      if(bullBreak || bearBreak)
+      //--- v1.06 FIX (Opus audit, real regression in the v1.04 fix above):
+      //--- force-finishing the live leg is only correct when the break
+      //--- goes the OPPOSITE way to it - a genuinely new leg superseding
+      //--- an unrelated one still in flight. If the break is the SAME
+      //--- direction as the live leg (a continuation - a new, more
+      //--- distant swing re-armed g_swingHighBroken/g_swingLowBroken
+      //--- while no opposite pivot had appeared), the old unconditional
+      //--- force-finish cut the live leg in two and drew two overlapping
+      //--- profiles for the same move: one early/truncated, one later and
+      //--- full. Same-direction case now just extends the live leg and
+      //--- re-arms the broken flag, instead of splitting it.
+      bool liveSameDir = ((bullBreak || bearBreak) && g_liveLeg >= 0 && g_legs[g_liveLeg].live &&
+                           g_legs[g_liveLeg].bullish == bullBreak);
+      if(liveSameDir)
+        {
+         if(bullBreak) g_swingHighBroken = true; else g_swingLowBroken = true;
+         g_legs[g_liveLeg].endTime = time[i];
+        }
+      else if(bullBreak || bearBreak)
         {
          if(g_liveLeg >= 0 && g_legs[g_liveLeg].live)
            {

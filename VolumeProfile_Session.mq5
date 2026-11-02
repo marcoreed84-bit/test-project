@@ -42,7 +42,7 @@
 //|  it shows have any backtested predictive edge.                        |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -129,7 +129,19 @@ void EnsureRightMargin()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.05 (" + IntegerToString(InpDaysToShow) + "d)");
+   //--- v1.06 FIX (Opus audit, real crash paths): neither InpBuckets nor
+   //--- InpDaysToShow was ever validated. InpBuckets<=0 divides by zero at
+   //--- bw=(hi-lo)/InpBuckets and ArrayResize(vol,0) then reads vol[0] out
+   //--- of range. InpDaysToShow<=0 puts cutoff AFTER the last bar, so the
+   //--- very first loop iteration sets start=rates_total and low[start]
+   //--- reads out of range. VolumeProfile_Leg.mq5 already guards its own
+   //--- InpBuckets input (v1.01) - Session never got the equivalent check.
+   if(InpBuckets <= 0 || InpDaysToShow <= 0)
+     {
+      Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.06 (" + IntegerToString(InpDaysToShow) + "d)");
    EnsureRightMargin();
    return(INIT_SUCCEEDED);
   }
@@ -171,7 +183,11 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       lo = MathMin(lo, low[i]);
       hi = MathMax(hi, high[i]);
      }
-   if(hi <= lo) { ChartRedraw(0); return(rates_total); }
+   //--- v1.06 FIX (Opus audit, low priority): these two early returns used
+   //--- to leave whatever profile was already drawn sitting on screen with
+   //--- no indication it's stale (e.g. InpUseRealVolume=true on a symbol
+   //--- whose real_volume is 0, confirmed 0 on GOLD/SILVER this project).
+   if(hi <= lo) { ObjectsDeleteAll(0, VP_PFX); ChartRedraw(0); return(rates_total); }
 
    double bw = (hi - lo) / InpBuckets;
    double vol[];
@@ -197,7 +213,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    double pocVol = vol[0];
    for(int b = 1; b < InpBuckets; b++)
       if(vol[b] > pocVol) { pocVol = vol[b]; pocBucket = b; }
-   if(pocVol <= 0.0) { ChartRedraw(0); return(rates_total); }
+   if(pocVol <= 0.0) { ObjectsDeleteAll(0, VP_PFX); ChartRedraw(0); return(rates_total); }
 
    //--- anchor the WHOLE profile one bar past the last candle, into the
    //--- chart's own empty future space - this is the only time coordinate
