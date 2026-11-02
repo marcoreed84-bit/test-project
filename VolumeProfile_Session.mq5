@@ -42,7 +42,7 @@
 //|  it shows have any backtested predictive edge.                        |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -72,8 +72,12 @@ input double InpBucketGapFrac    = 0.25;    // v1.02: each bucket's rectangle on
                                              // of its own vertical slot (centered), leaving a thin gap
                                              // above/below - breaks the solid-wall look into a readable
                                              // comb of bars. 0 = no gap (old look), try 0.15-0.35
-input color  InpBarColor         = C'40,70,110';     // ordinary bucket fill
-input color  InpPocColor         = C'255,165,0';     // Point-of-Control (busiest bucket) fill - distinct
+input color  InpBarColor         = C'10,80,140';     // v1.05: dim neon blue (same family colour as
+                                             // InpThemeBullCol in TradePanel_EA.mq5) instead of the old
+                                             // desaturated navy - blends with the blue/white candle theme.
+input color  InpPocColor         = clrWhite;         // v1.05: bright white (the theme's accent colour) -
+                                             // the single most important level reads as the brightest
+                                             // thing on the profile.
 input bool   InpShowPocLine      = true;    // a line at the POC price, extended across the chart so you
                                              // can see the level against price history and how price
                                              // reacted there, not just where it sits now
@@ -83,9 +87,14 @@ input bool   InpPocLineRayLeft   = true;    // v1.03: per direct request - exten
                                              // back) instead of stopping InpPocLineBackBars bars behind
                                              // the last candle. false = use InpPocLineBackBars instead.
 input int    InpPocLineBackBars  = 150;     // only used when InpPocLineRayLeft is false
-input color  InpPocLineColor     = C'130,95,35';   // v1.03: dimmed from a bright C'255,165,0' per direct
-                                             // request ("lightly shaded") - a faint line you can still
-                                             // follow across price history without it dominating the chart
+input color  InpPocLineColor     = C'0,150,255';   // v1.05: exact neon blue (InpThemeBullCol) instead of
+                                             // the old dim brown - matches the theme family.
+
+input group "=== Value Area (POC +/- the price range holding InpVAPercent of the window's volume) ==="
+input bool   InpShowValueArea    = true;
+input double InpVAPercent        = 70.0;    // standard volume-profile convention
+input color  InpVahValColor      = C'120,200,255';  // light neon blue/cyan - distinct from both the
+                                             // bright-white POC and the dim-blue bars, same family.
 
 #define VP_PFX "VPS_"
 
@@ -120,7 +129,7 @@ void EnsureRightMargin()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile (" + IntegerToString(InpDaysToShow) + "d)");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.05 (" + IntegerToString(InpDaysToShow) + "d)");
    EnsureRightMargin();
    return(INIT_SUCCEEDED);
   }
@@ -278,6 +287,79 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
      }
    else
       ObjectDelete(0, VP_PFX + "pocline");
+
+   //--- v1.05: Value Area High/Low - expand outward from the POC bucket,
+   //--- each step adding whichever still-unclaimed neighbour (left or
+   //--- right) carries MORE volume, until the accumulated share reaches
+   //--- InpVAPercent of the window's total volume. Same anchor/ray
+   //--- behaviour as the POC line (InpPocLineRayLeft/InpPocLineBackBars)
+   //--- so they read as one consistent family of levels.
+   if(InpShowValueArea)
+     {
+      double totalVol = 0.0;
+      for(int b = 0; b < InpBuckets; b++) totalVol += vol[b];
+      double target = totalVol * (InpVAPercent / 100.0);
+      int vaLo = pocBucket, vaHi = pocBucket;
+      double included = vol[pocBucket];
+      while(included < target && (vaLo > 0 || vaHi < InpBuckets - 1))
+        {
+         double leftVol  = (vaLo > 0) ? vol[vaLo - 1] : -1.0;
+         double rightVol = (vaHi < InpBuckets - 1) ? vol[vaHi + 1] : -1.0;
+         if(rightVol >= leftVol) { vaHi++; included += vol[vaHi]; }
+         else                    { vaLo--; included += vol[vaLo]; }
+        }
+      double vahPrice = lo + (vaHi + 1) * bw;
+      double valPrice = lo + vaLo * bw;
+      datetime vaLineStart = InpPocLineRayLeft ? anchorTime : time[(int)MathMax(0, end - InpPocLineBackBars)];
+      datetime vaLineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
+
+      string vahNm = VP_PFX + "vah";
+      if(ObjectFind(0, vahNm) < 0)
+        {
+         ObjectCreate(0, vahNm, OBJ_TREND, 0, vaLineStart, vahPrice, vaLineEnd, vahPrice);
+         ObjectSetInteger(0, vahNm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, vahNm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, vahNm, OBJPROP_STYLE, STYLE_DASH);
+         ObjectSetInteger(0, vahNm, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, vahNm, OBJPROP_BACK, true);
+        }
+      else
+        {
+         ObjectSetInteger(0, vahNm, OBJPROP_TIME, 0, vaLineStart);
+         ObjectSetDouble (0, vahNm, OBJPROP_PRICE, 0, vahPrice);
+         ObjectSetInteger(0, vahNm, OBJPROP_TIME, 1, vaLineEnd);
+         ObjectSetDouble (0, vahNm, OBJPROP_PRICE, 1, vahPrice);
+        }
+      ObjectSetInteger(0, vahNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
+      ObjectSetInteger(0, vahNm, OBJPROP_RAY_RIGHT, false);
+      ObjectSetInteger(0, vahNm, OBJPROP_COLOR, InpVahValColor);
+
+      string valNm = VP_PFX + "val";
+      if(ObjectFind(0, valNm) < 0)
+        {
+         ObjectCreate(0, valNm, OBJ_TREND, 0, vaLineStart, valPrice, vaLineEnd, valPrice);
+         ObjectSetInteger(0, valNm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, valNm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, valNm, OBJPROP_STYLE, STYLE_DASH);
+         ObjectSetInteger(0, valNm, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, valNm, OBJPROP_BACK, true);
+        }
+      else
+        {
+         ObjectSetInteger(0, valNm, OBJPROP_TIME, 0, vaLineStart);
+         ObjectSetDouble (0, valNm, OBJPROP_PRICE, 0, valPrice);
+         ObjectSetInteger(0, valNm, OBJPROP_TIME, 1, vaLineEnd);
+         ObjectSetDouble (0, valNm, OBJPROP_PRICE, 1, valPrice);
+        }
+      ObjectSetInteger(0, valNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
+      ObjectSetInteger(0, valNm, OBJPROP_RAY_RIGHT, false);
+      ObjectSetInteger(0, valNm, OBJPROP_COLOR, InpVahValColor);
+     }
+   else
+     {
+      ObjectDelete(0, VP_PFX + "vah");
+      ObjectDelete(0, VP_PFX + "val");
+     }
 
    ChartRedraw(0);
    return(rates_total);

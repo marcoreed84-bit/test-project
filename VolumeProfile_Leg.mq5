@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -50,14 +50,27 @@ input int      InpBuckets         = 20;      // fewer than VolumeProfile_Session
 input bool     InpUseRealVolume   = false;
 input int      InpMaxBarWidthBars = 8;
 input double   InpBucketGapFrac   = 0.25;
-input color    InpBarColor        = C'40,70,110';
-input color    InpPocColor        = C'255,165,0';
+input color    InpBarColor        = C'10,80,140';    // v1.05: dim neon blue (family colour, same blue as
+                                                       // InpThemeBullCol in TradePanel_EA.mq5) instead of
+                                                       // the old desaturated navy, so it reads as part of
+                                                       // the blue/white candle theme instead of clashing.
+input color    InpPocColor        = clrWhite;         // v1.05: bright white (the theme's bear/accent
+                                                       // colour) - the single most important level on the
+                                                       // profile now reads as the brightest thing on it.
 input bool     InpShowPocLine     = true;
 input int      InpPocLineExtendBars = 20;    // how far the POC line extends right of the leg's own end -
                                               // a short, leg-local line, NOT rayed across the whole chart
                                               // like VolumeProfile_Session.mq5's (this POC is only
                                               // meaningful in the context of that one leg)
-input color    InpPocLineColor    = C'130,95,35';
+input color    InpPocLineColor    = C'0,150,255';     // v1.05: exact neon blue (InpThemeBullCol) instead
+                                                       // of the old dim brown - matches the theme family.
+
+input group "=== Value Area (POC +/- the price range holding InpVAPercent of the leg's volume) ==="
+input bool     InpShowValueArea   = true;
+input double   InpVAPercent       = 70.0;    // standard volume-profile convention
+input color    InpVahValColor     = C'120,200,255';   // v1.05: light neon blue/cyan - distinct from both
+                                                       // the bright-white POC and the dim-blue bars, but
+                                                       // still clearly the same blue/white family.
 
 input group "=== General ==="
 input int      InpMaxLegs          = 20;     // cap on how many recent legs' profiles stay drawn at once
@@ -127,7 +140,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.04 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.05 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -228,6 +241,60 @@ void DrawLegProfile(const int legIdx, const double &high[], const double &low[],
         }
       ObjectSetInteger(0, pocNm, OBJPROP_COLOR, InpPocLineColor);
      }
+
+   //--- v1.05: Value Area High/Low - the standard third/fourth volume-
+   //--- profile level alongside POC. Expand outward from the POC bucket,
+   //--- each step adding whichever still-unclaimed neighbour (left or
+   //--- right) carries MORE volume, until the accumulated share reaches
+   //--- InpVAPercent of this leg's total volume. VAH/VAL are the outer
+   //--- edges of the included bucket range, not bucket centres (matches
+   //--- how POC itself is read - a price, not a bucket index).
+   if(InpShowValueArea)
+     {
+      double totalVol = 0.0;
+      for(int b = 0; b < InpBuckets; b++) totalVol += vol[b];
+      double target = totalVol * (InpVAPercent / 100.0);
+      int vaLo = pocBucket, vaHi = pocBucket;
+      double included = vol[pocBucket];
+      while(included < target && (vaLo > 0 || vaHi < InpBuckets - 1))
+        {
+         double leftVol  = (vaLo > 0) ? vol[vaLo - 1] : -1.0;
+         double rightVol = (vaHi < InpBuckets - 1) ? vol[vaHi + 1] : -1.0;
+         if(rightVol >= leftVol) { vaHi++; included += vol[vaHi]; }
+         else                    { vaLo--; included += vol[vaLo]; }
+        }
+      double vahPrice = lo + (vaHi + 1) * bw;
+      double valPrice = lo + vaLo * bw;
+      datetime vaLineEnd = anchorTime + (datetime)(InpPocLineExtendBars * perSec);
+
+      string vahNm = g_pfx + "vah_" + tag;
+      if(ObjectFind(0, vahNm) < 0)
+        {
+         ObjectCreate(0, vahNm, OBJ_TREND, 0, anchorTime, vahPrice, vaLineEnd, vahPrice);
+         ObjectSetInteger(0, vahNm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, vahNm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, vahNm, OBJPROP_STYLE, STYLE_DASH);
+         ObjectSetInteger(0, vahNm, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, vahNm, OBJPROP_BACK, true);
+         ObjectSetInteger(0, vahNm, OBJPROP_RAY_LEFT, false);
+         ObjectSetInteger(0, vahNm, OBJPROP_RAY_RIGHT, false);
+        }
+      ObjectSetInteger(0, vahNm, OBJPROP_COLOR, InpVahValColor);
+
+      string valNm = g_pfx + "val_" + tag;
+      if(ObjectFind(0, valNm) < 0)
+        {
+         ObjectCreate(0, valNm, OBJ_TREND, 0, anchorTime, valPrice, vaLineEnd, valPrice);
+         ObjectSetInteger(0, valNm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, valNm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, valNm, OBJPROP_STYLE, STYLE_DASH);
+         ObjectSetInteger(0, valNm, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, valNm, OBJPROP_BACK, true);
+         ObjectSetInteger(0, valNm, OBJPROP_RAY_LEFT, false);
+         ObjectSetInteger(0, valNm, OBJPROP_RAY_RIGHT, false);
+        }
+      ObjectSetInteger(0, valNm, OBJPROP_COLOR, InpVahValColor);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -243,6 +310,8 @@ void PruneLegs(const datetime lastBarTime)
             string tag = IntegerToString((long)g_legs[k].endTime);
             for(int b = 0; b < InpBuckets; b++) ObjectDelete(0, g_pfx + "b" + tag + "_" + IntegerToString(b));
             ObjectDelete(0, g_pfx + "poc_" + tag);
+            ObjectDelete(0, g_pfx + "vah_" + tag);
+            ObjectDelete(0, g_pfx + "val_" + tag);
             g_legs[k] = g_legs[ArraySize(g_legs) - 1];
             ArrayResize(g_legs, ArraySize(g_legs) - 1);
             if(g_liveLeg == k) g_liveLeg = -1;
@@ -259,6 +328,8 @@ void PruneLegs(const datetime lastBarTime)
       string tag = IntegerToString((long)g_legs[oldest].endTime);
       for(int b = 0; b < InpBuckets; b++) ObjectDelete(0, g_pfx + "b" + tag + "_" + IntegerToString(b));
       ObjectDelete(0, g_pfx + "poc_" + tag);
+      ObjectDelete(0, g_pfx + "vah_" + tag);
+      ObjectDelete(0, g_pfx + "val_" + tag);
       g_legs[oldest] = g_legs[ArraySize(g_legs) - 1];
       ArrayResize(g_legs, ArraySize(g_legs) - 1);
       if(g_liveLeg == oldest) g_liveLeg = -1;
