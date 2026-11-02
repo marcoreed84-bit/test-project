@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.06"
+#property version   "1.07"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -140,7 +140,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.06 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.07 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -401,6 +401,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          g_legs[g_liveLeg].live     = false;
          g_legs[g_liveLeg].finished = true;
          g_legs[g_liveLeg].endIdx   = i - 1;
+         //--- v1.07 diagnostic (temporary, kept until confirmed live): logs
+         //--- every leg freeze so a missing profile can be traced via the
+         //--- Experts log instead of guessed at.
+         PrintFormat("VolumeProfile_Leg: FROZEN %s leg, start=%s end=%s",
+                     g_legs[g_liveLeg].bullish ? "bull" : "bear",
+                     TimeToString(g_legs[g_liveLeg].startTime), TimeToString(time[i - 1]));
          DrawLegProfile(g_liveLeg, high, low, close, tick_volume, volume, time, perSec);
          g_liveLeg = -1;
         }
@@ -498,6 +504,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_legs[g_liveLeg].live     = false;
             g_legs[g_liveLeg].finished = true;
             g_legs[g_liveLeg].endIdx   = i - 1;
+            PrintFormat("VolumeProfile_Leg: FORCE-FINISHED %s leg (superseded by opposite break), start=%s end=%s",
+                        g_legs[g_liveLeg].bullish ? "bull" : "bear",
+                        TimeToString(g_legs[g_liveLeg].startTime), TimeToString(time[i - 1]));
             if(g_legs[g_liveLeg].endIdx >= g_legs[g_liveLeg].startIdx)
                DrawLegProfile(g_liveLeg, high, low, close, tick_volume, volume, time, perSec);
             g_liveLeg = -1;
@@ -516,6 +525,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_legs[zi].bullish   = true;
             g_legs[zi].extreme   = high[i];
             g_liveLeg = zi;
+            PrintFormat("VolumeProfile_Leg: START bull leg @ %s (opposite low swing @ %s)",
+                        TimeToString(time[i]), TimeToString(g_legs[zi].startTime));
            }
          else
            {
@@ -531,6 +542,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_legs[zi].bullish   = false;
             g_legs[zi].extreme   = low[i];
             g_liveLeg = zi;
+            PrintFormat("VolumeProfile_Leg: START bear leg @ %s (opposite high swing @ %s)",
+                        TimeToString(time[i]), TimeToString(g_legs[zi].startTime));
            }
         }
       else if(g_liveLeg >= 0)
