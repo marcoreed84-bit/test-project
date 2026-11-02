@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.09"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -102,6 +102,11 @@ input bool   InpUseRealVolume    = false;   // GOLD/SILVER real_volume is 0 on t
 input int    InpMaxBarWidthBars  = 10;      // the busiest bucket's rectangle extends this many bars
                                              // rightward from its own column's anchor; every other
                                              // bucket scales proportionally to its own volume share.
+input int    InpLeadingGapBars   = 10;      // v1.10: blank bars of empty space between the last live
+                                             // candle and the start of the today column - per direct
+                                             // request, so the profiles don't sit flush against price
+                                             // action. The previous-day column is offset relative to
+                                             // today's own anchor, so it moves with this automatically.
 input bool   InpAutoRightMargin  = true;    // MT5 clips any object past the chart's own right-margin
                                              // ("shift") space, a SEPARATE setting from anything this
                                              // indicator draws. When true, claims enough room for BOTH
@@ -137,7 +142,11 @@ void EnsureRightMargin()
    if(!(bool)ChartGetInteger(0, CHART_SHIFT))
       ChartSetInteger(0, CHART_SHIFT, true);
    double cur = ChartGetDouble(0, CHART_SHIFT_SIZE);
-   double want = InpShowPrevDay ? 45.0 : 25.0;   // percent - two columns need materially more room
+   //--- v1.10: base percentage (two columns need materially more room than
+   //--- one) plus a rough per-gap-bar allowance for InpLeadingGapBars -
+   //--- still just a generous estimate, same as the base values always
+   //--- were, not an exact bar->percent conversion.
+   double want = (InpShowPrevDay ? 45.0 : 25.0) + InpLeadingGapBars * 0.5;
    if(cur < want)
       ChartSetDouble(0, CHART_SHIFT_SIZE, want);
   }
@@ -359,7 +368,7 @@ int OnInit()
       Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.09 (today" +
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.10 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
    EnsureRightMargin();
    return(INIT_SUCCEEDED);
@@ -397,7 +406,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       if(time[i] < todayCutoff) { startToday = i + 1; break; }
    int endToday = rates_total - 1;
 
-   datetime todayAnchor = time[endToday] + (datetime)perSec;
+   datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
    DrawProfile(VP_PFX + "today_", startToday, endToday, todayAnchor,
                high, low, tick_volume, volume, time, perSec,
                InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
