@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.08"
+#property version   "1.09"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -75,6 +75,12 @@ input color  InpBarColor         = C'10,80,140';     // dim neon blue (same fami
 input color  InpPocColor         = clrWhite;         // bright white - today's most important level
                                              // reads as the brightest thing in this column.
 input color  InpPocLineColor     = C'0,150,255';     // exact neon blue (InpThemeBullCol).
+input color  InpVahValColor      = C'120,200,255';   // v1.09 FIX (Opus audit, real compile error): this
+                                             // input was referenced by the today DrawProfile() call but
+                                             // never declared after the v1.08 refactor split the colour
+                                             // inputs into today/prev groups - "undeclared identifier",
+                                             // would not compile. Light neon blue/cyan, same family as
+                                             // the Leg file's own InpVahValColor.
 
 input group "=== Previous day (frozen, completed session) ==="
 input bool   InpShowPrevDay      = true;    // v1.08: a second, independent profile for the full,
@@ -353,7 +359,7 @@ int OnInit()
       Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.08 (today" +
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.09 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
    EnsureRightMargin();
    return(INIT_SUCCEEDED);
@@ -396,23 +402,42 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                high, low, tick_volume, volume, time, perSec,
                InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
 
-   //--- PREVIOUS DAY column: exactly one full, already-completed calendar
-   //--- day (yesterday) - frozen, independent of InpDaysToShow, independent
-   //--- of how far today has progressed.
+   //--- PREVIOUS DAY column: exactly one full, already-completed SESSION -
+   //--- the last calendar day that actually has bars before today, not
+   //--- strictly "the calendar day before today". Frozen, independent of
+   //--- InpDaysToShow, independent of how far today has progressed.
+   //--- v1.09 FIX (Opus audit, real bug): the old version anchored to a
+   //--- fixed `todayStart - 86400` calendar day. On a Monday (no Sunday
+   //--- bars on this broker) or the day after any holiday, that calendar
+   //--- day has ZERO bars, so startPrev ended up > endPrev and the whole
+   //--- column was silently deleted - exactly the days a "previous
+   //--- session" reference is most wanted. Fixed by first finding the
+   //--- actual last bar before today (endPrev), then deriving ITS OWN
+   //--- calendar day as the window to scan backward from - always lands
+   //--- on the real last traded session, whatever it was.
    if(InpShowPrevDay)
      {
-      datetime prevDayStart = todayStart - (datetime)86400;
       int endPrev = -1;
       for(int i = rates_total - 1; i >= 0; i--)
          if(time[i] < todayStart) { endPrev = i; break; }
       int startPrev = -1;
+      datetime prevDayStart = 0;
       if(endPrev >= 0)
         {
+         prevDayStart = time[endPrev] - (time[endPrev] % 86400);
          startPrev = 0;
          for(int i = endPrev; i >= 0; i--)
             if(time[i] < prevDayStart) { startPrev = i + 1; break; }
         }
-      if(endPrev >= 0 && startPrev >= 0 && startPrev <= endPrev)
+      //--- v1.09 FIX (Opus audit, minor): if loaded history starts partway
+      //--- through that session, startPrev would stay at 0 and a partial
+      //--- day would get drawn as if it were a complete one with no way to
+      //--- tell the two apart. Fail safe instead - only draw when the bar
+      //--- just before startPrev is confirmed older than this window (i.e.
+      //--- there genuinely is a prior session boundary, not just the edge
+      //--- of however much history happens to be loaded).
+      bool startPrevValid = (endPrev >= 0 && startPrev > 0 && time[startPrev - 1] < prevDayStart);
+      if(endPrev >= 0 && startPrev >= 0 && startPrev <= endPrev && startPrevValid)
         {
          datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
          DrawProfile(VP_PFX + "prev_", startPrev, endPrev, prevAnchor,
