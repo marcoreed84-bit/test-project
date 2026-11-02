@@ -34,7 +34,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -127,7 +127,7 @@ int OnInit()
    g_lastBarTime = 0;
    g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighIdx = -1; g_swingHighBroken = true;
    g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowIdx  = -1; g_swingLowBroken  = true;
-   PrintFormat("VolumeProfile_Leg v1.03 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
+   PrintFormat("VolumeProfile_Leg v1.04 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  buckets=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBuckets);
    return(INIT_SUCCEEDED);
@@ -380,10 +380,40 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       //--- broken is always "older"). Dropped the ordering requirement
       //--- entirely - anchors to whichever opposite swing is currently
       //--- tracked, regardless of its relative age.
-      if(g_liveLeg < 0)
+      //--- v1.04 FIX (real bug, confirmed live - user reattached to force a
+      //--- full rescan and the big leg still never appeared, which rules
+      //--- out stale state and points at the leg-tracking model itself):
+      //--- a breakout was only ever even CHECKED inside `if(g_liveLeg<0)`.
+      //--- If a smaller, still-unconfirmed leg happened to be live at the
+      //--- exact bar a real breakout occurred, this whole block was
+      //--- skipped - and since g_swingHighBroken/g_swingLowBroken only got
+      //--- set to true inside it, the breakout was never queued either, it
+      //--- was just re-evaluated against that bar's close every single
+      //--- iteration. By the time the smaller leg eventually froze and
+      //--- freed g_liveLeg, price had typically moved on, so the original
+      //--- breakout condition silently stopped being true and that leg was
+      //--- never created at all - not delayed, permanently lost. Fix:
+      //--- check for a breakout on every bar regardless of g_liveLeg, and
+      //--- if one fires while a different leg is still live, force-finish
+      //--- that old leg right here (freeze + draw with whatever bars it
+      //--- has) before starting the new one, so a real breakout can never
+      //--- be swallowed by a smaller, unrelated leg still in flight.
+      bool bullBreak = (!g_swingHighBroken && g_swingHighTime != 0 && close[i] > g_swingHighPrice &&
+                         g_swingLowIdx >= 0);
+      bool bearBreak = (!g_swingLowBroken && g_swingLowTime != 0 && close[i] < g_swingLowPrice &&
+                         g_swingHighIdx >= 0);
+      if(bullBreak || bearBreak)
         {
-         if(!g_swingHighBroken && g_swingHighTime != 0 && close[i] > g_swingHighPrice &&
-            g_swingLowIdx >= 0)
+         if(g_liveLeg >= 0 && g_legs[g_liveLeg].live)
+           {
+            g_legs[g_liveLeg].live     = false;
+            g_legs[g_liveLeg].finished = true;
+            g_legs[g_liveLeg].endIdx   = i - 1;
+            if(g_legs[g_liveLeg].endIdx >= g_legs[g_liveLeg].startIdx)
+               DrawLegProfile(g_liveLeg, high, low, close, tick_volume, volume, time, perSec);
+            g_liveLeg = -1;
+           }
+         if(bullBreak)
            {
             g_swingHighBroken = true;
             int zi = ArraySize(g_legs);
@@ -398,8 +428,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_legs[zi].extreme   = high[i];
             g_liveLeg = zi;
            }
-         else if(!g_swingLowBroken && g_swingLowTime != 0 && close[i] < g_swingLowPrice &&
-                 g_swingHighIdx >= 0)
+         else
            {
             g_swingLowBroken = true;
             int zi = ArraySize(g_legs);
@@ -415,7 +444,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
             g_liveLeg = zi;
            }
         }
-      else
+      else if(g_liveLeg >= 0)
         {
          g_legs[g_liveLeg].endTime = time[i];   // keep the still-live leg's own end time current
         }
