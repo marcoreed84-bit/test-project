@@ -6,29 +6,41 @@
 //|  "session volume profile" (e.g. TradingView's own Session Volume  |
 //|  Profile tool, and standard retail/prop usage generally): one      |
 //|  profile per SESSION, building live from that session's own open,  |
-//|  not several calendar days blended into one POC/VA. InpDaysToShow  |
-//|  is left as an input (not removed) only so a genuinely multi-day   |
-//|  reference can still be built deliberately by raising it - the      |
-//|  default now matches the standard single-session construction.      |
-//|  Drawn entirely in the BLANK SPACE to the right of the most recent  |
-//|  candle - per direct request/screenshot, it must sit there, not     |
-//|  overlap any candles.                                               |
-//|  Anchored at (last bar time + 1 bar), extending further right as   |
-//|  chart's own empty future space - scroll/zoom moves it exactly     |
-//|  like any other chart object anchored by time, same as everything  |
-//|  else in this project's indicators.                                |
+//|  not several calendar days blended into one POC/VA.                 |
 //|                                                                   |
-//|  Buckets: that InpDaysToShow window's own [low, high] range split  |
-//|  into InpBuckets equal-width price buckets; each bar's volume is   |
-//|  split evenly across the buckets its own [low, high] touches (same |
-//|  distribution method already used and tested in this project's    |
-//|  volume_profile_poc_test.py research script). One horizontal      |
-//|  OBJ_RECTANGLE per non-empty bucket, width proportional to that    |
-//|  bucket's volume share of the single busiest bucket (POC - Point   |
-//|  of Control), which is drawn in its own distinct color. An         |
-//|  optional dotted line extends the POC price back across the        |
-//|  visible chart (InpShowPocLine) so it is easy to read against the  |
-//|  actual candles despite the profile itself sitting off to the side.|
+//|  v1.08: per direct request/screenshot - shows BOTH the current,     |
+//|  still-live session AND the previous, fully completed session at    |
+//|  once, as two separate profiles drawn side by side in two distinct   |
+//|  colour families so they're never confused for one blended window.   |
+//|  The "today" column is live (today's bars so far); the "previous     |
+//|  day" column is a genuinely FROZEN snapshot of yesterday's full,      |
+//|  completed session - it never changes once today starts, which is     |
+//|  exactly what makes it useful as a fixed reference level.              |
+//|  InpDaysToShow still controls how many days feed the TODAY column      |
+//|  (default 1 = just today) - raise it only if you deliberately want      |
+//|  several days blended into that one live column; the previous-day       |
+//|  column is always exactly one full completed calendar day, separately.  |
+//|                                                                   |
+//|  Both profiles drawn entirely in the BLANK SPACE to the right of    |
+//|  the most recent candle - per direct request/screenshot, must sit   |
+//|  there, not overlap any candles. Anchored at (last bar time + 1     |
+//|  bar) for today, and one column further right (InpMaxBarWidthBars + |
+//|  InpColumnGapBars bars) for the previous day - scroll/zoom moves     |
+//|  both exactly like any other chart object anchored by time, same     |
+//|  as everything else in this project's indicators.                    |
+//|                                                                   |
+//|  Buckets: each window's own [low, high] range split into InpBuckets |
+//|  equal-width price buckets; each bar's volume is split evenly       |
+//|  across the buckets its own [low, high] touches (same distribution   |
+//|  method already used and tested in this project's                    |
+//|  volume_profile_poc_test.py research script). One horizontal         |
+//|  OBJ_RECTANGLE per non-empty bucket, width proportional to that       |
+//|  bucket's volume share of that window's own busiest bucket (POC -      |
+//|  Point of Control), drawn in its own distinct colour. An optional       |
+//|  dotted/dashed line extends each level price back across the visible    |
+//|  chart (InpShowPocLine/InpShowValueArea) so it is easy to read against   |
+//|  the actual candles despite the profiles themselves sitting off to the   |
+//|  side.                                                                    |
 //|                                                                   |
 //|  CAVEAT (same as every other volume-based construction in this   |
 //|  project - see CLAUDE.md and volume_profile_poc_test.py's own     |
@@ -44,148 +56,116 @@
 //|  M5, real TP/SL, walk-forward split, random-timing null) and        |
 //|  FAILED: OOS PF 0.969, net -379.9, p(PF)=0.52, p(net)=0.58 -         |
 //|  indistinguishable from random entry timing. NOT implemented as a    |
-//|  signal here or anywhere - this indicator draws the profile for      |
-//|  discretionary/visual judgement only, it does not claim the levels    |
-//|  it shows have any backtested predictive edge.                        |
+//|  signal here or anywhere - this indicator draws the profiles for      |
+//|  discretionary/visual judgement only, it does not claim the levels     |
+//|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.07"
+#property version   "1.08"
 #property indicator_chart_window
 #property indicator_plots 0
 
-input group "=== Volume profile settings ==="
-input int    InpDaysToShow       = 1;       // v1.07: default 1 = ONE session (today, live from this
-                                             // session's own open) - matches the standard "session
-                                             // volume profile" other traders use. Raise only if you
-                                             // deliberately want several calendar days blended into one
-                                             // profile instead (a different, non-standard construction).
+input group "=== Today (live session) ==="
+input int    InpDaysToShow       = 1;       // how many days feed the TODAY column (1 = just today,
+                                             // live from this session's own open - the standard
+                                             // construction). Raise only if you deliberately want
+                                             // several days blended into THIS column.
+input color  InpBarColor         = C'10,80,140';     // dim neon blue (same family as InpThemeBullCol
+                                             // in TradePanel_EA.mq5) - blends with the blue/white theme.
+input color  InpPocColor         = clrWhite;         // bright white - today's most important level
+                                             // reads as the brightest thing in this column.
+input color  InpPocLineColor     = C'0,150,255';     // exact neon blue (InpThemeBullCol).
+
+input group "=== Previous day (frozen, completed session) ==="
+input bool   InpShowPrevDay      = true;    // v1.08: a second, independent profile for the full,
+                                             // already-completed previous calendar day - frozen, never
+                                             // changes once today starts, unlike the live today column.
+input int    InpColumnGapBars    = 2;       // blank bars between the two columns so they never touch
+input color  InpPrevBarColor     = C'140,70,10';     // dim neon amber/orange - a distinct colour family
+                                             // from today's blue, so the two sessions are never confused.
+input color  InpPrevPocColor     = C'255,160,60';    // bright neon orange - previous day's POC.
+input color  InpPrevPocLineColor = C'255,140,0';     // exact neon orange.
+input color  InpPrevVahValColor  = C'255,190,130';   // light neon amber - previous day's VAH/VAL.
+
+input group "=== Volume profile settings (shared by both columns) ==="
 input int    InpBuckets          = 30;      // price buckets - more buckets = finer resolution,
                                              // noisier-looking histogram
 input bool   InpUseRealVolume    = false;   // GOLD/SILVER real_volume is 0 on this broker's feed
                                              // (confirmed this project) - leave off unless you have
                                              // verified your own symbol/broker actually populates it
-input int    InpMaxBarWidthBars  = 10;      // v1.03: shrunk from 18 - per direct request, bars were
-                                             // still reaching past the chart's right-margin space and
-                                             // getting cut off behind the price column. The busiest
-                                             // bucket's rectangle extends this many bars rightward from
-                                             // the last candle; every other bucket scales proportionally
-                                             // to its own volume share of that max.
-input bool   InpAutoRightMargin  = true;    // v1.03: the real fix for the cut-off problem - MT5 clips
-                                             // any object past the chart's own right-margin ("shift")
-                                             // space, which is a SEPARATE setting from anything this
-                                             // indicator draws. When true, claims enough right-margin
-                                             // room for InpMaxBarWidthBars automatically (only ever
-                                             // INCREASES it, never shrinks a larger margin you already
-                                             // have set). Turn off if you'd rather control Chart
-                                             // Properties -> right margin yourself.
-input double InpBucketGapFrac    = 0.25;    // v1.02: each bucket's rectangle only fills this fraction
-                                             // of its own vertical slot (centered), leaving a thin gap
-                                             // above/below - breaks the solid-wall look into a readable
-                                             // comb of bars. 0 = no gap (old look), try 0.15-0.35
-input color  InpBarColor         = C'10,80,140';     // v1.05: dim neon blue (same family colour as
-                                             // InpThemeBullCol in TradePanel_EA.mq5) instead of the old
-                                             // desaturated navy - blends with the blue/white candle theme.
-input color  InpPocColor         = clrWhite;         // v1.05: bright white (the theme's accent colour) -
-                                             // the single most important level reads as the brightest
-                                             // thing on the profile.
-input bool   InpShowPocLine      = true;    // a line at the POC price, extended across the chart so you
-                                             // can see the level against price history and how price
-                                             // reacted there, not just where it sits now
-input bool   InpPocLineRayLeft   = true;    // v1.03: per direct request - extend the POC line ALL the
-                                             // way across the visible chart to the left (MT5's own
-                                             // OBJPROP_RAY_LEFT, genuinely infinite, not just N bars
-                                             // back) instead of stopping InpPocLineBackBars bars behind
-                                             // the last candle. false = use InpPocLineBackBars instead.
+input int    InpMaxBarWidthBars  = 10;      // the busiest bucket's rectangle extends this many bars
+                                             // rightward from its own column's anchor; every other
+                                             // bucket scales proportionally to its own volume share.
+input bool   InpAutoRightMargin  = true;    // MT5 clips any object past the chart's own right-margin
+                                             // ("shift") space, a SEPARATE setting from anything this
+                                             // indicator draws. When true, claims enough room for BOTH
+                                             // columns automatically (only ever INCREASES the margin,
+                                             // never shrinks a larger one you already have set).
+input double InpBucketGapFrac    = 0.25;    // each bucket's rectangle only fills this fraction of its
+                                             // own vertical slot (centered) - 0 = no gap (solid look)
+input bool   InpShowPocLine      = true;    // a line at each column's own POC price, extended across
+                                             // the chart so you can see the level against price history
+input bool   InpPocLineRayLeft   = true;    // extend POC/VA lines ALL the way across the visible chart
+                                             // to the left (MT5's own OBJPROP_RAY_LEFT) instead of
+                                             // stopping InpPocLineBackBars bars behind the last candle.
 input int    InpPocLineBackBars  = 150;     // only used when InpPocLineRayLeft is false
-input color  InpPocLineColor     = C'0,150,255';   // v1.05: exact neon blue (InpThemeBullCol) instead of
-                                             // the old dim brown - matches the theme family.
 
-input group "=== Value Area (POC +/- the price range holding InpVAPercent of the window's volume) ==="
+input group "=== Value Area (POC +/- the price range holding InpVAPercent of each column's volume) ==="
 input bool   InpShowValueArea    = true;
 input double InpVAPercent        = 70.0;    // standard volume-profile convention
-input color  InpVahValColor      = C'120,200,255';  // light neon blue/cyan - distinct from both the
-                                             // bright-white POC and the dim-blue bars, same family.
 
 #define VP_PFX "VPS_"
 
 //+------------------------------------------------------------------+
-//| v1.03: claims enough right-margin ("shift") chart space for the    |
-//| profile to actually fit without MT5 clipping it behind the price   |
-//| column - the real fix for "extend far into the right past the     |
-//| price column, and get cut off". CHART_SHIFT_SIZE is a PERCENTAGE   |
-//| of the chart's own width, independent of anything this indicator   |
-//| draws in bars, so there's no exact bar->percent conversion - uses  |
-//| a generous fixed value instead and only ever INCREASES the margin, |
-//| never shrinks one you already had set bigger for your own reasons. |
+//| claims enough right-margin ("shift") chart space for both profile  |
+//| columns to actually fit without MT5 clipping them behind the price  |
+//| column - a SEPARATE chart setting from anything drawn here.          |
+//| CHART_SHIFT_SIZE is a PERCENTAGE of the chart's own width, so there   |
+//| is no exact bar->percent conversion - uses a generous fixed value      |
+//| instead and only ever INCREASES the margin, never shrinks one you       |
+//| already had set bigger for your own reasons.                             |
 //+------------------------------------------------------------------+
 void EnsureRightMargin()
   {
    if(!InpAutoRightMargin) return;
    if(!(bool)ChartGetInteger(0, CHART_SHIFT))
       ChartSetInteger(0, CHART_SHIFT, true);
-   //--- v1.04 FIX (real compile error, caught by the actual MT5 compiler -
-   //--- this environment has none, so this slipped through): CHART_SHIFT_SIZE
-   //--- is a DOUBLE property (a percentage, e.g. 25.0), not an integer one -
-   //--- ChartGetInteger/ChartSetInteger don't have a matching overload for
-   //--- it ("wrong parameters count" / "cannot convert enum"). CHART_SHIFT
-   //--- itself (the bool just above) genuinely is an integer property, so
-   //--- that half was always correct.
    double cur = ChartGetDouble(0, CHART_SHIFT_SIZE);
-   double want = 25.0;   // percent - comfortably fits InpMaxBarWidthBars at typical zoom levels
+   double want = InpShowPrevDay ? 45.0 : 25.0;   // percent - two columns need materially more room
    if(cur < want)
       ChartSetDouble(0, CHART_SHIFT_SIZE, want);
   }
 
 //+------------------------------------------------------------------+
-int OnInit()
+//| Deletes every object belonging to one profile column (used both to |
+//| clean up a column that's been toggled off, and as the early-return  |
+//| path when a window has no valid range/volume - so a stale profile    |
+//| never sits on screen with no indication it's out of date).            |
+//+------------------------------------------------------------------+
+void DeleteProfileObjects(const string prefix)
   {
-   //--- v1.06 FIX (Opus audit, real crash paths): neither InpBuckets nor
-   //--- InpDaysToShow was ever validated. InpBuckets<=0 divides by zero at
-   //--- bw=(hi-lo)/InpBuckets and ArrayResize(vol,0) then reads vol[0] out
-   //--- of range. InpDaysToShow<=0 puts cutoff AFTER the last bar, so the
-   //--- very first loop iteration sets start=rates_total and low[start]
-   //--- reads out of range. VolumeProfile_Leg.mq5 already guards its own
-   //--- InpBuckets input (v1.01) - Session never got the equivalent check.
-   if(InpBuckets <= 0 || InpDaysToShow <= 0)
+   for(int b = 0; b < 200; b++)
      {
-      Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
-      return(INIT_PARAMETERS_INCORRECT);
+      string nm = prefix + "bucket_" + IntegerToString(b);
+      if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.07 (" + IntegerToString(InpDaysToShow) + "d)");
-   EnsureRightMargin();
-   return(INIT_SUCCEEDED);
+   ObjectDelete(0, prefix + "pocline");
+   ObjectDelete(0, prefix + "vah");
+   ObjectDelete(0, prefix + "val");
   }
 
 //+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-  {
-   ObjectsDeleteAll(0, VP_PFX);
-  }
-
+//| Builds and draws ONE profile column over [start,end], anchored at  |
+//| anchorTime. Used for both the live "today" column and the frozen    |
+//| "previous day" column - identical bucket/POC/VA math, only the       |
+//| bar range, anchor position, and colours differ between calls.         |
 //+------------------------------------------------------------------+
-//| Full recompute every call - cheap (InpDaysToShow+1 days of bars    |
-//| only, same bounded-window convention as VWAP_Bands_Metals/Crypto). |
-//| Draws ONE aggregate profile, anchored just past the last candle,   |
-//| extending rightward into the chart's own blank/empty space - never |
-//| over any candle, per direct request.                               |
-//+------------------------------------------------------------------+
-int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
-                 const double &open[], const double &high[], const double &low[], const double &close[],
-                 const long &tick_volume[], const long &volume[], const int &spread[])
+void DrawProfile(const string prefix, const int start, const int end, const datetime anchorTime,
+                  const double &high[], const double &low[], const long &tick_volume[], const long &volume[],
+                  const datetime &time[], const int perSec,
+                  const color barColor, const color pocColor, const color pocLineColor, const color vaColor)
   {
-   if(rates_total < 2) return(0);
-   EnsureRightMargin();   // cheap (SetIfDiff-style guard inside) - re-asserted here in case another
-                          // EA/indicator on the same chart changed CHART_SHIFT_SIZE back since OnInit
-   int perSec = PeriodSeconds(PERIOD_CURRENT);
-   if(perSec <= 0) return(rates_total);
-
-   datetime lastDay = time[rates_total - 1] - (time[rates_total - 1] % 86400);
-   datetime cutoff  = lastDay - (datetime)((long)(InpDaysToShow - 1) * 86400);
-
-   int start = 0;
-   for(int i = rates_total - 1; i >= 0; i--)
-      if(time[i] < cutoff) { start = i + 1; break; }
-   int end = rates_total - 1;
+   if(end < start) { DeleteProfileObjects(prefix); return; }
 
    double lo = low[start], hi = high[start];
    for(int i = start; i <= end; i++)
@@ -193,11 +173,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       lo = MathMin(lo, low[i]);
       hi = MathMax(hi, high[i]);
      }
-   //--- v1.06 FIX (Opus audit, low priority): these two early returns used
-   //--- to leave whatever profile was already drawn sitting on screen with
-   //--- no indication it's stale (e.g. InpUseRealVolume=true on a symbol
-   //--- whose real_volume is 0, confirmed 0 on GOLD/SILVER this project).
-   if(hi <= lo) { ObjectsDeleteAll(0, VP_PFX); ChartRedraw(0); return(rates_total); }
+   if(hi <= lo) { DeleteProfileObjects(prefix); return; }
 
    double bw = (hi - lo) / InpBuckets;
    double vol[];
@@ -223,17 +199,11 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    double pocVol = vol[0];
    for(int b = 1; b < InpBuckets; b++)
       if(vol[b] > pocVol) { pocVol = vol[b]; pocBucket = b; }
-   if(pocVol <= 0.0) { ObjectsDeleteAll(0, VP_PFX); ChartRedraw(0); return(rates_total); }
-
-   //--- anchor the WHOLE profile one bar past the last candle, into the
-   //--- chart's own empty future space - this is the only time coordinate
-   //--- every bucket rectangle uses, so nothing here ever sits on top of
-   //--- a real candle.
-   datetime anchorTime = time[end] + (datetime)perSec;
+   if(pocVol <= 0.0) { DeleteProfileObjects(prefix); return; }
 
    for(int b = 0; b < InpBuckets; b++)
      {
-      string nm = VP_PFX + "bucket_" + IntegerToString(b);
+      string nm = prefix + "bucket_" + IntegerToString(b);
       if(vol[b] <= 0.0)
         {
          ObjectDelete(0, nm);
@@ -265,7 +235,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
          ObjectSetInteger(0, nm, OBJPROP_TIME, 1, t2);
          ObjectSetDouble (0, nm, OBJPROP_PRICE, 1, bucketHi);
         }
-      ObjectSetInteger(0, nm, OBJPROP_COLOR, isPoc ? InpPocColor : InpBarColor);
+      ObjectSetInteger(0, nm, OBJPROP_COLOR, isPoc ? pocColor : barColor);
       ObjectSetString(0, nm, OBJPROP_TOOLTIP,
                        (isPoc ? "POC " : "") + "vol=" + DoubleToString(vol[b], 0) +
                        "  [" + DoubleToString(bucketLo, _Digits) + " - " + DoubleToString(bucketHi, _Digits) + "]");
@@ -273,22 +243,15 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- clean up any leftover buckets from a previous call with more buckets than now
    for(int b = InpBuckets; b < 200; b++)
      {
-      string nm = VP_PFX + "bucket_" + IntegerToString(b);
+      string nm = prefix + "bucket_" + IntegerToString(b);
       if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
       else break;
      }
 
    if(InpShowPocLine)
      {
-      string pocNm = VP_PFX + "pocline";
+      string pocNm = prefix + "pocline";
       double pocPrice = lo + (pocBucket + 0.5) * bw;
-      //--- v1.03: per direct request - InpPocLineRayLeft uses MT5's own
-      //--- OBJPROP_RAY_LEFT to extend the line genuinely infinitely across
-      //--- the whole visible (and scrollable-back-into) chart history,
-      //--- rather than stopping InpPocLineBackBars bars behind the last
-      //--- candle - "so I can see on the chart the levels and how price
-      //--- reacted" needs the line to reach back over whatever history
-      //--- you scroll to, not a fixed recent window.
       datetime lineStart = InpPocLineRayLeft ? anchorTime : time[(int)MathMax(0, end - InpPocLineBackBars)];
       datetime lineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
       if(ObjectFind(0, pocNm) < 0)
@@ -309,17 +272,11 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
       ObjectSetInteger(0, pocNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
       ObjectSetInteger(0, pocNm, OBJPROP_RAY_RIGHT, false);
-      ObjectSetInteger(0, pocNm, OBJPROP_COLOR, InpPocLineColor);
+      ObjectSetInteger(0, pocNm, OBJPROP_COLOR, pocLineColor);
      }
    else
-      ObjectDelete(0, VP_PFX + "pocline");
+      ObjectDelete(0, prefix + "pocline");
 
-   //--- v1.05: Value Area High/Low - expand outward from the POC bucket,
-   //--- each step adding whichever still-unclaimed neighbour (left or
-   //--- right) carries MORE volume, until the accumulated share reaches
-   //--- InpVAPercent of the window's total volume. Same anchor/ray
-   //--- behaviour as the POC line (InpPocLineRayLeft/InpPocLineBackBars)
-   //--- so they read as one consistent family of levels.
    if(InpShowValueArea)
      {
       double totalVol = 0.0;
@@ -339,7 +296,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       datetime vaLineStart = InpPocLineRayLeft ? anchorTime : time[(int)MathMax(0, end - InpPocLineBackBars)];
       datetime vaLineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
 
-      string vahNm = VP_PFX + "vah";
+      string vahNm = prefix + "vah";
       if(ObjectFind(0, vahNm) < 0)
         {
          ObjectCreate(0, vahNm, OBJ_TREND, 0, vaLineStart, vahPrice, vaLineEnd, vahPrice);
@@ -358,9 +315,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
       ObjectSetInteger(0, vahNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
       ObjectSetInteger(0, vahNm, OBJPROP_RAY_RIGHT, false);
-      ObjectSetInteger(0, vahNm, OBJPROP_COLOR, InpVahValColor);
+      ObjectSetInteger(0, vahNm, OBJPROP_COLOR, vaColor);
 
-      string valNm = VP_PFX + "val";
+      string valNm = prefix + "val";
       if(ObjectFind(0, valNm) < 0)
         {
          ObjectCreate(0, valNm, OBJ_TREND, 0, vaLineStart, valPrice, vaLineEnd, valPrice);
@@ -379,13 +336,94 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
         }
       ObjectSetInteger(0, valNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
       ObjectSetInteger(0, valNm, OBJPROP_RAY_RIGHT, false);
-      ObjectSetInteger(0, valNm, OBJPROP_COLOR, InpVahValColor);
+      ObjectSetInteger(0, valNm, OBJPROP_COLOR, vaColor);
      }
    else
      {
-      ObjectDelete(0, VP_PFX + "vah");
-      ObjectDelete(0, VP_PFX + "val");
+      ObjectDelete(0, prefix + "vah");
+      ObjectDelete(0, prefix + "val");
      }
+  }
+
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   if(InpBuckets <= 0 || InpDaysToShow <= 0)
+     {
+      Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.08 (today" +
+                       (InpShowPrevDay ? "+prev day)" : ")"));
+   EnsureRightMargin();
+   return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   ObjectsDeleteAll(0, VP_PFX);
+  }
+
+//+------------------------------------------------------------------+
+//| Full recompute every call - cheap (at most InpDaysToShow+1 days of |
+//| bars for "today" plus one more day for "previous day"). Draws TWO  |
+//| independent profile columns side by side in the chart's own blank/  |
+//| empty space to the right of the last candle - never over any         |
+//| candle, per direct request.                                           |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
+                 const double &open[], const double &high[], const double &low[], const double &close[],
+                 const long &tick_volume[], const long &volume[], const int &spread[])
+  {
+   if(rates_total < 2) return(0);
+   EnsureRightMargin();   // cheap (SetIfDiff-style guard inside) - re-asserted here in case another
+                          // EA/indicator on the same chart changed CHART_SHIFT_SIZE back since OnInit
+   int perSec = PeriodSeconds(PERIOD_CURRENT);
+   if(perSec <= 0) return(rates_total);
+
+   //--- TODAY column: InpDaysToShow calendar days up to and including the
+   //--- current (possibly still-forming) day - live.
+   datetime todayStart = time[rates_total - 1] - (time[rates_total - 1] % 86400);
+   datetime todayCutoff = todayStart - (datetime)((long)(InpDaysToShow - 1) * 86400);
+   int startToday = 0;
+   for(int i = rates_total - 1; i >= 0; i--)
+      if(time[i] < todayCutoff) { startToday = i + 1; break; }
+   int endToday = rates_total - 1;
+
+   datetime todayAnchor = time[endToday] + (datetime)perSec;
+   DrawProfile(VP_PFX + "today_", startToday, endToday, todayAnchor,
+               high, low, tick_volume, volume, time, perSec,
+               InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
+
+   //--- PREVIOUS DAY column: exactly one full, already-completed calendar
+   //--- day (yesterday) - frozen, independent of InpDaysToShow, independent
+   //--- of how far today has progressed.
+   if(InpShowPrevDay)
+     {
+      datetime prevDayStart = todayStart - (datetime)86400;
+      int endPrev = -1;
+      for(int i = rates_total - 1; i >= 0; i--)
+         if(time[i] < todayStart) { endPrev = i; break; }
+      int startPrev = -1;
+      if(endPrev >= 0)
+        {
+         startPrev = 0;
+         for(int i = endPrev; i >= 0; i--)
+            if(time[i] < prevDayStart) { startPrev = i + 1; break; }
+        }
+      if(endPrev >= 0 && startPrev >= 0 && startPrev <= endPrev)
+        {
+         datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
+         DrawProfile(VP_PFX + "prev_", startPrev, endPrev, prevAnchor,
+                     high, low, tick_volume, volume, time, perSec,
+                     InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
+        }
+      else
+         DeleteProfileObjects(VP_PFX + "prev_");
+     }
+   else
+      DeleteProfileObjects(VP_PFX + "prev_");
 
    ChartRedraw(0);
    return(rates_total);
