@@ -1,11 +1,18 @@
 //+------------------------------------------------------------------+
 //|                                   VolumeProfile_Session.mq5      |
 //|  Session (daily) volume profile - per direct request, as its own |
-//|  standalone indicator. Aggregates the last InpDaysToShow calendar  |
-//|  days (same day boundary as this project's VWAP_Bands_Metals/     |
-//|  Crypto.mq5 daily VWAP) into ONE profile, drawn entirely in the    |
-//|  BLANK SPACE to the right of the most recent candle - per direct   |
-//|  request/screenshot, it must sit there, not overlap any candles.   |
+//|  standalone indicator. v1.07: InpDaysToShow default changed 3->1  |
+//|  - a multi-day blended window was NOT what other traders mean by  |
+//|  "session volume profile" (e.g. TradingView's own Session Volume  |
+//|  Profile tool, and standard retail/prop usage generally): one      |
+//|  profile per SESSION, building live from that session's own open,  |
+//|  not several calendar days blended into one POC/VA. InpDaysToShow  |
+//|  is left as an input (not removed) only so a genuinely multi-day   |
+//|  reference can still be built deliberately by raising it - the      |
+//|  default now matches the standard single-session construction.      |
+//|  Drawn entirely in the BLANK SPACE to the right of the most recent  |
+//|  candle - per direct request/screenshot, it must sit there, not     |
+//|  overlap any candles.                                               |
 //|  Anchored at (last bar time + 1 bar), extending further right as   |
 //|  chart's own empty future space - scroll/zoom moves it exactly     |
 //|  like any other chart object anchored by time, same as everything  |
@@ -42,13 +49,16 @@
 //|  it shows have any backtested predictive edge.                        |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.06"
+#property version   "1.07"
 #property indicator_chart_window
 #property indicator_plots 0
 
 input group "=== Volume profile settings ==="
-input int    InpDaysToShow       = 3;       // how many of the most recent calendar days feed the
-                                             // ONE profile shown (same day boundary as the daily VWAP)
+input int    InpDaysToShow       = 1;       // v1.07: default 1 = ONE session (today, live from this
+                                             // session's own open) - matches the standard "session
+                                             // volume profile" other traders use. Raise only if you
+                                             // deliberately want several calendar days blended into one
+                                             // profile instead (a different, non-standard construction).
 input int    InpBuckets          = 30;      // price buckets - more buckets = finer resolution,
                                              // noisier-looking histogram
 input bool   InpUseRealVolume    = false;   // GOLD/SILVER real_volume is 0 on this broker's feed
@@ -141,7 +151,7 @@ int OnInit()
       Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.06 (" + IntegerToString(InpDaysToShow) + "d)");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.07 (" + IntegerToString(InpDaysToShow) + "d)");
    EnsureRightMargin();
    return(INIT_SUCCEEDED);
   }
