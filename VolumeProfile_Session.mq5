@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.10"
+#property version   "1.11"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -94,6 +94,14 @@ input color  InpPrevPocLineColor = C'255,140,0';     // exact neon orange.
 input color  InpPrevVahValColor  = C'255,190,130';   // light neon amber - previous day's VAH/VAL.
 
 input group "=== Volume profile settings (shared by both columns) ==="
+input ENUM_TIMEFRAMES InpSourceTF = PERIOD_M1;   // v1.11: the profile's own high/low/volume data is
+                                             // ALWAYS pulled from this ONE fixed timeframe, independent
+                                             // of whatever timeframe the chart itself is on - per direct
+                                             // report ("whether M5 or M15, the POC should be at the same
+                                             // level"), building from the chart's own (coarser) bars let
+                                             // the POC genuinely shift depending on which chart you
+                                             // viewed it from. M1 gives the finest practical attribution
+                                             // of volume to price without needing tick data.
 input int    InpBuckets          = 30;      // price buckets - more buckets = finer resolution,
                                              // noisier-looking histogram
 input bool   InpUseRealVolume    = false;   // GOLD/SILVER real_volume is 0 on this broker's feed
@@ -175,12 +183,35 @@ void DeleteProfileObjects(const string prefix)
 //| "previous day" column - identical bucket/POC/VA math, only the       |
 //| bar range, anchor position, and colours differ between calls.         |
 //+------------------------------------------------------------------+
-void DrawProfile(const string prefix, const int start, const int end, const datetime anchorTime,
-                  const double &high[], const double &low[], const long &tick_volume[], const long &volume[],
-                  const datetime &time[], const int perSec,
+//--- v1.09 FIX (real design bug - "whether M5 or M15, the POC should be
+//--- at the same level"): the old version built the profile from the
+//--- CHART'S OWN bars - on M15, each bar's volume gets smeared evenly
+//--- across that bar's own (3x wider than M5) high-low range before being
+//--- bucketed, which can genuinely shift which bucket ends up busiest
+//--- compared to the finer M5 attribution of the exact same underlying
+//--- trading. The true POC shouldn't depend on which chart you're
+//--- viewing it from. Fixed by always sourcing the profile's own high/
+//--- low/volume data from ONE FIXED timeframe (InpSourceTF, default M1)
+//--- via Copy*() by time range, completely independent of whatever
+//--- timeframe the chart itself is on - same POC/VAH/VAL regardless of
+//--- chart period, only the drawing position (anchorTime/perSec, still
+//--- tied to the chart's own bars) changes.
+void DrawProfile(const string prefix, const datetime startTime, const datetime endTime,
+                  const datetime anchorTime, const datetime &chartTime[], const int chartEnd, const int perSec,
                   const color barColor, const color pocColor, const color pocLineColor, const color vaColor)
   {
-   if(end < start) { DeleteProfileObjects(prefix); return; }
+   if(endTime <= startTime) { DeleteProfileObjects(prefix); return; }
+
+   double high[], low[];
+   long   tick_volume[], volume[];
+   int n = CopyHigh(_Symbol, InpSourceTF, startTime, endTime, high);
+   if(CopyLow(_Symbol, InpSourceTF, startTime, endTime, low) < n) n = 0;
+   if(InpUseRealVolume)
+     { if(CopyRealVolume(_Symbol, InpSourceTF, startTime, endTime, volume) < n) n = 0; }
+   else
+     { if(CopyTickVolume(_Symbol, InpSourceTF, startTime, endTime, tick_volume) < n) n = 0; }
+   if(n <= 0) { DeleteProfileObjects(prefix); return; }
+   int start = 0, end = n - 1;
 
    double lo = low[start], hi = high[start];
    for(int i = start; i <= end; i++)
@@ -267,7 +298,7 @@ void DrawProfile(const string prefix, const int start, const int end, const date
      {
       string pocNm = prefix + "pocline";
       double pocPrice = lo + (pocBucket + 0.5) * bw;
-      datetime lineStart = InpPocLineRayLeft ? anchorTime : time[(int)MathMax(0, end - InpPocLineBackBars)];
+      datetime lineStart = InpPocLineRayLeft ? anchorTime : chartTime[(int)MathMax(0, chartEnd - InpPocLineBackBars)];
       datetime lineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
       if(ObjectFind(0, pocNm) < 0)
         {
@@ -308,7 +339,7 @@ void DrawProfile(const string prefix, const int start, const int end, const date
         }
       double vahPrice = lo + (vaHi + 1) * bw;
       double valPrice = lo + vaLo * bw;
-      datetime vaLineStart = InpPocLineRayLeft ? anchorTime : time[(int)MathMax(0, end - InpPocLineBackBars)];
+      datetime vaLineStart = InpPocLineRayLeft ? anchorTime : chartTime[(int)MathMax(0, chartEnd - InpPocLineBackBars)];
       datetime vaLineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
 
       string vahNm = prefix + "vah";
@@ -368,7 +399,7 @@ int OnInit()
       Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.10 (today" +
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.11 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
    EnsureRightMargin();
    return(INIT_SUCCEEDED);
@@ -407,8 +438,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    int endToday = rates_total - 1;
 
    datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
-   DrawProfile(VP_PFX + "today_", startToday, endToday, todayAnchor,
-               high, low, tick_volume, volume, time, perSec,
+   DrawProfile(VP_PFX + "today_", todayCutoff, TimeCurrent(), todayAnchor,
+               time, endToday, perSec,
                InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
 
    //--- PREVIOUS DAY column: exactly one full, already-completed SESSION -
@@ -449,8 +480,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       if(endPrev >= 0 && startPrev >= 0 && startPrev <= endPrev && startPrevValid)
         {
          datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
-         DrawProfile(VP_PFX + "prev_", startPrev, endPrev, prevAnchor,
-                     high, low, tick_volume, volume, time, perSec,
+         DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
+                     time, endPrev, perSec,
                      InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
         }
       else
