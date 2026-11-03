@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 9
 #property indicator_plots   5
@@ -157,11 +157,11 @@ int OnInit()
    PlotIndexSetInteger(1, PLOT_LINE_COLOR, InpBearColor);
    PlotIndexSetInteger(1, PLOT_LINE_WIDTH, InpLineWidth);
 
-   PlotIndexSetInteger(2, PLOT_ARROWCODE, InpBuyArrowCode);
+   PlotIndexSetInteger(2, PLOT_ARROW, InpBuyArrowCode);
    PlotIndexSetInteger(2, PLOT_LINE_COLOR, InpBuyArrowColor);
    PlotIndexSetInteger(2, PLOT_LINE_WIDTH, InpArrowSize);
    PlotIndexSetInteger(2, PLOT_DRAW_TYPE, InpShowSignalArrows ? DRAW_ARROW : DRAW_NONE);
-   PlotIndexSetInteger(3, PLOT_ARROWCODE, InpSellArrowCode);
+   PlotIndexSetInteger(3, PLOT_ARROW, InpSellArrowCode);
    PlotIndexSetInteger(3, PLOT_LINE_COLOR, InpSellArrowColor);
    PlotIndexSetInteger(3, PLOT_LINE_WIDTH, InpArrowSize);
    PlotIndexSetInteger(3, PLOT_DRAW_TYPE, InpShowSignalArrows ? DRAW_ARROW : DRAW_NONE);
