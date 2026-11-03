@@ -23,7 +23,7 @@
 //|  current chart's own timeframe).                                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 3
 #property indicator_plots   3
@@ -165,6 +165,23 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                  const int &spread[])
   {
    if(rates_total < 1) return(0);
+   //--- v1.01 FIX (real bug - "nothing shows on the chart"): a freshly
+   //--- created iMA() handle has no computed data at all for a tick or
+   //--- two after OnInit - CopyBuffer against it just fails. The old code
+   //--- never checked for this, so on the VERY FIRST OnCalculate call (the
+   //--- one that backfills the entire chart's history) every bar's
+   //--- CopyBuffer call failed and got silently set to EMPTY_VALUE - and
+   //--- since that call still returned rates_total, MT5 treated the whole
+   //--- backfill as done and never retried it. Same "not ready yet, retry
+   //--- next tick" pattern already used for every ATR handle elsewhere in
+   //--- this project (e.g. MarketStructure_Break.mq5) - return(0) keeps
+   //--- prev_calculated at 0 so MT5 calls OnCalculate again next tick
+   //--- instead of accepting a backfill that silently filled nothing.
+   if((g_handle1 != INVALID_HANDLE && BarsCalculated(g_handle1) <= 0) ||
+      (g_handle2 != INVALID_HANDLE && BarsCalculated(g_handle2) <= 0) ||
+      (g_handle3 != INVALID_HANDLE && BarsCalculated(g_handle3) <= 0))
+      return(0);
+
    //--- incremental: only (re)compute bars that are new or could have
    //--- changed (the current forming bar, always re-evaluated since its
    //--- own HTF parent bar's EMA value can still move intra-bar).
