@@ -23,7 +23,7 @@
 //|  current chart's own timeframe).                                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 3
 #property indicator_plots   3
@@ -165,25 +165,64 @@ void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
       return;
      }
    int htfPeriodSec = PeriodSeconds(tf);
+   if(from >= rates_total || htfPeriodSec <= 0) return;
+
+   //--- v1.03 FIX (real freeze-causing bug - confirmed, not a settings
+   //--- issue): the previous version called CopyBuffer TWICE per LTF bar,
+   //--- inside this loop - on a fresh attach that loop can run across the
+   //--- chart's entire history (hundreds of thousands of bars), so a
+   //--- single OnCalculate call could fire well over a million individual
+   //--- CopyBuffer calls. Each one has real per-call overhead, and
+   //--- indicator calculation runs on the terminal's main thread, so a
+   //--- call that takes that long freezes the whole terminal UI, not just
+   //--- this indicator. Fixed by bulk-fetching the whole needed shift
+   //--- range of HTF values (and HTF bar open times) ONCE per FillLine
+   //--- call, then doing plain in-memory array lookups per LTF bar instead
+   //--- of a fresh CopyBuffer call each time - the same bulk-fetch-then-
+   //--- index pattern every other indicator in this project already uses
+   //--- for its ATR buffer.
+   int shiftOldest = iBarShift(_Symbol, tf, time[from], false);
+   int shiftNewest = iBarShift(_Symbol, tf, time[rates_total - 1], false);
+   if(shiftOldest < 0 || shiftNewest < 0)
+     {
+      for(int i = from; i < rates_total; i++) buf[i] = EMPTY_VALUE;
+      return;
+     }
+   //--- +2 margin: need one bar MORE recent than shiftNewest for its own
+   //--- "next bar" interpolation target, plus the usual off-by-one safety.
+   int need = shiftOldest - shiftNewest + 3;
+   int haveHtf = BarsCalculated(handle);
+   if(need > haveHtf) need = haveHtf;
+   if(need < 2) need = MathMin(2, haveHtf);
+
+   double vals[];
+   datetime opens[];
+   ArraySetAsSeries(vals, true);
+   ArraySetAsSeries(opens, true);
+   int gotVals = CopyBuffer(handle, 0, 0, need, vals);
+   int gotTimes = CopyTime(_Symbol, tf, 0, need, opens);
+   int got = MathMin(gotVals, gotTimes);
+   if(got < 1)
+     {
+      for(int i = from; i < rates_total; i++) buf[i] = EMPTY_VALUE;
+      return;
+     }
+
    for(int i = from; i < rates_total; i++)
      {
       int htfShift = iBarShift(_Symbol, tf, time[i], false);
-      if(htfShift < 0) { buf[i] = EMPTY_VALUE; continue; }
-      double tmpCur[];
-      if(CopyBuffer(handle, 0, htfShift, 1, tmpCur) < 1) { buf[i] = EMPTY_VALUE; continue; }
-      double valCur = tmpCur[0];
+      if(htfShift < 0 || htfShift >= got) { buf[i] = EMPTY_VALUE; continue; }
+      double valCur = vals[htfShift];
 
-      if(htfShift <= 0 || htfPeriodSec <= 0)
+      if(htfShift <= 0)
         {
          buf[i] = valCur;   // still-forming HTF bar - nothing to interpolate toward yet
          continue;
         }
-      double tmpNext[];
-      if(CopyBuffer(handle, 0, htfShift - 1, 1, tmpNext) < 1) { buf[i] = valCur; continue; }
-      double valNext = tmpNext[0];
+      if(htfShift - 1 >= got) { buf[i] = valCur; continue; }
+      double valNext = vals[htfShift - 1];
 
-      datetime htfOpenTime = iTime(_Symbol, tf, htfShift);
-      double frac = (double)(time[i] - htfOpenTime) / (double)htfPeriodSec;
+      double frac = (double)(time[i] - opens[htfShift]) / (double)htfPeriodSec;
       if(frac < 0.0) frac = 0.0;
       if(frac > 1.0) frac = 1.0;
       buf[i] = valCur + frac * (valNext - valCur);
