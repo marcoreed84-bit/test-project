@@ -1,0 +1,513 @@
+//+------------------------------------------------------------------+
+//|                                          SuperTrend_MTF.mq5      |
+//|  Standalone rebuild of a commercial-looking "LT Super Trend 2.0"  |
+//|  indicator the user has running and reported causes chart hangs -  |
+//|  per direct request, built from scratch (not decompiled/copied -   |
+//|  the original's compiled .ex5 was never read) so there's something  |
+//|  the user can compare on the same chart against the one that hangs,  |
+//|  and so a freeze can be ruled in or out by isolation.                 |
+//|                                                                    |
+//|  Core: textbook ATR SuperTrend (standard formula, same on every      |
+//|  platform - NOT proprietary): basic bands = (high+low)/2 +/- mult*     |
+//|  ATR; final bands only move in the trend-favourable direction unless    |
+//|  price closes through the opposite one ("sticky" bands); trend flips     |
+//|  the first close beyond the opposite final band.                          |
+//|                                                                    |
+//|  Everything visible in the user's Inputs screenshot is implemented:  |
+//|  line colour/width, buy/sell arrows (Wingdings codes 233/234, same     |
+//|  as shown), cloud fill between price and the trend line, a price        |
+//|  label, an optional single HTF SuperTrend line projected onto the        |
+//|  current chart, and a 4-timeframe dashboard panel.                        |
+//|                                                                    |
+//|  ONE THING IS NOT SPECIFIED by the inputs screenshot and had to be    |
+//|  invented: the dashboard's "Warning" (gold) state, between Bullish       |
+//|  and Bearish. Defined here as "price is within InpWarningATR x ATR of     |
+//|  flipping" - a reasonable guess, not a known fact about the original.      |
+//|                                                                    |
+//|  PERFORMANCE - this is the actual point of the rebuild, so it's        |
+//|  called out explicitly: every per-tick Copy*()/CopyBuffer() call in      |
+//|  this file is a SINGLE bulk fetch covering however many bars are          |
+//|  actually new, never one call per historical bar inside a loop - the       |
+//|  exact anti-pattern that caused real, confirmed freezes in this project's    |
+//|  HTF_EMA_Overlay.mq5 (fixed in its own v1.03) earlier. The HTF line and the  |
+//|  dashboard's 4 timeframes are each bar-gated to their OWN timeframe (only     |
+//|  recomputed when THAT timeframe prints a new bar, not every tick) and bound    |
+//|  their own lookback (InpHtfLookbackBars) so a SuperTrend's recurrence (each     |
+//|  bar depends on the previous one's final bands) can't turn into an unbounded     |
+//|  per-tick cost either.                                                            |
+//+------------------------------------------------------------------+
+#property copyright "test-project"
+#property version   "1.00"
+#property indicator_chart_window
+#property indicator_buffers 9
+#property indicator_plots   5
+#property indicator_label1  "Uptrend"
+#property indicator_type1   DRAW_LINE
+#property indicator_label2  "Downtrend"
+#property indicator_type2   DRAW_LINE
+#property indicator_label3  "Buy"
+#property indicator_type3   DRAW_ARROW
+#property indicator_label4  "Sell"
+#property indicator_type4   DRAW_ARROW
+#property indicator_label5  "Cloud"
+#property indicator_type5   DRAW_FILLING
+
+input group "=== 1. Indicator settings ==="
+input int    InpAtrPeriod        = 10;
+input double InpAtrMultiplier    = 3.0;
+
+input group "=== 2. Visual settings - Line ==="
+input color  InpBullColor        = clrLime;
+input color  InpBearColor        = clrRed;
+input int    InpLineWidth        = 2;
+
+input group "=== Signal arrows ==="
+input bool   InpShowSignalArrows = true;
+input int    InpArrowSize        = 2;
+input color  InpBuyArrowColor    = clrLime;
+input color  InpSellArrowColor   = clrRed;
+input int    InpBuyArrowCode     = 233;
+input int    InpSellArrowCode    = 234;
+
+input group "=== Cloud fill ==="
+input bool   InpShowCloudFill    = true;
+input color  InpCloudBullColor   = C'0,80,0';
+input color  InpCloudBearColor   = C'80,0,0';
+
+input group "=== Price label ==="
+input bool   InpShowPriceLabel   = true;
+
+input group "=== 3. HTF line on chart ==="
+input bool             InpShowHtfLine  = false;
+input ENUM_TIMEFRAMES  InpHtfTimeframe = PERIOD_H4;
+input color             InpHtfBullColor = clrDodgerBlue;
+input color             InpHtfBearColor = clrOrangeRed;
+input int               InpHtfLineWidth = 3;
+input ENUM_LINE_STYLE   InpHtfLineStyle = STYLE_SOLID;
+
+input group "=== 4. Dashboard ==="
+input bool   InpShowDashboard    = false;
+input int    InpDashX            = 10;
+input int    InpDashY            = 30;
+input color  InpDashTextColor    = clrWhite;
+input color  InpDashBullColor    = clrLime;
+input color  InpDashWarnColor    = clrGold;
+input color  InpDashBearColor    = clrRed;
+//--- NOT in the original's visible inputs - my own addition to define
+//--- "Warning" (see file header): price within this many ATR of the
+//--- opposite band counts as about-to-flip.
+input double InpWarningATR       = 0.25;
+
+input group "=== 5. Multi-timeframe (dashboard rows) ==="
+input ENUM_TIMEFRAMES InpTF1 = PERIOD_M15;
+input ENUM_TIMEFRAMES InpTF2 = PERIOD_H1;
+input ENUM_TIMEFRAMES InpTF3 = PERIOD_H4;
+input ENUM_TIMEFRAMES InpTF4 = PERIOD_D1;
+
+input group "=== General ==="
+input int    InpHtfLookbackBars  = 500;   // bounds the one-shot SuperTrend recurrence recompute for
+                                           // the HTF line AND each dashboard row - a new bar on that
+                                           // timeframe triggers a recompute over at most this many of
+                                           // its own bars, never per-tick, never unbounded.
+
+//+------------------------------------------------------------------+
+double g_lineUp[], g_lineDown[], g_arrowBuy[], g_arrowSell[], g_cloudUp[], g_cloudDn[];
+double g_finalUpper[], g_finalLower[], g_trendState[];   // calc-only, not plotted
+
+int      g_atrHandle = INVALID_HANDLE;
+datetime g_lastBarTime = 0;
+
+#define PFX "STM_"
+
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   if(InpAtrPeriod <= 0 || InpAtrMultiplier <= 0.0 || InpHtfLookbackBars <= 0)
+     {
+      Print("SuperTrend_MTF: InpAtrPeriod, InpAtrMultiplier and InpHtfLookbackBars must all be >= 1 (> 0 for the multiplier).");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   SetIndexBuffer(0, g_lineUp, INDICATOR_DATA);
+   SetIndexBuffer(1, g_lineDown, INDICATOR_DATA);
+   SetIndexBuffer(2, g_arrowBuy, INDICATOR_DATA);
+   SetIndexBuffer(3, g_arrowSell, INDICATOR_DATA);
+   SetIndexBuffer(4, g_cloudUp, INDICATOR_DATA);
+   SetIndexBuffer(5, g_cloudDn, INDICATOR_DATA);
+   SetIndexBuffer(6, g_finalUpper, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(7, g_finalLower, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(8, g_trendState, INDICATOR_CALCULATIONS);
+   ArraySetAsSeries(g_lineUp, false);
+   ArraySetAsSeries(g_lineDown, false);
+   ArraySetAsSeries(g_arrowBuy, false);
+   ArraySetAsSeries(g_arrowSell, false);
+   ArraySetAsSeries(g_cloudUp, false);
+   ArraySetAsSeries(g_cloudDn, false);
+   ArraySetAsSeries(g_finalUpper, false);
+   ArraySetAsSeries(g_finalLower, false);
+   ArraySetAsSeries(g_trendState, false);
+
+   PlotIndexSetDouble(0, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(1, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(2, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(3, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(4, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+
+   PlotIndexSetInteger(0, PLOT_LINE_COLOR, InpBullColor);
+   PlotIndexSetInteger(0, PLOT_LINE_WIDTH, InpLineWidth);
+   PlotIndexSetInteger(1, PLOT_LINE_COLOR, InpBearColor);
+   PlotIndexSetInteger(1, PLOT_LINE_WIDTH, InpLineWidth);
+
+   PlotIndexSetInteger(2, PLOT_ARROWCODE, InpBuyArrowCode);
+   PlotIndexSetInteger(2, PLOT_LINE_COLOR, InpBuyArrowColor);
+   PlotIndexSetInteger(2, PLOT_LINE_WIDTH, InpArrowSize);
+   PlotIndexSetInteger(2, PLOT_DRAW_TYPE, InpShowSignalArrows ? DRAW_ARROW : DRAW_NONE);
+   PlotIndexSetInteger(3, PLOT_ARROWCODE, InpSellArrowCode);
+   PlotIndexSetInteger(3, PLOT_LINE_COLOR, InpSellArrowColor);
+   PlotIndexSetInteger(3, PLOT_LINE_WIDTH, InpArrowSize);
+   PlotIndexSetInteger(3, PLOT_DRAW_TYPE, InpShowSignalArrows ? DRAW_ARROW : DRAW_NONE);
+
+   PlotIndexSetInteger(4, PLOT_LINE_COLOR, 0, InpCloudBullColor);
+   PlotIndexSetInteger(4, PLOT_LINE_COLOR, 1, InpCloudBearColor);
+   PlotIndexSetInteger(4, PLOT_DRAW_TYPE, InpShowCloudFill ? DRAW_FILLING : DRAW_NONE);
+
+   g_atrHandle = iATR(_Symbol, PERIOD_CURRENT, InpAtrPeriod);
+   if(g_atrHandle == INVALID_HANDLE)
+     {
+      Print("SuperTrend_MTF: failed to create ATR handle.");
+      return(INIT_FAILED);
+     }
+   g_lastBarTime = 0;
+   EventSetTimer(3);   // same "don't stay stale on a closed market" guard as VolumeProfile_Session v1.12
+   IndicatorSetString(INDICATOR_SHORTNAME, "SuperTrend MTF");
+   return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   EventKillTimer();
+   ObjectsDeleteAll(0, PFX);
+   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+  }
+
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   ChartSetSymbolPeriod(0, _Symbol, _Period);
+  }
+
+//+------------------------------------------------------------------+
+//| One step of the standard ATR SuperTrend recurrence, given bar i's   |
+//| own high/low/close/atr and the PREVIOUS bar's final bands/trend -    |
+//| same formula used identically for the main chart and for each HTF     |
+//| bounded recompute below, so there's only one implementation of the      |
+//| actual math to get right.                                                |
+//+------------------------------------------------------------------+
+void SuperTrendStep(const double h, const double l, const double c, const double atr,
+                     const double prevClose, const double prevFinalUpper, const double prevFinalLower,
+                     const double prevTrend, const double mult,
+                     double &finalUpper, double &finalLower, double &trend)
+  {
+   double mid = (h + l) / 2.0;
+   double basicUpper = mid + mult * atr;
+   double basicLower = mid - mult * atr;
+
+   finalUpper = (basicUpper < prevFinalUpper || prevClose > prevFinalUpper) ? basicUpper : prevFinalUpper;
+   finalLower = (basicLower > prevFinalLower || prevClose < prevFinalLower) ? basicLower : prevFinalLower;
+
+   if(c > prevFinalUpper)      trend = 1.0;
+   else if(c < prevFinalLower) trend = -1.0;
+   else                         trend = prevTrend;
+  }
+
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
+                 const double &open[], const double &high[], const double &low[],
+                 const double &close[], const long &tick_volume[], const long &volume[],
+                 const int &spread[])
+  {
+   int minBars = InpAtrPeriod + 2;
+   if(rates_total < minBars) return(0);
+
+   if(BarsCalculated(g_atrHandle) <= 0) return(0);   // handle not ready yet - retry next tick
+
+   bool freshAttach = (prev_calculated <= 0);
+   int from = freshAttach ? 1 : prev_calculated - 1;
+   if(from < 1) from = 1;
+   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);
+
+   double atrBuf[];
+   ArraySetAsSeries(atrBuf, true);
+   int atrCount = rates_total - from + 1;
+   if(CopyBuffer(g_atrHandle, 0, 0, atrCount, atrBuf) < atrCount) return(0);
+
+   if(freshAttach)
+     {
+      g_finalUpper[0] = (high[0] + low[0]) / 2.0 + InpAtrMultiplier * atrBuf[rates_total - 1];
+      g_finalLower[0] = (high[0] + low[0]) / 2.0 - InpAtrMultiplier * atrBuf[rates_total - 1];
+      g_trendState[0] = 1.0;
+      g_lineUp[0] = EMPTY_VALUE; g_lineDown[0] = EMPTY_VALUE;
+      g_arrowBuy[0] = EMPTY_VALUE; g_arrowSell[0] = EMPTY_VALUE;
+      g_cloudUp[0] = EMPTY_VALUE; g_cloudDn[0] = EMPTY_VALUE;
+     }
+
+   for(int i = from; i < rates_total; i++)
+     {
+      double atrHere = atrBuf[rates_total - 1 - i];
+      if(atrHere == EMPTY_VALUE || atrHere <= 0.0) { atrHere = atrBuf[rates_total - from]; }
+
+      double fu, fl, tr;
+      SuperTrendStep(high[i], low[i], close[i], atrHere,
+                      close[i - 1], g_finalUpper[i - 1], g_finalLower[i - 1], g_trendState[i - 1],
+                      InpAtrMultiplier, fu, fl, tr);
+      g_finalUpper[i] = fu; g_finalLower[i] = fl; g_trendState[i] = tr;
+
+      bool bull = (tr > 0.0);
+      double trendVal = bull ? fl : fu;
+
+      g_lineUp[i]   = bull ? trendVal : EMPTY_VALUE;
+      g_lineDown[i] = bull ? EMPTY_VALUE : trendVal;
+
+      bool flippedUp   = bull  && g_trendState[i - 1] <= 0.0;
+      bool flippedDown = !bull && g_trendState[i - 1] >= 0.0;
+      g_arrowBuy[i]  = flippedUp   ? low[i]  - atrHere * 0.5 : EMPTY_VALUE;
+      g_arrowSell[i] = flippedDown ? high[i] + atrHere * 0.5 : EMPTY_VALUE;
+
+      if(InpShowCloudFill) { g_cloudUp[i] = close[i]; g_cloudDn[i] = trendVal; }
+      else                 { g_cloudUp[i] = EMPTY_VALUE; g_cloudDn[i] = EMPTY_VALUE; }
+     }
+
+   if(InpShowPriceLabel) DrawPriceLabel(rates_total - 1, g_trendState[rates_total - 1] > 0.0, close[rates_total - 1]);
+   else ObjectDelete(0, PFX + "pricelbl");
+
+   if(InpShowHtfLine) UpdateHtfLine(time, rates_total);
+   else ObjectsDeleteAll(0, PFX + "htfseg_");
+
+   if(InpShowDashboard) UpdateDashboard();
+   else ObjectsDeleteAll(0, PFX + "dash_");
+
+   g_lastBarTime = time[rates_total - 1];
+   return(rates_total);
+  }
+
+//+------------------------------------------------------------------+
+void DrawPriceLabel(const int i, const bool bull, const double price)
+  {
+   string nm = PFX + "pricelbl";
+   string txt = (bull ? "UP " : "DOWN ") + DoubleToString(price, _Digits);
+   if(ObjectFind(0, nm) < 0)
+     {
+      ObjectCreate(0, nm, OBJ_TEXT, 0, 0, 0);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 9);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+     }
+   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, TimeCurrent());
+   ObjectSetDouble(0, nm, OBJPROP_PRICE, 0, price);
+   ObjectSetString(0, nm, OBJPROP_TEXT, " " + txt);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, bull ? InpBullColor : InpBearColor);
+  }
+
+//+------------------------------------------------------------------+
+//| Bounded, one-shot SuperTrend recompute over the last InpHtfLookbackBars |
+//| CLOSED bars of one timeframe - a single CopyRates + single CopyBuffer    |
+//| (ATR) call, then a plain in-memory sequential loop (no further API        |
+//| calls). Returns the final bar's own trend state (+1/-1) and, via the       |
+//| out arrays, every bar's own trend VALUE (for projecting the HTF line)       |
+//| and time (for locating it on the current chart) - same bulk-fetch-then-      |
+//| index pattern already fixed into HTF_EMA_Overlay.mq5 v1.04, not a fresh       |
+//| per-bar-fetch risk.                                                            |
+//+------------------------------------------------------------------+
+double ComputeTimeframeTrend(const ENUM_TIMEFRAMES tf, double &outTrendVal[], datetime &outTime[], int &outCount)
+  {
+   outCount = 0;
+   int bars = Bars(_Symbol, tf);
+   int need = MathMin(InpHtfLookbackBars, bars);
+   if(need < InpAtrPeriod + 2) return(0.0);
+
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   int n = CopyRates(_Symbol, tf, 0, need, r);
+   if(n < InpAtrPeriod + 2) return(0.0);
+
+   int atrHandle = iATR(_Symbol, tf, InpAtrPeriod);
+   if(atrHandle == INVALID_HANDLE) return(0.0);
+   if(BarsCalculated(atrHandle) <= 0) { IndicatorRelease(atrHandle); return(0.0); }
+   double atrBuf[];
+   ArraySetAsSeries(atrBuf, true);
+   int gotAtr = CopyBuffer(atrHandle, 0, 0, n, atrBuf);
+   IndicatorRelease(atrHandle);
+   if(gotAtr < n) return(0.0);
+
+   //--- r[]/atrBuf[] are series (index 0 = most recent) - walk oldest to
+   //--- newest for the recurrence, i.e. descending array index.
+   double finalUpper = (r[n - 1].high + r[n - 1].low) / 2.0 + InpAtrMultiplier * atrBuf[n - 1];
+   double finalLower = (r[n - 1].high + r[n - 1].low) / 2.0 - InpAtrMultiplier * atrBuf[n - 1];
+   double trend = 1.0;
+   double prevClose = r[n - 1].close;
+
+   ArrayResize(outTrendVal, n);
+   ArrayResize(outTime, n);
+   outTrendVal[n - 1] = trend > 0.0 ? finalLower : finalUpper;
+   outTime[n - 1] = r[n - 1].time;
+
+   for(int k = n - 2; k >= 0; k--)
+     {
+      double atrHere = atrBuf[k];
+      if(atrHere == EMPTY_VALUE || atrHere <= 0.0) atrHere = atrBuf[k + 1];
+      double fu, fl, tr;
+      SuperTrendStep(r[k].high, r[k].low, r[k].close, atrHere,
+                      prevClose, finalUpper, finalLower, trend, InpAtrMultiplier, fu, fl, tr);
+      finalUpper = fu; finalLower = fl; trend = tr;
+      prevClose = r[k].close;
+      outTrendVal[k] = (trend > 0.0) ? fl : fu;
+      outTime[k] = r[k].time;
+     }
+   outCount = n;
+   return(trend);
+  }
+
+//+------------------------------------------------------------------+
+//| HTF line: bar-gated to InpHtfTimeframe's own new bars (not every tick), |
+//| bulk-computed via ComputeTimeframeTrend above, then projected onto the   |
+//| current chart with plain iBarShift index lookups (no Copy* calls inside   |
+//| the per-bar loop) - a step function (flat between flips, jump at a flip)    |
+//| is the CORRECT representation here, unlike an EMA - SuperTrend's own value  |
+//| genuinely doesn't change between flips, so no interpolation is needed.       |
+//+------------------------------------------------------------------+
+datetime g_lastHtfBar = 0;
+double   g_htfTrendVal[];
+datetime g_htfTime[];
+int      g_htfCount = 0;
+double   g_htfTrendDir = 0.0;
+
+void UpdateHtfLine(const datetime &chartTime[], const int rates_total)
+  {
+   datetime htfBar = iTime(_Symbol, InpHtfTimeframe, 0);
+   if(htfBar != g_lastHtfBar || g_htfCount == 0)
+     {
+      double trend = ComputeTimeframeTrend(InpHtfTimeframe, g_htfTrendVal, g_htfTime, g_htfCount);
+      if(g_htfCount > 0) { g_htfTrendDir = trend; g_lastHtfBar = htfBar; }
+     }
+   if(g_htfCount == 0) return;
+
+   //--- OBJ_TREND only supports 2 points - for a genuine multi-segment
+   //--- step line, draw a short OBJ_TREND per segment instead, named by
+   //--- segment start time so segments update in place rather than
+   //--- accumulating. Only (re)draw the last few segments each call -
+   //--- bounded, not the whole lookback every tick.
+   int pts = g_htfCount;
+   int segsToShow = 12;
+   int shown = 0;
+   for(int k = 0; k < pts && shown < segsToShow; k++)
+     {
+      datetime t1 = g_htfTime[k];
+      datetime t2 = (k > 0) ? g_htfTime[k - 1] : TimeCurrent() + (datetime)PeriodSeconds(InpHtfTimeframe);
+      string segNm = PFX + "htfseg_" + IntegerToString((long)t1);
+      bool bull = false;
+      //--- recover direction at this point by comparing to the adjacent
+      //--- final bands is unnecessary here - trend VALUE alone doesn't
+      //--- carry sign, so colour by whether price was above/below it.
+      int barShift = iBarShift(_Symbol, InpHtfTimeframe, t1, false);
+      bull = (barShift >= 0) ? (iClose(_Symbol, InpHtfTimeframe, barShift) >= g_htfTrendVal[k]) : true;
+      if(ObjectFind(0, segNm) < 0)
+        {
+         ObjectCreate(0, segNm, OBJ_TREND, 0, t1, g_htfTrendVal[k], t2, g_htfTrendVal[k]);
+         ObjectSetInteger(0, segNm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, segNm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, segNm, OBJPROP_RAY_LEFT, false);
+         ObjectSetInteger(0, segNm, OBJPROP_RAY_RIGHT, false);
+        }
+      else
+        {
+         ObjectSetInteger(0, segNm, OBJPROP_TIME, 0, t1);
+         ObjectSetDouble (0, segNm, OBJPROP_PRICE, 0, g_htfTrendVal[k]);
+         ObjectSetInteger(0, segNm, OBJPROP_TIME, 1, t2);
+         ObjectSetDouble (0, segNm, OBJPROP_PRICE, 1, g_htfTrendVal[k]);
+        }
+      ObjectSetInteger(0, segNm, OBJPROP_COLOR, bull ? InpHtfBullColor : InpHtfBearColor);
+      ObjectSetInteger(0, segNm, OBJPROP_WIDTH, InpHtfLineWidth);
+      ObjectSetInteger(0, segNm, OBJPROP_STYLE, InpHtfLineStyle);
+      shown++;
+     }
+   //--- prune older segments beyond what's still shown
+   for(int k = segsToShow; k < pts; k++)
+      ObjectDelete(0, PFX + "htfseg_" + IntegerToString((long)g_htfTime[k]));
+  }
+
+//+------------------------------------------------------------------+
+//| Dashboard: each of the 4 rows is bar-gated to ITS OWN timeframe (only |
+//| recomputed when that timeframe prints a new bar), each a single        |
+//| bounded ComputeTimeframeTrend call - never per-tick, never per-bar       |
+//| Copy* calls.                                                               |
+//+------------------------------------------------------------------+
+datetime g_lastRowBar[4] = {0, 0, 0, 0};
+double   g_rowState[4]   = {0, 0, 0, 0};   // +1 bull, -1 bear, 0 unknown/not-ready
+bool     g_rowWarn[4]    = {false, false, false, false};
+
+void UpdateDashboardRow(const int idx, const ENUM_TIMEFRAMES tf)
+  {
+   datetime bar0 = iTime(_Symbol, tf, 0);
+   if(bar0 == g_lastRowBar[idx] && g_lastRowBar[idx] != 0) return;
+
+   double trendVal[]; datetime trendTime[]; int cnt = 0;
+   double trend = ComputeTimeframeTrend(tf, trendVal, trendTime, cnt);
+   if(cnt == 0) return;   // not ready - leave previous state, retry next call
+
+   g_rowState[idx] = trend;
+   g_lastRowBar[idx] = bar0;
+
+   int atrHandle = iATR(_Symbol, tf, InpAtrPeriod);
+   if(atrHandle != INVALID_HANDLE)
+     {
+      double atrBuf[];
+      if(CopyBuffer(atrHandle, 0, 0, 1, atrBuf) >= 1)
+        {
+         double close0 = iClose(_Symbol, tf, 0);
+         double dist = MathAbs(close0 - trendVal[0]);
+         g_rowWarn[idx] = (dist <= InpWarningATR * atrBuf[0]);
+        }
+      IndicatorRelease(atrHandle);
+     }
+  }
+
+void UpdateDashboard()
+  {
+   UpdateDashboardRow(0, InpTF1);
+   UpdateDashboardRow(1, InpTF2);
+   UpdateDashboardRow(2, InpTF3);
+   UpdateDashboardRow(3, InpTF4);
+
+   int lineH = 18;
+   int y = InpDashY;
+   DashLabel("title", InpDashX, y, "SuperTrend MTF", InpDashTextColor); y += lineH;
+   string names[4] = {StringSubstr(EnumToString(InpTF1), 7), StringSubstr(EnumToString(InpTF2), 7),
+                       StringSubstr(EnumToString(InpTF3), 7), StringSubstr(EnumToString(InpTF4), 7)};
+   for(int idx = 0; idx < 4; idx++)
+     {
+      string txt = names[idx] + ":  " + (g_rowState[idx] > 0.0 ? "BULLISH" : (g_rowState[idx] < 0.0 ? "BEARISH" : "..."));
+      color col = g_rowWarn[idx] ? InpDashWarnColor : (g_rowState[idx] > 0.0 ? InpDashBullColor :
+                  (g_rowState[idx] < 0.0 ? InpDashBearColor : InpDashTextColor));
+      DashLabel("row" + IntegerToString(idx), InpDashX, y, txt, col);
+      y += lineH;
+     }
+  }
+
+void DashLabel(const string suffix, const int x, const int y, const string text, const color col)
+  {
+   string nm = PFX + "dash_" + suffix;
+   if(ObjectFind(0, nm) < 0)
+     {
+      ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 10);
+     }
+   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, y);
+   ObjectSetString(0, nm, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+  }
