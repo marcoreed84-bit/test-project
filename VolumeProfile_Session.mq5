@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.11"
+#property version   "1.12"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -183,7 +183,7 @@ void DeleteProfileObjects(const string prefix)
 //| "previous day" column - identical bucket/POC/VA math, only the       |
 //| bar range, anchor position, and colours differ between calls.         |
 //+------------------------------------------------------------------+
-//--- v1.09 FIX (real design bug - "whether M5 or M15, the POC should be
+//--- v1.11 FIX (real design bug - "whether M5 or M15, the POC should be
 //--- at the same level"): the old version built the profile from the
 //--- CHART'S OWN bars - on M15, each bar's volume gets smeared evenly
 //--- across that bar's own (3x wider than M5) high-low range before being
@@ -202,22 +202,24 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
   {
    if(endTime <= startTime) { DeleteProfileObjects(prefix); return; }
 
-   double high[], low[];
-   long   tick_volume[], volume[];
-   int n = CopyHigh(_Symbol, InpSourceTF, startTime, endTime, high);
-   if(CopyLow(_Symbol, InpSourceTF, startTime, endTime, low) < n) n = 0;
-   if(InpUseRealVolume)
-     { if(CopyRealVolume(_Symbol, InpSourceTF, startTime, endTime, volume) < n) n = 0; }
-   else
-     { if(CopyTickVolume(_Symbol, InpSourceTF, startTime, endTime, tick_volume) < n) n = 0; }
+   //--- v1.12 FIX (Opus audit): separate CopyHigh/CopyLow/CopyTickVolume/
+   //--- CopyRealVolume calls each independently request the same
+   //--- (startTime,endTime) range - not actually bounded by each other's
+   //--- result count, so a history sync landing between calls could in
+   //--- principle misalign them. One CopyRates() call gives a single
+   //--- atomic snapshot (guaranteed-aligned high/low/tick_volume/
+   //--- real_volume together) and also removes any question about the
+   //--- ternary below ever touching an unfilled array.
+   MqlRates r[];
+   int n = CopyRates(_Symbol, InpSourceTF, startTime, endTime, r);
    if(n <= 0) { DeleteProfileObjects(prefix); return; }
    int start = 0, end = n - 1;
 
-   double lo = low[start], hi = high[start];
+   double lo = r[start].low, hi = r[start].high;
    for(int i = start; i <= end; i++)
      {
-      lo = MathMin(lo, low[i]);
-      hi = MathMax(hi, high[i]);
+      lo = MathMin(lo, r[i].low);
+      hi = MathMax(hi, r[i].high);
      }
    if(hi <= lo) { DeleteProfileObjects(prefix); return; }
 
@@ -228,10 +230,10 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
 
    for(int i = start; i <= end; i++)
      {
-      double v = InpUseRealVolume ? (double)volume[i] : (double)tick_volume[i];
+      double v = InpUseRealVolume ? (double)r[i].real_volume : (double)r[i].tick_volume;
       if(v <= 0.0) continue;
-      int b0 = (int)((low[i]  - lo) / bw);
-      int b1 = (int)((high[i] - lo) / bw);
+      int b0 = (int)((r[i].low  - lo) / bw);
+      int b1 = (int)((r[i].high - lo) / bw);
       b0 = (int)MathMax(0, MathMin(InpBuckets - 1, b0));
       b1 = (int)MathMax(0, MathMin(InpBuckets - 1, b1));
       if(b1 < b0) { int t = b0; b0 = b1; b1 = t; }
@@ -399,16 +401,47 @@ int OnInit()
       Print("VolumeProfile_Session: InpBuckets and InpDaysToShow must both be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.11 (today" +
+   //--- v1.12 FIX (Opus audit, real gap): InpSourceTF=PERIOD_CURRENT would
+   //--- silently bring back the exact chart-timeframe-dependent POC bug
+   //--- this version was built to fix. Anything coarser than D1 also
+   //--- breaks the day-boundary math below. Reject both explicitly rather
+   //--- than let either one quietly reintroduce an already-fixed bug.
+   if(InpSourceTF == PERIOD_CURRENT || PeriodSeconds(InpSourceTF) > PeriodSeconds(PERIOD_D1))
+     {
+      Print("VolumeProfile_Session: InpSourceTF must be a specific, fixed timeframe (not PERIOD_CURRENT) "
+            "no coarser than D1.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   if(InpPocLineBackBars < 0)
+     {
+      Print("VolumeProfile_Session: InpPocLineBackBars must be >= 0.");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.12 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
    EnsureRightMargin();
+   //--- v1.12 FIX (Opus audit, real usability gap): OnCalculate only ever
+   //--- runs on a new tick/bar - on a closed market (weekend) or if
+   //--- InpSourceTF's history wasn't ready yet on attach, the profile
+   //--- could sit blank with nothing to trigger a retry. A low-frequency
+   //--- timer forcing a recalc is cheap (DrawProfile's per-call cost is
+   //--- already bounded, confirmed in the v1.11 audit) and guarantees it
+   //--- eventually catches up without needing a real tick first.
+   EventSetTimer(3);
    return(INIT_SUCCEEDED);
   }
 
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
    ObjectsDeleteAll(0, VP_PFX);
+  }
+
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   ChartSetSymbolPeriod(0, _Symbol, _Period);   // forces OnCalculate to re-run even with no new tick
   }
 
 //+------------------------------------------------------------------+
@@ -428,13 +461,22 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    if(perSec <= 0) return(rates_total);
 
-   //--- TODAY column: InpDaysToShow calendar days up to and including the
-   //--- current (possibly still-forming) day - live.
-   datetime todayStart = time[rates_total - 1] - (time[rates_total - 1] % 86400);
+   //--- v1.12 FIX (Opus audit, real bug): session boundaries used to be
+   //--- derived from the CHART's own time[] array (time[rates_total-1]
+   //--- rounded to a calendar day) - correct on M1-D1 charts, but wrong on
+   //--- W1/MN charts, where the last bar's own day-of-week means "today"
+   //--- could resolve to the wrong calendar day entirely (e.g. a W1 bar
+   //--- opens on Sunday). D1's own bar 0/1 are always the right session
+   //--- boundaries regardless of what timeframe the chart itself is on -
+   //--- bar 1 is by definition the last fully completed session, which
+   //--- also replaces the old manual backward-scan-for-a-gap logic
+   //--- entirely (handles Mondays/holidays for free, same as before, just
+   //--- without scanning).
+   datetime todayStart = iTime(_Symbol, PERIOD_D1, 0);
+   datetime prevDayStart = iTime(_Symbol, PERIOD_D1, 1);
+   if(todayStart <= 0) return(rates_total);   // D1 history not ready yet - retry next tick
+
    datetime todayCutoff = todayStart - (datetime)((long)(InpDaysToShow - 1) * 86400);
-   int startToday = 0;
-   for(int i = rates_total - 1; i >= 0; i--)
-      if(time[i] < todayCutoff) { startToday = i + 1; break; }
    int endToday = rates_total - 1;
 
    datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
@@ -442,50 +484,16 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                time, endToday, perSec,
                InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
 
-   //--- PREVIOUS DAY column: exactly one full, already-completed SESSION -
-   //--- the last calendar day that actually has bars before today, not
-   //--- strictly "the calendar day before today". Frozen, independent of
-   //--- InpDaysToShow, independent of how far today has progressed.
-   //--- v1.09 FIX (Opus audit, real bug): the old version anchored to a
-   //--- fixed `todayStart - 86400` calendar day. On a Monday (no Sunday
-   //--- bars on this broker) or the day after any holiday, that calendar
-   //--- day has ZERO bars, so startPrev ended up > endPrev and the whole
-   //--- column was silently deleted - exactly the days a "previous
-   //--- session" reference is most wanted. Fixed by first finding the
-   //--- actual last bar before today (endPrev), then deriving ITS OWN
-   //--- calendar day as the window to scan backward from - always lands
-   //--- on the real last traded session, whatever it was.
-   if(InpShowPrevDay)
+   //--- PREVIOUS DAY column: exactly D1 bar 1's own session - the last
+   //--- fully completed one, whatever calendar day that actually was.
+   //--- Frozen, independent of InpDaysToShow, independent of how far
+   //--- today has progressed.
+   if(InpShowPrevDay && prevDayStart > 0)
      {
-      int endPrev = -1;
-      for(int i = rates_total - 1; i >= 0; i--)
-         if(time[i] < todayStart) { endPrev = i; break; }
-      int startPrev = -1;
-      datetime prevDayStart = 0;
-      if(endPrev >= 0)
-        {
-         prevDayStart = time[endPrev] - (time[endPrev] % 86400);
-         startPrev = 0;
-         for(int i = endPrev; i >= 0; i--)
-            if(time[i] < prevDayStart) { startPrev = i + 1; break; }
-        }
-      //--- v1.09 FIX (Opus audit, minor): if loaded history starts partway
-      //--- through that session, startPrev would stay at 0 and a partial
-      //--- day would get drawn as if it were a complete one with no way to
-      //--- tell the two apart. Fail safe instead - only draw when the bar
-      //--- just before startPrev is confirmed older than this window (i.e.
-      //--- there genuinely is a prior session boundary, not just the edge
-      //--- of however much history happens to be loaded).
-      bool startPrevValid = (endPrev >= 0 && startPrev > 0 && time[startPrev - 1] < prevDayStart);
-      if(endPrev >= 0 && startPrev >= 0 && startPrev <= endPrev && startPrevValid)
-        {
-         datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
-         DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
-                     time, endPrev, perSec,
-                     InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
-        }
-      else
-         DeleteProfileObjects(VP_PFX + "prev_");
+      datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
+      DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
+                  time, endToday, perSec,
+                  InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
      }
    else
       DeleteProfileObjects(VP_PFX + "prev_");
