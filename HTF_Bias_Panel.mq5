@@ -28,7 +28,7 @@
 //|  not a running history of every past break.                                   |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -44,6 +44,30 @@ input group "=== Moving average context ==="
 input int    InpMaPeriod          = 200;
 input ENUM_MA_METHOD InpMaMethod  = MODE_SMMA;
 
+input group "=== v1.02: H1 momentum + stochastic (per direct request - a static ==="
+input group "=== 'below the MA' reading alone doesn't say what price is doing RIGHT NOW) ==="
+input int    InpMomentumBars      = 3;      // H1 momentum: last closed H1 close vs the close this many
+                                             // H1 bars earlier - independent of where price sits vs the
+                                             // 200 MA, since price can be below a falling-slowly MA
+                                             // while still actively rising bar to bar.
+input int    InpStochK            = 5;
+input int    InpStochD            = 3;
+input int    InpStochSlow         = 3;
+input ENUM_MA_METHOD   InpStochMaMethod = MODE_SMA;
+input ENUM_STO_PRICE   InpStochPrice    = STO_LOWHIGH;
+
+input group "=== v1.02: Volume check ('is volume correct to trade') ==="
+input int    InpVolAvgBars        = 20;     // last closed chart-timeframe bar's tick_volume vs the
+                                             // average of the InpVolAvgBars bars before it - a rough
+                                             // read of whether the current move has real participation
+                                             // behind it, not a validated signal (same caveat as the
+                                             // rest of this project's tick_volume-based constructions).
+
+input group "=== v1.02: M5/M15 trend (per direct request) ==="
+input bool   InpShowM5M15Trend    = true;   // same structure-bias method as H1/Daily below, just run
+                                             // on M5 and M15 too - "sideways" = NO BIAS (no confirmed
+                                             // break in either direction yet).
+
 input group "=== Panel ==="
 input ENUM_BASE_CORNER InpCorner  = CORNER_RIGHT_UPPER;
 input int    InpXOffset           = 15;
@@ -58,17 +82,25 @@ input color  InpBearColor         = clrWhite;       // matches TradePanel_EA's I
 input color  InpBearSignalColor   = C'255,90,90';
 input color  InpMixedColor        = clrSilver;
 input color  InpPanelBgColor      = clrBlack;
-input int    InpPanelWidth        = 230;
+input int    InpPanelWidth        = 280;    // v1.02: widened from 230 - per direct report the panel was
+                                             // too small for its own text, and more rows were added.
 
 #define PFX "HBP_"
 
 int g_atrHandleH1 = INVALID_HANDLE, g_atrHandleD1 = INVALID_HANDLE;
 int g_maHandleH1  = INVALID_HANDLE, g_maHandleD1  = INVALID_HANDLE;
-datetime g_lastH1Bar = 0, g_lastD1Bar = 0;
+int g_stochHandleH1 = INVALID_HANDLE;
+int g_atrHandleM5 = INVALID_HANDLE, g_atrHandleM15 = INVALID_HANDLE;
+datetime g_lastH1Bar = 0, g_lastD1Bar = 0, g_lastM5Bar = 0, g_lastM15Bar = 0;
 
-int    g_h1Bias = 0, g_d1Bias = 0;          // 0 undecided, +1 bullish, -1 bearish
+int    g_h1Bias = 0, g_d1Bias = 0, g_m5Bias = 0, g_m15Bias = 0;   // 0 undecided, +1 bullish, -1 bearish
 double g_h1Ma = 0.0, g_d1Ma = 0.0;
 double g_prevDayHigh = 0.0, g_prevDayLow = 0.0;
+int    g_h1Momentum = 0;          // +1 rising, -1 falling, 0 unknown
+double g_h1StochK = 0.0;
+int    g_h1StochDir = 0;          // +1 rising, -1 falling, 0 unknown
+bool   g_h1StochOB = false, g_h1StochOS = false;
+int    g_volSide = 0;             // +1 above average, -1 below average, 0 unknown
 
 //+------------------------------------------------------------------+
 //| Fresh, bounded structure-bias calc for one timeframe - same swing/ |
@@ -186,15 +218,26 @@ void RedrawPanel()
       ObjectSetInteger(0, PFX + "bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, PFX + "bg", OBJPROP_COLOR, clrGray);
      }
+   int totalLines = InpShowM5M15Trend ? 13 : 11;
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, rightCorner ? (x - 10 + InpPanelWidth) : (x - 10));
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, y - 8);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, InpPanelWidth);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * 7 + 16);
+   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * totalLines + 16);
 
    DrawLabel(PFX + "title", x, y, "HTF BIAS (not a signal)", InpTextColor); y += lineH;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    DrawLabel(PFX + "h1", x, y, "H1 structure:  " + BiasText(g_h1Bias), BiasColor(g_h1Bias)); y += lineH;
+
+   string momTxt = (g_h1Momentum > 0 ? "RISING" : (g_h1Momentum < 0 ? "FALLING" : "n/a"));
+   DrawLabel(PFX + "h1mom", x, y, "H1 momentum (" + IntegerToString(InpMomentumBars) + "b):  " + momTxt,
+             BiasColor(g_h1Momentum)); y += lineH;
+
+   string stochTxt = DoubleToString(g_h1StochK, 1) + " " +
+                      (g_h1StochDir > 0 ? "RISING" : (g_h1StochDir < 0 ? "FALLING" : "n/a")) +
+                      (g_h1StochOB ? " (OB)" : (g_h1StochOS ? " (OS)" : ""));
+   DrawLabel(PFX + "h1stoch", x, y, "H1 Stoch %K:  " + stochTxt, BiasColor(g_h1StochDir)); y += lineH;
+
    DrawLabel(PFX + "d1", x, y, "Daily structure:  " + BiasText(g_d1Bias), BiasColor(g_d1Bias)); y += lineH;
 
    int maH1Side = (g_h1Ma > 0) ? (bid > g_h1Ma ? 1 : -1) : 0;
@@ -214,6 +257,21 @@ void RedrawPanel()
      }
    DrawLabel(PFX + "pd", x, y, "Prior-day range:  " + pdText, pdSide == 0 ? InpMixedColor : BiasColor(pdSide));
    y += lineH;
+
+   string volTxt = (g_volSide > 0 ? "ABOVE AVG" : (g_volSide < 0 ? "below avg" : "n/a"));
+   DrawLabel(PFX + "vol", x, y, "Volume vs avg:  " + volTxt,
+             g_volSide > 0 ? InpBullColor : InpMixedColor); y += lineH;
+
+   if(InpShowM5M15Trend)
+     {
+      DrawLabel(PFX + "m15", x, y, "M15 trend:  " + BiasText(g_m15Bias), BiasColor(g_m15Bias)); y += lineH;
+      DrawLabel(PFX + "m5", x, y, "M5 trend:  " + BiasText(g_m5Bias), BiasColor(g_m5Bias)); y += lineH;
+     }
+   else
+     {
+      ObjectDelete(0, PFX + "m15");
+      ObjectDelete(0, PFX + "m5");
+     }
 
    //--- overall readout: every factor must agree for a directional call -
    //--- any disagreement is MIXED/no-trade, matching the "if HTFs disagree,
@@ -239,23 +297,29 @@ void RedrawPanel()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   if(InpPivotWindow <= 0 || InpBiasLookbackBars <= 0 || InpMaPeriod <= 0)
+   if(InpPivotWindow <= 0 || InpBiasLookbackBars <= 0 || InpMaPeriod <= 0 ||
+      InpMomentumBars <= 0 || InpVolAvgBars <= 0 || InpStochK <= 0 || InpStochD <= 0 || InpStochSlow <= 0)
      {
-      Print("HTF_Bias_Panel: InpPivotWindow, InpBiasLookbackBars and InpMaPeriod must all be >= 1.");
+      Print("HTF_Bias_Panel: InpPivotWindow, InpBiasLookbackBars, InpMaPeriod, InpMomentumBars, "
+            "InpVolAvgBars, InpStochK, InpStochD and InpStochSlow must all be >= 1.");
       return(INIT_PARAMETERS_INCORRECT);
      }
    g_atrHandleH1 = iATR(_Symbol, PERIOD_H1, InpAtrPeriod);
    g_atrHandleD1 = iATR(_Symbol, PERIOD_D1, InpAtrPeriod);
    g_maHandleH1  = iMA(_Symbol, PERIOD_H1, InpMaPeriod, 0, InpMaMethod, PRICE_CLOSE);
    g_maHandleD1  = iMA(_Symbol, PERIOD_D1, InpMaPeriod, 0, InpMaMethod, PRICE_CLOSE);
+   g_stochHandleH1 = iStochastic(_Symbol, PERIOD_H1, InpStochK, InpStochD, InpStochSlow, InpStochMaMethod, InpStochPrice);
+   g_atrHandleM5  = iATR(_Symbol, PERIOD_M5, InpAtrPeriod);
+   g_atrHandleM15 = iATR(_Symbol, PERIOD_M15, InpAtrPeriod);
    if(g_atrHandleH1 == INVALID_HANDLE || g_atrHandleD1 == INVALID_HANDLE ||
-      g_maHandleH1 == INVALID_HANDLE || g_maHandleD1 == INVALID_HANDLE)
+      g_maHandleH1 == INVALID_HANDLE || g_maHandleD1 == INVALID_HANDLE ||
+      g_stochHandleH1 == INVALID_HANDLE || g_atrHandleM5 == INVALID_HANDLE || g_atrHandleM15 == INVALID_HANDLE)
      {
       Print("HTF_Bias_Panel: failed to create one or more indicator handles.");
       return(INIT_FAILED);
      }
-   g_lastH1Bar = 0; g_lastD1Bar = 0;
-   PrintFormat("HTF_Bias_Panel v1.00 OnInit: %s  pivotWindow=%d  minMoveATR=%.2f  maPeriod=%d",
+   g_lastH1Bar = 0; g_lastD1Bar = 0; g_lastM5Bar = 0; g_lastM15Bar = 0;
+   PrintFormat("HTF_Bias_Panel v1.02 OnInit: %s  pivotWindow=%d  minMoveATR=%.2f  maPeriod=%d",
                _Symbol, InpPivotWindow, InpMinMoveATR, InpMaPeriod);
    return(INIT_SUCCEEDED);
   }
@@ -268,6 +332,9 @@ void OnDeinit(const int reason)
    if(g_atrHandleD1 != INVALID_HANDLE) IndicatorRelease(g_atrHandleD1);
    if(g_maHandleH1  != INVALID_HANDLE) IndicatorRelease(g_maHandleH1);
    if(g_maHandleD1  != INVALID_HANDLE) IndicatorRelease(g_maHandleD1);
+   if(g_stochHandleH1 != INVALID_HANDLE) IndicatorRelease(g_stochHandleH1);
+   if(g_atrHandleM5  != INVALID_HANDLE) IndicatorRelease(g_atrHandleM5);
+   if(g_atrHandleM15 != INVALID_HANDLE) IndicatorRelease(g_atrHandleM15);
   }
 
 //+------------------------------------------------------------------+
@@ -282,7 +349,9 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- HTF_EMA_Overlay.mq5 v1.01 - a freshly created handle has no data
    //--- for a tick or two, so retry rather than silently show nothing).
    if(BarsCalculated(g_atrHandleH1) <= 0 || BarsCalculated(g_atrHandleD1) <= 0 ||
-      BarsCalculated(g_maHandleH1) <= 0  || BarsCalculated(g_maHandleD1) <= 0)
+      BarsCalculated(g_maHandleH1) <= 0  || BarsCalculated(g_maHandleD1) <= 0 ||
+      BarsCalculated(g_stochHandleH1) <= 0 ||
+      (InpShowM5M15Trend && (BarsCalculated(g_atrHandleM5) <= 0 || BarsCalculated(g_atrHandleM15) <= 0)))
       return(0);
 
    datetime h1Bar = iTime(_Symbol, PERIOD_H1, 0);
@@ -302,9 +371,65 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       int bias = ComputeBias(PERIOD_H1, g_atrHandleH1, biasOk);
       double tmp[];
       bool maOk = (CopyBuffer(g_maHandleH1, 0, 0, 1, tmp) >= 1);
+
+      //--- v1.02: H1 momentum - last closed H1 close vs the close
+      //--- InpMomentumBars H1 bars earlier. Independent of the 200 MA
+      //--- reading above, per direct report ("price can be below the 200
+      //--- EMA on the 1hour but going up").
+      double closeNow = iClose(_Symbol, PERIOD_H1, 1);
+      double closeThen = iClose(_Symbol, PERIOD_H1, 1 + InpMomentumBars);
+      bool momOk = (closeNow > 0.0 && closeThen > 0.0);
+      int mom = momOk ? (closeNow > closeThen ? 1 : (closeNow < closeThen ? -1 : 0)) : 0;
+
+      //--- v1.02: H1 Stochastic %K - last closed value plus rising/falling
+      //--- vs one bar earlier, and overbought(>80)/oversold(<20) flags.
+      double stochBuf[];
+      bool stochOk = (CopyBuffer(g_stochHandleH1, 0, 1, 2, stochBuf) >= 2);
+      double kNow = 0.0; int stochDir = 0; bool ob = false, os = false;
+      if(stochOk)
+        {
+         ArraySetAsSeries(stochBuf, true);
+         kNow = stochBuf[0];
+         stochDir = (stochBuf[0] > stochBuf[1]) ? 1 : (stochBuf[0] < stochBuf[1] ? -1 : 0);
+         ob = (kNow > 80.0); os = (kNow < 20.0);
+        }
+
       if(biasOk) g_h1Bias = bias;
       if(maOk) g_h1Ma = tmp[0];
-      if(biasOk && maOk) g_lastH1Bar = h1Bar;
+      if(momOk) g_h1Momentum = mom;
+      if(stochOk) { g_h1StochK = kNow; g_h1StochDir = stochDir; g_h1StochOB = ob; g_h1StochOS = os; }
+      if(biasOk && maOk && momOk && stochOk) g_lastH1Bar = h1Bar;
+     }
+
+   if(InpShowM5M15Trend)
+     {
+      datetime m5Bar = iTime(_Symbol, PERIOD_M5, 0);
+      if(needRecalc || m5Bar != g_lastM5Bar)
+        {
+         bool ok = false;
+         int bias = ComputeBias(PERIOD_M5, g_atrHandleM5, ok);
+         if(ok) { g_m5Bias = bias; g_lastM5Bar = m5Bar; }
+        }
+      datetime m15Bar = iTime(_Symbol, PERIOD_M15, 0);
+      if(needRecalc || m15Bar != g_lastM15Bar)
+        {
+         bool ok = false;
+         int bias = ComputeBias(PERIOD_M15, g_atrHandleM15, ok);
+         if(ok) { g_m15Bias = bias; g_lastM15Bar = m15Bar; }
+        }
+     }
+
+   //--- v1.02: volume check - reuses the CHART'S OWN tick_volume[] array
+   //--- already passed into OnCalculate, no extra Copy* call needed. Last
+   //--- CLOSED bar (rates_total-2) vs the average of the InpVolAvgBars
+   //--- bars before it - cheap enough to just run every call.
+   if(rates_total >= InpVolAvgBars + 2)
+     {
+      long sum = 0;
+      for(int k = rates_total - 2 - InpVolAvgBars; k < rates_total - 2; k++) sum += tick_volume[k];
+      double avg = (double)sum / InpVolAvgBars;
+      long lastClosedVol = tick_volume[rates_total - 2];
+      g_volSide = (avg > 0.0) ? (lastClosedVol > avg ? 1 : -1) : 0;
      }
    if(needRecalc || d1Bar != g_lastD1Bar)
      {
