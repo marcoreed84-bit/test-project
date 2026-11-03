@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.12"
+#property version   "1.13"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -417,31 +417,28 @@ int OnInit()
       Print("VolumeProfile_Session: InpPocLineBackBars must be >= 0.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.12 (today" +
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.13 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
    EnsureRightMargin();
-   //--- v1.12 FIX (Opus audit, real usability gap): OnCalculate only ever
-   //--- runs on a new tick/bar - on a closed market (weekend) or if
-   //--- InpSourceTF's history wasn't ready yet on attach, the profile
-   //--- could sit blank with nothing to trigger a retry. A low-frequency
-   //--- timer forcing a recalc is cheap (DrawProfile's per-call cost is
-   //--- already bounded, confirmed in the v1.11 audit) and guarantees it
-   //--- eventually catches up without needing a real tick first.
-   EventSetTimer(3);
+   //--- v1.13 FIX (real bug found live in SuperTrend_MTF.mq5, same risky
+   //--- pattern copied here in v1.12): the timer-based ChartSetSymbolPeriod
+   //--- "force a recalc" trick is REMOVED. MT5's own docs explicitly warn
+   //--- it can RE-INITIALIZE the chart's indicators even on a same-symbol/
+   //--- period call. If it does, a 3-second timer would wipe all buffered
+   //--- state and restart the historical backfill from scratch every 3
+   //--- seconds - on a large chart history that backfill could never
+   //--- finish before being torn down and restarted again, i.e. the
+   //--- profile would never draw at all. The "stays blank on a closed
+   //--- market" edge case this was meant to fix is a minor cosmetic issue;
+   //--- this was a severe, unverified risk traded for it. OnCalculate
+   //--- already runs on every real tick without it.
    return(INIT_SUCCEEDED);
   }
 
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   EventKillTimer();
    ObjectsDeleteAll(0, VP_PFX);
-  }
-
-//+------------------------------------------------------------------+
-void OnTimer()
-  {
-   ChartSetSymbolPeriod(0, _Symbol, _Period);   // forces OnCalculate to re-run even with no new tick
   }
 
 //+------------------------------------------------------------------+

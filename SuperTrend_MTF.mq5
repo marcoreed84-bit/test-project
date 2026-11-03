@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 9
 #property indicator_plots   5
@@ -177,7 +177,22 @@ int OnInit()
       return(INIT_FAILED);
      }
    g_lastBarTime = 0;
-   EventSetTimer(3);   // same "don't stay stale on a closed market" guard as VolumeProfile_Session v1.12
+   //--- v1.02 FIX (real bug - "displays nothing"): v1.01 used a 3-second
+   //--- timer calling ChartSetSymbolPeriod() to force a recalc on a
+   //--- closed market. MT5's own documentation explicitly warns this can
+   //--- RE-INITIALIZE the chart's indicators, even for a same-symbol/
+   //--- period call (forum reports are mixed on whether it actually does
+   //--- in practice, but the official docs' warning alone makes this too
+   //--- risky to rely on). If it does reinit, every 3 seconds would wipe
+   //--- all buffered state and restart the ENTIRE historical backfill
+   //--- from bar 0 - on a large chart history, that backfill could never
+   //--- finish before being torn down and restarted again, which would
+   //--- look exactly like "displays nothing, ever". Removed entirely -
+   //--- OnCalculate already runs on every real tick without it, same as
+   //--- every other indicator in this project that doesn't use this
+   //--- trick. The "stays blank on a dead-quiet market" edge case this
+   //--- was meant to fix is a minor cosmetic issue; this was a severe,
+   //--- unverified risk traded for it.
    IndicatorSetString(INDICATOR_SHORTNAME, "SuperTrend MTF");
    return(INIT_SUCCEEDED);
   }
@@ -185,15 +200,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   EventKillTimer();
    ObjectsDeleteAll(0, PFX);
    if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
-  }
-
-//+------------------------------------------------------------------+
-void OnTimer()
-  {
-   ChartSetSymbolPeriod(0, _Symbol, _Period);
   }
 
 //+------------------------------------------------------------------+
