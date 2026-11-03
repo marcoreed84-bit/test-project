@@ -23,7 +23,7 @@
 //|  current chart's own timeframe).                                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 3
 #property indicator_plots   3
@@ -140,6 +140,22 @@ void OnDeinit(const int reason)
 //| live HTF EMA genuinely does update with its own still-forming bar,    |
 //| exactly as it would look on that timeframe's own chart in real time). |
 //+------------------------------------------------------------------+
+//| v1.02 FIX (real design bug - "lines are all choppy, zigzag"): the   |
+//| old version flat-repeated one HTF bar's value across every LTF bar   |
+//| inside it, then JUMPED straight to the next HTF bar's value - a       |
+//| staircase, not a line. A real HTF chart draws one point per HTF bar    |
+//| and connects consecutive points with a straight diagonal - this is     |
+//| what "look like it's attached to the 15min chart directly" actually    |
+//| means. Fixed by interpolating: find the HTF bar covering this LTF       |
+//| bar's time (valCur) and the NEXT, more recent HTF bar (valNext),         |
+//| compute how far through the current HTF bar's own span this LTF bar      |
+//| sits (frac, 0 at the HTF bar's open, approaching 1 just before the        |
+//| next one begins), and blend linearly - reproducing exactly what           |
+//| sampling that same diagonal line at this LTF bar's time would give.        |
+//| The still-forming (most recent, shift 0) HTF bar has no "next" bar yet     |
+//| to interpolate toward, so it's used as-is - same as a live HTF chart's      |
+//| own most recent point, which is also not yet connected to anything.          |
+//+------------------------------------------------------------------+
 void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
               const int from, const int rates_total, const datetime &time[])
   {
@@ -148,13 +164,29 @@ void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
       for(int i = from; i < rates_total; i++) buf[i] = EMPTY_VALUE;
       return;
      }
+   int htfPeriodSec = PeriodSeconds(tf);
    for(int i = from; i < rates_total; i++)
      {
       int htfShift = iBarShift(_Symbol, tf, time[i], false);
       if(htfShift < 0) { buf[i] = EMPTY_VALUE; continue; }
-      double tmp[];
-      if(CopyBuffer(handle, 0, htfShift, 1, tmp) < 1) { buf[i] = EMPTY_VALUE; continue; }
-      buf[i] = tmp[0];
+      double tmpCur[];
+      if(CopyBuffer(handle, 0, htfShift, 1, tmpCur) < 1) { buf[i] = EMPTY_VALUE; continue; }
+      double valCur = tmpCur[0];
+
+      if(htfShift <= 0 || htfPeriodSec <= 0)
+        {
+         buf[i] = valCur;   // still-forming HTF bar - nothing to interpolate toward yet
+         continue;
+        }
+      double tmpNext[];
+      if(CopyBuffer(handle, 0, htfShift - 1, 1, tmpNext) < 1) { buf[i] = valCur; continue; }
+      double valNext = tmpNext[0];
+
+      datetime htfOpenTime = iTime(_Symbol, tf, htfShift);
+      double frac = (double)(time[i] - htfOpenTime) / (double)htfPeriodSec;
+      if(frac < 0.0) frac = 0.0;
+      if(frac > 1.0) frac = 1.0;
+      buf[i] = valCur + frac * (valNext - valCur);
      }
   }
 
