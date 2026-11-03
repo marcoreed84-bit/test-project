@@ -23,7 +23,7 @@
 //|  current chart's own timeframe).                                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_buffers 3
 #property indicator_plots   3
@@ -68,6 +68,14 @@ input ENUM_LINE_STYLE     InpStyle3     = STYLE_SOLID;
 //+------------------------------------------------------------------+
 double g_buf1[], g_buf2[], g_buf3[];
 int    g_handle1 = INVALID_HANDLE, g_handle2 = INVALID_HANDLE, g_handle3 = INVALID_HANDLE;
+//--- v1.04 FIX (Opus audit, real gap): if a line's HTF history was still
+//--- partially loaded on the first full pass, older LTF bars got EMPTY/
+//--- short-period values baked in and prev_calculated advanced past them
+//--- anyway - MT5 doesn't reset prev_calculated just because a DIFFERENT
+//--- timeframe's history grew in the background, so nothing ever
+//--- rechecked those bars. Tracking each line's own BarsCalculated and
+//--- forcing a full rescan for that line specifically if it grew.
+int g_lastHtfBars1 = -1, g_lastHtfBars2 = -1, g_lastHtfBars3 = -1;
 
 //+------------------------------------------------------------------+
 bool SetupLine(const int bufIndex, double &buf[], const bool show, const int period,
@@ -119,6 +127,7 @@ int OnInit()
    //--- before it can return real values - MT5 handles this by returning
    //--- 0/not-ready from CopyBuffer until enough history is available, so
    //--- no extra guard needed here beyond what FillLine() already checks.
+   g_lastHtfBars1 = -1; g_lastHtfBars2 = -1; g_lastHtfBars3 = -1;
    IndicatorSetString(INDICATOR_SHORTNAME, "HTF EMA Overlay");
    return(INIT_SUCCEEDED);
   }
@@ -167,6 +176,26 @@ void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
    int htfPeriodSec = PeriodSeconds(tf);
    if(from >= rates_total || htfPeriodSec <= 0) return;
 
+   //--- v1.04 FIX (Opus audit, real repaint bug): while an HTF bar is
+   //--- still forming, every LTF bar inside it interpolates toward
+   //--- whatever that forming bar's CURRENT (still-changing) value is.
+   //--- Once that HTF bar actually closes, those same LTF bars should be
+   //--- re-interpolated toward its final value - but the normal
+   //--- incremental `from` only covers the newest 1-2 LTF bars, so they
+   //--- never get refreshed and stay interpolated toward a stale,
+   //--- mid-formation value until a full reattach. Fixed by backing the
+   //--- recompute start up to cover the ENTIRE span of the most recently
+   //--- closed HTF bar (shift 1) every time, not just the newest LTF
+   //--- bars - a small, bounded extra cost (at most one HTF bar's worth
+   //--- of LTF bars, e.g. ~3 for M15-on-M5, ~12 for H1-on-M5).
+   int start = from;
+   if(from > 0)
+     {
+      datetime prevHtfOpen = iTime(_Symbol, tf, 1);
+      if(prevHtfOpen > 0)
+         while(start > 0 && time[start - 1] >= prevHtfOpen) start--;
+     }
+
    //--- v1.03 FIX (real freeze-causing bug - confirmed, not a settings
    //--- issue): the previous version called CopyBuffer TWICE per LTF bar,
    //--- inside this loop - on a fresh attach that loop can run across the
@@ -181,16 +210,23 @@ void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
    //--- of a fresh CopyBuffer call each time - the same bulk-fetch-then-
    //--- index pattern every other indicator in this project already uses
    //--- for its ATR buffer.
-   int shiftOldest = iBarShift(_Symbol, tf, time[from], false);
+   int shiftOldest = iBarShift(_Symbol, tf, time[start], false);
    int shiftNewest = iBarShift(_Symbol, tf, time[rates_total - 1], false);
    if(shiftOldest < 0 || shiftNewest < 0)
      {
-      for(int i = from; i < rates_total; i++) buf[i] = EMPTY_VALUE;
+      for(int i = start; i < rates_total; i++) buf[i] = EMPTY_VALUE;
       return;
      }
-   //--- +2 margin: need one bar MORE recent than shiftNewest for its own
-   //--- "next bar" interpolation target, plus the usual off-by-one safety.
-   int need = shiftOldest - shiftNewest + 3;
+   //--- v1.04 FIX (Opus audit, real bug): CopyBuffer/CopyTime below always
+   //--- fetch starting at shift 0, so covering shifts [0..shiftOldest]
+   //--- needs shiftOldest+1 bars - NOT shiftOldest-shiftNewest+3, which
+   //--- under-requests whenever shiftNewest>=3 (e.g. chart timeframe >=4x
+   //--- a line's own timeframe). Under-fetching made the live bar (and up
+   //--- to the whole chart on a big enough ratio) blank, since the final
+   //--- loop's `htfShift >= got` guard rejected every shift the under-sized
+   //--- fetch didn't actually cover. +2 margin keeps the same "one bar
+   //--- more recent, plus off-by-one safety" cushion as before.
+   int need = shiftOldest + 3;
    int haveHtf = BarsCalculated(handle);
    if(need > haveHtf) need = haveHtf;
    if(need < 2) need = MathMin(2, haveHtf);
@@ -204,11 +240,11 @@ void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
    int got = MathMin(gotVals, gotTimes);
    if(got < 1)
      {
-      for(int i = from; i < rates_total; i++) buf[i] = EMPTY_VALUE;
+      for(int i = start; i < rates_total; i++) buf[i] = EMPTY_VALUE;
       return;
      }
 
-   for(int i = from; i < rates_total; i++)
+   for(int i = start; i < rates_total; i++)
      {
       int htfShift = iBarShift(_Symbol, tf, time[i], false);
       if(htfShift < 0 || htfShift >= got) { buf[i] = EMPTY_VALUE; continue; }
@@ -258,9 +294,18 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- own HTF parent bar's EMA value can still move intra-bar).
    int from = (prev_calculated <= 1) ? 0 : prev_calculated - 1;
 
-   FillLine(g_buf1, g_handle1, InpTF1, from, rates_total, time);
-   FillLine(g_buf2, g_handle2, InpTF2, from, rates_total, time);
-   FillLine(g_buf3, g_handle3, InpTF3, from, rates_total, time);
+   int from1 = from, from2 = from, from3 = from;
+   int bars1 = (g_handle1 != INVALID_HANDLE) ? BarsCalculated(g_handle1) : -1;
+   int bars2 = (g_handle2 != INVALID_HANDLE) ? BarsCalculated(g_handle2) : -1;
+   int bars3 = (g_handle3 != INVALID_HANDLE) ? BarsCalculated(g_handle3) : -1;
+   if(bars1 > g_lastHtfBars1 + 1) from1 = 0;
+   if(bars2 > g_lastHtfBars2 + 1) from2 = 0;
+   if(bars3 > g_lastHtfBars3 + 1) from3 = 0;
+   g_lastHtfBars1 = bars1; g_lastHtfBars2 = bars2; g_lastHtfBars3 = bars3;
+
+   FillLine(g_buf1, g_handle1, InpTF1, from1, rates_total, time);
+   FillLine(g_buf2, g_handle2, InpTF2, from2, rates_total, time);
+   FillLine(g_buf3, g_handle3, InpTF3, from3, rates_total, time);
 
    return(rates_total);
   }

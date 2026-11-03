@@ -28,7 +28,7 @@
 //|  not a running history of every past break.                                   |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -77,25 +77,26 @@ double g_prevDayHigh = 0.0, g_prevDayLow = 0.0;
 //| running state (this panel only needs the CURRENT bias each time it's      |
 //| called, not a drawn history of every past break).                          |
 //+------------------------------------------------------------------+
-int ComputeBias(const ENUM_TIMEFRAMES tf, const int atrHandle)
+int ComputeBias(const ENUM_TIMEFRAMES tf, const int atrHandle, bool &ok)
   {
    int w = InpPivotWindow;
    int need = InpBiasLookbackBars + 2 * w + 10;
    int bars = Bars(_Symbol, tf);
    if(bars < need) need = bars;
-   if(need < 2 * w + 10) return(0);
+   if(need < 2 * w + 10) { ok = false; return(0); }
 
    double h[], l[], c[];
-   if(CopyHigh(_Symbol, tf, 0, need, h) < need) return(0);
-   if(CopyLow(_Symbol, tf, 0, need, l) < need) return(0);
-   if(CopyClose(_Symbol, tf, 0, need, c) < need) return(0);
+   if(CopyHigh(_Symbol, tf, 0, need, h) < need) { ok = false; return(0); }
+   if(CopyLow(_Symbol, tf, 0, need, l) < need) { ok = false; return(0); }
+   if(CopyClose(_Symbol, tf, 0, need, c) < need) { ok = false; return(0); }
    ArraySetAsSeries(h, false);
    ArraySetAsSeries(l, false);
    ArraySetAsSeries(c, false);
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, true);
-   if(CopyBuffer(atrHandle, 0, 0, need, atrBuf) < need) return(0);
+   if(CopyBuffer(atrHandle, 0, 0, need, atrBuf) < need) { ok = false; return(0); }
+   ok = true;
 
    double swingHighPrice = 0.0, swingLowPrice = 0.0;
    bool   haveHigh = false, haveLow = false;
@@ -132,12 +133,23 @@ string BiasText(const int bias) { return(bias > 0 ? "BULLISH" : (bias < 0 ? "BEA
 color  BiasColor(const int bias) { return(bias > 0 ? InpBullColor : (bias < 0 ? InpBearSignalColor : InpMixedColor)); }
 
 //+------------------------------------------------------------------+
+//--- v1.01 FIX (Opus audit, real bug - "nothing shows", same class as
+//--- Overlay v1.01): OBJ_LABEL defaults to ANCHOR_LEFT_UPPER regardless of
+//--- which chart CORNER it's pinned to. With a RIGHT corner, XDISTANCE
+//--- measures from the right edge inward, but the text's own left edge
+//--- was still being used as the anchor point - so the text ran off the
+//--- right side of the chart instead of sitting inside it. Every other
+//--- right-corner panel in this project (Aurelius_EA, Fulcrum_EA,
+//--- AuRebound_EA) pairs a right corner with ANCHOR_RIGHT_* for exactly
+//--- this reason.
 void DrawLabel(const string name, const int x, const int y, const string text, const color col)
   {
+   bool rightCorner = (InpCorner == CORNER_RIGHT_UPPER || InpCorner == CORNER_RIGHT_LOWER);
    if(ObjectFind(0, name) < 0)
      {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
+      ObjectSetInteger(0, name, OBJPROP_ANCHOR, rightCorner ? ANCHOR_RIGHT_UPPER : ANCHOR_LEFT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
       ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
@@ -156,6 +168,13 @@ void RedrawPanel()
    int y = InpYOffset;
    int x = InpXOffset;
 
+   //--- v1.01 FIX (Opus audit, same right-corner issue as DrawLabel):
+   //--- OBJ_RECTANGLE_LABEL is always anchored at its OWN top-left
+   //--- regardless of chart corner - XDISTANCE=x-10 with a RIGHT corner
+   //--- left almost the entire box off-screen to the right. For a right
+   //--- corner, XDISTANCE must be measured from the box's own left edge,
+   //--- i.e. pushed out by the box's own width.
+   bool rightCorner = (InpCorner == CORNER_RIGHT_UPPER || InpCorner == CORNER_RIGHT_LOWER);
    if(ObjectFind(0, PFX + "bg") < 0)
      {
       ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
@@ -167,12 +186,12 @@ void RedrawPanel()
       ObjectSetInteger(0, PFX + "bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, PFX + "bg", OBJPROP_COLOR, clrGray);
      }
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, x - 10);
+   ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, rightCorner ? (x - 10 + InpPanelWidth) : (x - 10));
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, y - 8);
    ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, InpPanelWidth);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * 8 + 16);
+   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * 7 + 16);
 
-   DrawLabel(PFX + "title", x, y, "HTF BIAS (discretionary - not a signal)", InpTextColor); y += lineH;
+   DrawLabel(PFX + "title", x, y, "HTF BIAS (not a signal)", InpTextColor); y += lineH;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    DrawLabel(PFX + "h1", x, y, "H1 structure:  " + BiasText(g_h1Bias), BiasColor(g_h1Bias)); y += lineH;
@@ -270,22 +289,37 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    datetime d1Bar = iTime(_Symbol, PERIOD_D1, 0);
    bool needRecalc = (prev_calculated <= 0);
 
+   //--- v1.01 FIX (Opus audit, real gap): ComputeBias/CopyBuffer/CopyHigh/
+   //--- CopyLow failures were silently accepted as "done for this bar" -
+   //--- g_lastH1Bar/g_lastD1Bar advanced regardless, so a transient copy
+   //--- failure left stale "NO BIAS"/"n/a" showing until the NEXT H1 bar
+   //--- (or, for Daily, the next calendar day) instead of retrying next
+   //--- tick. Now only advances the "last bar" marker when every copy for
+   //--- that block actually succeeded.
    if(needRecalc || h1Bar != g_lastH1Bar)
      {
-      g_h1Bias = ComputeBias(PERIOD_H1, g_atrHandleH1);
+      bool biasOk = false;
+      int bias = ComputeBias(PERIOD_H1, g_atrHandleH1, biasOk);
       double tmp[];
-      if(CopyBuffer(g_maHandleH1, 0, 0, 1, tmp) >= 1) g_h1Ma = tmp[0];
-      g_lastH1Bar = h1Bar;
+      bool maOk = (CopyBuffer(g_maHandleH1, 0, 0, 1, tmp) >= 1);
+      if(biasOk) g_h1Bias = bias;
+      if(maOk) g_h1Ma = tmp[0];
+      if(biasOk && maOk) g_lastH1Bar = h1Bar;
      }
    if(needRecalc || d1Bar != g_lastD1Bar)
      {
-      g_d1Bias = ComputeBias(PERIOD_D1, g_atrHandleD1);
+      bool biasOk = false;
+      int bias = ComputeBias(PERIOD_D1, g_atrHandleD1, biasOk);
       double tmp[];
-      if(CopyBuffer(g_maHandleD1, 0, 0, 1, tmp) >= 1) g_d1Ma = tmp[0];
+      bool maOk = (CopyBuffer(g_maHandleD1, 0, 0, 1, tmp) >= 1);
       double ph[], pl[];
-      if(CopyHigh(_Symbol, PERIOD_D1, 1, 1, ph) >= 1) g_prevDayHigh = ph[0];
-      if(CopyLow(_Symbol, PERIOD_D1, 1, 1, pl) >= 1)  g_prevDayLow  = pl[0];
-      g_lastD1Bar = d1Bar;
+      bool phOk = (CopyHigh(_Symbol, PERIOD_D1, 1, 1, ph) >= 1);
+      bool plOk = (CopyLow(_Symbol, PERIOD_D1, 1, 1, pl) >= 1);
+      if(biasOk) g_d1Bias = bias;
+      if(maOk) g_d1Ma = tmp[0];
+      if(phOk) g_prevDayHigh = ph[0];
+      if(plOk) g_prevDayLow = pl[0];
+      if(biasOk && maOk && phOk && plOk) g_lastD1Bar = d1Bar;
      }
 
    RedrawPanel();
