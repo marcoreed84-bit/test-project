@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.06"
+#property version   "1.07"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -106,7 +106,7 @@ input int               InpHtfLineWidth = 3;
 input ENUM_LINE_STYLE   InpHtfLineStyle = STYLE_SOLID;
 
 input group "=== 4. Dashboard ==="
-input bool   InpShowDashboard    = false;
+input bool   InpShowDashboard    = true;
 input int    InpDashX            = 10;
 input int    InpDashY            = 30;
 input color  InpDashTextColor    = clrWhite;
@@ -378,7 +378,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
 void DrawPriceLabel(const datetime lblTime, const bool bull, const double stValue, const double atrHere)
   {
    string nm = PFX + "pricelbl";
-   string txt = "ST Value: " + DoubleToString(stValue, _Digits);
+   string txt = DoubleToString(stValue, _Digits);
    if(ObjectFind(0, nm) < 0)
      {
       ObjectCreate(0, nm, OBJ_TEXT, 0, 0, 0);
