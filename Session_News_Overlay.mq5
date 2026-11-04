@@ -16,7 +16,7 @@
 //|  shading's exact edges.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -26,13 +26,16 @@
 input group "=== Sessions ==="
 input bool   InpShowSessions         = true;
 input bool   InpShowAsian            = true;
-input color  InpAsianColor           = C'12,12,30';
+input color  InpAsianColor           = C'35,35,75';   // v1.01: brightened - the old near-black values
+                                                        // (12,12,30 etc.) were essentially invisible
+                                                        // against a black chart background, not "lightly
+                                                        // shaded" at all - real miss, not a deliberate choice
 input bool   InpShowLondon           = true;
-input color  InpLondonColor          = C'10,28,10';
+input color  InpLondonColor          = C'25,70,25';
 input bool   InpShowNewYork          = true;
-input color  InpNewYorkColor         = C'30,12,12';
+input color  InpNewYorkColor         = C'75,30,30';
 input bool   InpShowOverlap          = true;      // London/NY overlap - historically the highest-volume window
-input color  InpOverlapColor         = C'30,30,10';
+input color  InpOverlapColor         = C'80,80,25';
 input int    InpDaysBack             = 6;         // how many past calendar days to shade
 input int    InpDaysForward          = 1;
 
