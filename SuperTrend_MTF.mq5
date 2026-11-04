@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.12"
+#property version   "1.13"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -107,9 +107,10 @@ input ENUM_LINE_STYLE   InpHtfLineStyle = STYLE_SOLID;
 
 input group "=== 4. Dashboard ==="
 input bool   InpShowDashboard    = true;
-input int    InpDashX            = 10;
-input int    InpDashY            = 110;    // v1.12: pushed further down - still sat behind MT5's own
-                                            // SELL/BUY quick-trade panel at 65
+input int    InpDashX            = 10;     // v1.13: margin from the chart's RIGHT edge (panel is now
+                                            // bottom-right anchored, so it can't sit under the
+                                            // top-left SELL/BUY quick-trade panel at all)
+input int    InpDashY            = 20;     // v1.13: margin from the chart's BOTTOM edge
 input color  InpDashTextColor    = clrWhite;
 input color  InpDashHeaderColor  = clrDodgerBlue;
 input color  InpDashBullColor    = clrLime;
@@ -638,14 +639,21 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
                   (volRatio >= 1.2 ? InpDashBullColor : (volRatio < 0.6 ? InpDashWarnColor : InpDashTextColor));
 
    int lineH = 18;
-   int y = InpDashY;
    int x = InpDashX;
    int totalLines = 17;
+   int panelH = lineH * totalLines + 12;
+
+   //--- v1.13: anchored to the bottom-right corner instead of top-left, per
+   //--- direct request ("move it to the bottom right corner") - sidesteps
+   //--- the top-left quick-trade panel entirely instead of chasing its
+   //--- exact pixel height. y here is distance-from-bottom of the TOP row;
+   //--- each successive row's distance-from-bottom shrinks by lineH.
+   int y = InpDashY + panelH;
 
    if(!g_dashCreated)
      {
       ObjectCreate(0, PFX + "dash_bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_CORNER, CORNER_RIGHT_LOWER);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BACK, false);
@@ -656,14 +664,14 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_COLOR, InpDashHeaderColor);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_WIDTH, 1);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_XDISTANCE, x - 8);
-      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YDISTANCE, y - 6);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YDISTANCE, InpDashY - 6);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_XSIZE, InpDashWidth);
-      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YSIZE, lineH * totalLines + 12);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YSIZE, panelH);
 
       //--- v1.09: thin divider under the title row, same accent color as
       //--- the outer border, for a cleaner/more "professional" layout.
       ObjectCreate(0, PFX + "dash_div", OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_CORNER, CORNER_RIGHT_LOWER);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_BACK, false);
@@ -671,22 +679,22 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_COLOR, InpDashHeaderColor);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_XDISTANCE, x - 8);
-      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_YDISTANCE, y + lineH - 4);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_YDISTANCE, y - lineH - 4);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_XSIZE, InpDashWidth);
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_YSIZE, 1);
      }
 
-   DashLabel("title", x, y, "LT Super Trend", InpDashTextColor); y += lineH;
-   DashLabel("hdr1", x, y, "CURRENT TIMEFRAME", InpDashHeaderColor); y += lineH;
+   DashLabel("title", x, y, "LT Super Trend", InpDashTextColor); y -= lineH;
+   DashLabel("hdr1", x, y, "CURRENT TIMEFRAME", InpDashHeaderColor); y -= lineH;
    DashLabel("trend", x, y, "Trend:  " + (bull ? "BULLISH" : "BEARISH"),
-             bull ? InpDashBullColor : InpDashBearColor); y += lineH;
-   DashLabel("dur", x, y, "Duration:  " + IntegerToString(duration) + " bars", InpDashTextColor); y += lineH;
-   DashLabel("stval", x, y, "ST Value:  " + DoubleToString(stVal, _Digits), InpDashTextColor); y += lineH;
-   DashLabel("atr", x, y, "ATR:  " + DoubleToString(atrPips, 1) + " pips", InpDashTextColor); y += lineH;
-   DashLabel("spread", x, y, "Spread:  " + IntegerToString(spreadPts) + " pts", InpDashTextColor); y += lineH;
-   DashLabel("vol", x, y, "Volume:  " + volTxt, volCol); y += lineH;
+             bull ? InpDashBullColor : InpDashBearColor); y -= lineH;
+   DashLabel("dur", x, y, "Duration:  " + IntegerToString(duration) + " bars", InpDashTextColor); y -= lineH;
+   DashLabel("stval", x, y, "ST Value:  " + DoubleToString(stVal, _Digits), InpDashTextColor); y -= lineH;
+   DashLabel("atr", x, y, "ATR:  " + DoubleToString(atrPips, 1) + " pips", InpDashTextColor); y -= lineH;
+   DashLabel("spread", x, y, "Spread:  " + IntegerToString(spreadPts) + " pts", InpDashTextColor); y -= lineH;
+   DashLabel("vol", x, y, "Volume:  " + volTxt, volCol); y -= lineH;
 
-   DashLabel("hdr2", x, y, "MULTI-TIMEFRAME", InpDashHeaderColor); y += lineH;
+   DashLabel("hdr2", x, y, "MULTI-TIMEFRAME", InpDashHeaderColor); y -= lineH;
    string names[4] = {StringSubstr(EnumToString(InpTF1), 7), StringSubstr(EnumToString(InpTF2), 7),
                        StringSubstr(EnumToString(InpTF3), 7), StringSubstr(EnumToString(InpTF4), 7)};
    int bullCount = 0, bearCount = 0;
@@ -696,16 +704,16 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
       color col = g_rowWarn[idx] ? InpDashWarnColor : (g_rowState[idx] > 0.0 ? InpDashBullColor :
                   (g_rowState[idx] < 0.0 ? InpDashBearColor : InpDashTextColor));
       DashLabel("row" + IntegerToString(idx), x, y, txt, col);
-      y += lineH;
+      y -= lineH;
       if(g_rowState[idx] > 0.0) bullCount++;
       else if(g_rowState[idx] < 0.0) bearCount++;
      }
 
-   DashLabel("hdr3", x, y, "ALIGNMENT", InpDashHeaderColor); y += lineH;
+   DashLabel("hdr3", x, y, "ALIGNMENT", InpDashHeaderColor); y -= lineH;
    int score = MathMax(bullCount, bearCount);
    bool scoreBull = bullCount >= bearCount;
    DashLabel("score", x, y, "Score:  " + IntegerToString(score) + "/4  " + (scoreBull ? "BULLISH" : "BEARISH"),
-             scoreBull ? InpDashBullColor : InpDashBearColor); y += lineH;
+             scoreBull ? InpDashBullColor : InpDashBearColor); y -= lineH;
    DashLabel("status", x, y, (score >= 4 ? "STRONG" : "CAUTION"),
              score >= 4 ? (scoreBull ? InpDashBullColor : InpDashBearColor) : InpDashWarnColor);
 
@@ -728,8 +736,10 @@ void DashLabel(const string suffix, const int x, const int y, const string text,
    if(!g_dashCreated)
      {
       ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+      //--- v1.13: bottom-right anchored to match the panel's own corner -
+      //--- text right-aligned so it stays inside the box growing leftward.
+      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
       ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 10);
