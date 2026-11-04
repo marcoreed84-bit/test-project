@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_buffers 9
 #property indicator_plots   5
@@ -51,6 +51,15 @@
 #property indicator_type4   DRAW_ARROW
 #property indicator_label5  "Cloud"
 #property indicator_type5   DRAW_FILLING
+//--- v1.05 FIX (real bug, confirmed - "still no red shading"): a
+//--- DRAW_FILLING plot's TWO colours must be declared at COMPILE TIME via
+//--- this #property directive - without it, only ONE colour slot exists
+//--- for the plot at all, and the runtime PlotIndexSetInteger(4,
+//--- PLOT_LINE_COLOR, 1, ...) call for colour index 1 (bearish/red) had
+//--- nowhere to go and silently did nothing. These are placeholders only
+//--- - OnInit still overwrites both with the actual InpCloudBullColor/
+//--- InpCloudBearColor input values at runtime, same as before.
+#property indicator_color5  clrGreen, clrRed
 
 input group "=== 1. Indicator settings ==="
 input int    InpAtrPeriod        = 10;
@@ -64,9 +73,9 @@ input int    InpLineWidth        = 2;
 input group "=== Signal arrows ==="
 input bool   InpShowSignalArrows = true;
 input int    InpArrowSize        = 2;
-input double InpArrowOffsetATR   = 1.5;    // v1.04: how far an arrow sits from the candle it marks, in
-                                            // ATR - per direct request ("away from the candles"); was a
-                                            // fixed, small 0.5x ATR with no input to adjust it.
+input double InpArrowOffsetATR   = 3.0;    // v1.05: raised again from 1.5 - per direct follow-up report
+                                            // that 1.5x ATR still wasn't far enough from the candles.
+                                            // How far an arrow sits from the candle it marks, in ATR.
 input color  InpBuyArrowColor    = clrLime;
 input color  InpSellArrowColor   = clrRed;
 input int    InpBuyArrowCode     = 233;
