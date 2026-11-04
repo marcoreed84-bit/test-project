@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.14"
+#property version   "1.15"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -73,9 +73,10 @@ input int    InpLineWidth        = 2;
 input group "=== Signal arrows ==="
 input bool   InpShowSignalArrows = true;
 input int    InpArrowSize        = 2;
-input double InpArrowOffsetATR   = 6.0;    // v1.07: raised again from 3.0 - signals were still printing
-                                            // that 1.5x ATR still wasn't far enough from the candles.
-                                            // How far an arrow sits from the candle it marks, in ATR.
+input int    InpArrowGapPoints   = 150;    // v1.15: per direct request - arrows now sit a small FIXED
+                                            // distance (in points, not ATR-scaled) from the SuperTrend
+                                            // line itself, not from the candle's high/low. Buy arrow
+                                            // below the (now-support) trend line; sell arrow above it.
 input color  InpBuyArrowColor    = clrLime;
 input color  InpSellArrowColor   = clrRed;
 input int    InpBuyArrowCode     = 233;
@@ -343,8 +344,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
 
       bool flippedUp   = bull  && g_trendState[i - 1] <= 0.0;
       bool flippedDown = !bull && g_trendState[i - 1] >= 0.0;
-      g_arrowBuy[i]  = flippedUp   ? low[i]  - atrHere * InpArrowOffsetATR : EMPTY_VALUE;
-      g_arrowSell[i] = flippedDown ? high[i] + atrHere * InpArrowOffsetATR : EMPTY_VALUE;
+      //--- v1.15: offset from the trend LINE's own value (trendVal), a
+      //--- small fixed amount in points - not ATR-scaled off the candle's
+      //--- own high/low as before.
+      double arrowGap = InpArrowGapPoints * _Point;
+      g_arrowBuy[i]  = flippedUp   ? trendVal - arrowGap : EMPTY_VALUE;
+      g_arrowSell[i] = flippedDown ? trendVal + arrowGap : EMPTY_VALUE;
 
       if(InpShowCloudFill) { g_cloudUp[i] = close[i]; g_cloudDn[i] = trendVal; }
       else                 { g_cloudUp[i] = EMPTY_VALUE; g_cloudDn[i] = EMPTY_VALUE; }
