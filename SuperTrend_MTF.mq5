@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_buffers 9
 #property indicator_plots   5
@@ -64,6 +64,9 @@ input int    InpLineWidth        = 2;
 input group "=== Signal arrows ==="
 input bool   InpShowSignalArrows = true;
 input int    InpArrowSize        = 2;
+input double InpArrowOffsetATR   = 1.5;    // v1.04: how far an arrow sits from the candle it marks, in
+                                            // ATR - per direct request ("away from the candles"); was a
+                                            // fixed, small 0.5x ATR with no input to adjust it.
 input color  InpBuyArrowColor    = clrLime;
 input color  InpSellArrowColor   = clrRed;
 input int    InpBuyArrowCode     = 233;
@@ -71,8 +74,10 @@ input int    InpSellArrowCode    = 234;
 
 input group "=== Cloud fill ==="
 input bool   InpShowCloudFill    = true;
-input color  InpCloudBullColor   = C'0,80,0';
-input color  InpCloudBearColor   = C'80,0,0';
+input color  InpCloudBullColor   = C'20,140,20';   // v1.04: lighter - per direct report the old
+                                             // C'0,80,0'/C'80,0,0' pair was too dark, and the dark red
+                                             // specifically was hard to see against a black background.
+input color  InpCloudBearColor   = C'160,30,30';
 
 input group "=== Price label ==="
 input bool   InpShowPriceLabel   = true;
@@ -309,8 +314,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
 
       bool flippedUp   = bull  && g_trendState[i - 1] <= 0.0;
       bool flippedDown = !bull && g_trendState[i - 1] >= 0.0;
-      g_arrowBuy[i]  = flippedUp   ? low[i]  - atrHere * 0.5 : EMPTY_VALUE;
-      g_arrowSell[i] = flippedDown ? high[i] + atrHere * 0.5 : EMPTY_VALUE;
+      g_arrowBuy[i]  = flippedUp   ? low[i]  - atrHere * InpArrowOffsetATR : EMPTY_VALUE;
+      g_arrowSell[i] = flippedDown ? high[i] + atrHere * InpArrowOffsetATR : EMPTY_VALUE;
 
       if(InpShowCloudFill) { g_cloudUp[i] = close[i]; g_cloudDn[i] = trendVal; }
       else                 { g_cloudUp[i] = EMPTY_VALUE; g_cloudDn[i] = EMPTY_VALUE; }
