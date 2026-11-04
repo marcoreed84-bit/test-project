@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.09"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -83,11 +83,8 @@ input int    InpSellArrowCode    = 234;
 
 input group "=== Cloud fill ==="
 input bool   InpShowCloudFill    = true;
-input color  InpCloudBullColor   = C'70,255,70';   // v1.06: lighter again (was C'20,140,20'/
-                                             // C'160,30,30') per direct follow-up report ("still too
-                                             // dark") - genuinely bright neon now, matching the
-                                             // reference screenshot's own vivid look.
-input color  InpCloudBearColor   = C'255,80,80';
+input color  InpCloudBullColor   = C'0,50,0';      // v1.10: exact values per direct instruction
+input color  InpCloudBearColor   = C'50,0,0';
 
 input group "=== Price label ==="
 input bool   InpShowPriceLabel   = true;
