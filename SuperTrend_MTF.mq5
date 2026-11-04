@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.07"
+#property version   "1.08"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -73,7 +73,7 @@ input int    InpLineWidth        = 2;
 input group "=== Signal arrows ==="
 input bool   InpShowSignalArrows = true;
 input int    InpArrowSize        = 2;
-input double InpArrowOffsetATR   = 3.0;    // v1.05: raised again from 1.5 - per direct follow-up report
+input double InpArrowOffsetATR   = 6.0;    // v1.07: raised again from 3.0 - signals were still printing
                                             // that 1.5x ATR still wasn't far enough from the candles.
                                             // How far an arrow sits from the candle it marks, in ATR.
 input color  InpBuyArrowColor    = clrLime;
