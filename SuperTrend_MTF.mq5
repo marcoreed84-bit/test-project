@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 9
 #property indicator_plots   5
@@ -116,6 +116,15 @@ double g_finalUpper[], g_finalLower[], g_trendState[];   // calc-only, not plott
 
 int      g_atrHandle = INVALID_HANDLE;
 datetime g_lastBarTime = 0;
+//--- v1.03 FIX (Opus audit, real bug): HTF line / dashboard ATR handles
+//--- are now created ONCE here and reused, instead of a fresh handle
+//--- being created and immediately released inside ComputeTimeframeTrend
+//--- on every call - a brand-new handle has no computed data until after
+//--- the CURRENT calculation context returns, so BarsCalculated() nearly
+//--- always read 0 and the create/release/retry cycle could essentially
+//--- never produce a usable value.
+int g_htfAtrHandle = INVALID_HANDLE;
+int g_rowAtrHandle[4] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE};
 
 #define PFX "STM_"
 
@@ -171,9 +180,16 @@ int OnInit()
    PlotIndexSetInteger(4, PLOT_DRAW_TYPE, InpShowCloudFill ? DRAW_FILLING : DRAW_NONE);
 
    g_atrHandle = iATR(_Symbol, PERIOD_CURRENT, InpAtrPeriod);
-   if(g_atrHandle == INVALID_HANDLE)
+   g_htfAtrHandle = iATR(_Symbol, InpHtfTimeframe, InpAtrPeriod);
+   g_rowAtrHandle[0] = iATR(_Symbol, InpTF1, InpAtrPeriod);
+   g_rowAtrHandle[1] = iATR(_Symbol, InpTF2, InpAtrPeriod);
+   g_rowAtrHandle[2] = iATR(_Symbol, InpTF3, InpAtrPeriod);
+   g_rowAtrHandle[3] = iATR(_Symbol, InpTF4, InpAtrPeriod);
+   if(g_atrHandle == INVALID_HANDLE || g_htfAtrHandle == INVALID_HANDLE ||
+      g_rowAtrHandle[0] == INVALID_HANDLE || g_rowAtrHandle[1] == INVALID_HANDLE ||
+      g_rowAtrHandle[2] == INVALID_HANDLE || g_rowAtrHandle[3] == INVALID_HANDLE)
      {
-      Print("SuperTrend_MTF: failed to create ATR handle.");
+      Print("SuperTrend_MTF: failed to create one or more ATR handles.");
       return(INIT_FAILED);
      }
    g_lastBarTime = 0;
@@ -202,6 +218,9 @@ void OnDeinit(const int reason)
   {
    ObjectsDeleteAll(0, PFX);
    if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   if(g_htfAtrHandle != INVALID_HANDLE) IndicatorRelease(g_htfAtrHandle);
+   for(int k = 0; k < 4; k++)
+      if(g_rowAtrHandle[k] != INVALID_HANDLE) IndicatorRelease(g_rowAtrHandle[k]);
   }
 
 //+------------------------------------------------------------------+
@@ -234,15 +253,27 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
                  const double &close[], const long &tick_volume[], const long &volume[],
                  const int &spread[])
   {
-   int minBars = InpAtrPeriod + 2;
-   if(rates_total < minBars) return(0);
-
-   if(BarsCalculated(g_atrHandle) <= 0) return(0);   // handle not ready yet - retry next tick
-
    bool freshAttach = (prev_calculated <= 0);
+   int minBars = InpAtrPeriod + 2;
+   //--- v1.03 FIX (Opus audit, real bug): both of these used to return(0)
+   //--- unconditionally on failure, which makes MT5 treat the NEXT call as
+   //--- a fresh attach (prev_calculated reset to 0) and redo the entire
+   //--- historical backfill from bar 0 for a single transient hiccup
+   //--- (e.g. the ATR handle not quite ready on one tick). Bounded/cheap
+   //--- either way (confirmed no freeze risk), but wasteful and pointless
+   //--- - returning prev_calculated on a non-fresh-attach failure instead
+   //--- just leaves state as-is and retries incrementally next tick.
+   if(rates_total < minBars) return(freshAttach ? 0 : prev_calculated);
+   if(BarsCalculated(g_atrHandle) <= 0) return(freshAttach ? 0 : prev_calculated);
+
+   //--- v1.03 FIX (Opus audit, real bug): an early return here used to skip
+   //--- the main loop on every tick except the first one of a new bar, so
+   //--- the forming bar's line/arrows/price label only ever reflected its
+   //--- opening tick, not live price movement within the bar. Removed -
+   //--- the normal incremental path below already recomputes just the
+   //--- newest bar or two per tick (O(1), not a cost concern).
    int from = freshAttach ? 1 : prev_calculated - 1;
    if(from < 1) from = 1;
-   if(!freshAttach && rates_total <= prev_calculated) return(rates_total);
 
    double atrBuf[];
    ArraySetAsSeries(atrBuf, true);
@@ -327,25 +358,34 @@ void DrawPriceLabel(const int i, const bool bull, const double price)
 //| index pattern already fixed into HTF_EMA_Overlay.mq5 v1.04, not a fresh       |
 //| per-bar-fetch risk.                                                            |
 //+------------------------------------------------------------------+
-double ComputeTimeframeTrend(const ENUM_TIMEFRAMES tf, double &outTrendVal[], datetime &outTime[], int &outCount)
+//--- v1.03 FIX (Opus audit, real bug): used to create+release a fresh
+//--- iATR() handle inside this function on every call. A brand-new MT5
+//--- indicator handle has no computed data at all until AFTER the
+//--- current OnCalculate-equivalent context returns - so BarsCalculated()
+//--- almost always read 0 and this returned 0.0/outCount=0 EVERY time,
+//--- meaning the HTF line and dashboard rows could essentially never
+//--- populate. Fixed by taking an already-created, persistent handle
+//--- (made once in OnInit, released once in OnDeinit) as a parameter
+//--- instead. Also switched from including the still-forming bar (shift
+//--- 0) to CLOSED bars only (shift 1 onward) - the file's own comment
+//--- already claimed "CLOSED bars" but the code didn't actually do that.
+double ComputeTimeframeTrend(const ENUM_TIMEFRAMES tf, const int atrHandle,
+                              double &outTrendVal[], datetime &outTime[], int &outCount)
   {
    outCount = 0;
+   if(atrHandle == INVALID_HANDLE || BarsCalculated(atrHandle) <= 0) return(0.0);
    int bars = Bars(_Symbol, tf);
-   int need = MathMin(InpHtfLookbackBars, bars);
+   int need = MathMin(InpHtfLookbackBars, bars - 1);
    if(need < InpAtrPeriod + 2) return(0.0);
 
    MqlRates r[];
    ArraySetAsSeries(r, true);
-   int n = CopyRates(_Symbol, tf, 0, need, r);
+   int n = CopyRates(_Symbol, tf, 1, need, r);
    if(n < InpAtrPeriod + 2) return(0.0);
 
-   int atrHandle = iATR(_Symbol, tf, InpAtrPeriod);
-   if(atrHandle == INVALID_HANDLE) return(0.0);
-   if(BarsCalculated(atrHandle) <= 0) { IndicatorRelease(atrHandle); return(0.0); }
    double atrBuf[];
    ArraySetAsSeries(atrBuf, true);
-   int gotAtr = CopyBuffer(atrHandle, 0, 0, n, atrBuf);
-   IndicatorRelease(atrHandle);
+   int gotAtr = CopyBuffer(atrHandle, 0, 1, n, atrBuf);
    if(gotAtr < n) return(0.0);
 
    //--- r[]/atrBuf[] are series (index 0 = most recent) - walk oldest to
@@ -395,7 +435,7 @@ void UpdateHtfLine(const datetime &chartTime[], const int rates_total)
    datetime htfBar = iTime(_Symbol, InpHtfTimeframe, 0);
    if(htfBar != g_lastHtfBar || g_htfCount == 0)
      {
-      double trend = ComputeTimeframeTrend(InpHtfTimeframe, g_htfTrendVal, g_htfTime, g_htfCount);
+      double trend = ComputeTimeframeTrend(InpHtfTimeframe, g_htfAtrHandle, g_htfTrendVal, g_htfTime, g_htfCount);
       if(g_htfCount > 0) { g_htfTrendDir = trend; g_lastHtfBar = htfBar; }
      }
    if(g_htfCount == 0) return;
@@ -454,38 +494,37 @@ datetime g_lastRowBar[4] = {0, 0, 0, 0};
 double   g_rowState[4]   = {0, 0, 0, 0};   // +1 bull, -1 bear, 0 unknown/not-ready
 bool     g_rowWarn[4]    = {false, false, false, false};
 
-void UpdateDashboardRow(const int idx, const ENUM_TIMEFRAMES tf)
+void UpdateDashboardRow(const int idx, const ENUM_TIMEFRAMES tf, const int atrHandle)
   {
    datetime bar0 = iTime(_Symbol, tf, 0);
    if(bar0 == g_lastRowBar[idx] && g_lastRowBar[idx] != 0) return;
 
    double trendVal[]; datetime trendTime[]; int cnt = 0;
-   double trend = ComputeTimeframeTrend(tf, trendVal, trendTime, cnt);
+   double trend = ComputeTimeframeTrend(tf, atrHandle, trendVal, trendTime, cnt);
    if(cnt == 0) return;   // not ready - leave previous state, retry next call
 
    g_rowState[idx] = trend;
    g_lastRowBar[idx] = bar0;
 
-   int atrHandle = iATR(_Symbol, tf, InpAtrPeriod);
-   if(atrHandle != INVALID_HANDLE)
+   //--- v1.03 FIX (Opus audit): reuses the same persistent handle
+   //--- (no longer creates/releases its own), and reads the last CLOSED
+   //--- bar's ATR (shift 1) to match trendVal[0], which is now also the
+   //--- last closed bar's own trend value (see ComputeTimeframeTrend fix).
+   double atrBuf[];
+   if(atrHandle != INVALID_HANDLE && CopyBuffer(atrHandle, 0, 1, 1, atrBuf) >= 1)
      {
-      double atrBuf[];
-      if(CopyBuffer(atrHandle, 0, 0, 1, atrBuf) >= 1)
-        {
-         double close0 = iClose(_Symbol, tf, 0);
-         double dist = MathAbs(close0 - trendVal[0]);
-         g_rowWarn[idx] = (dist <= InpWarningATR * atrBuf[0]);
-        }
-      IndicatorRelease(atrHandle);
+      double close1 = iClose(_Symbol, tf, 1);
+      double dist = MathAbs(close1 - trendVal[0]);
+      g_rowWarn[idx] = (dist <= InpWarningATR * atrBuf[0]);
      }
   }
 
 void UpdateDashboard()
   {
-   UpdateDashboardRow(0, InpTF1);
-   UpdateDashboardRow(1, InpTF2);
-   UpdateDashboardRow(2, InpTF3);
-   UpdateDashboardRow(3, InpTF4);
+   UpdateDashboardRow(0, InpTF1, g_rowAtrHandle[0]);
+   UpdateDashboardRow(1, InpTF2, g_rowAtrHandle[1]);
+   UpdateDashboardRow(2, InpTF3, g_rowAtrHandle[2]);
+   UpdateDashboardRow(3, InpTF4, g_rowAtrHandle[3]);
 
    int lineH = 18;
    int y = InpDashY;
