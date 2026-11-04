@@ -45,7 +45,7 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.29"
+#property version   "1.30"
 //--- 1.24: Per direct request - "give me them all separate, each
 //--- previous day's high and low": new InpShowRecentHLPerDay (default
 //--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
@@ -584,12 +584,17 @@ input bool     InpShowTouchLabels  = true;  // small "xN" text label showing eac
                                              // its most recent touch
 input color    InpLabelColor       = clrWhite;
 input int      InpLabelFontSize    = 8;
-input int      InpLabelRightOffsetBars = 8;   // v1.27: per direct report - labels pinned exactly at "now"
+input int      InpLabelRightOffsetBars = 45;  // v1.27: per direct report - labels pinned exactly at "now"
                                              // sat right on top of the current candle whenever price was
                                              // actually AT a level (the moment you'd most want to read the
                                              // label clearly). Shifts every right-edge label this many bars
                                              // further right of the current time instead - 0 restores the
                                              // old at-now behavior.
+                                             // v1.30: raised 8->45 - VolumeProfile_Session's own "today"
+                                             // (~21 bars wide incl. leading gap) + gap (8) + "previous
+                                             // day" (~10 bars) columns now sit past the old offset, so
+                                             // these labels were drawing on top of that profile. 45 bars
+                                             // clears both columns with room to spare.
 
 input group "=== Intraday levels (the chart's own timeframe) ==="
 input bool     InpShowIntradayLevels = false;  // v1.10: default OFF - per direct request ("maybe just change
@@ -865,7 +870,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.29 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.30 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s  %s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
