@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.10"
+#property version   "1.11"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -87,7 +87,10 @@ input color  InpCloudBullColor   = C'0,50,0';      // v1.10: exact values per di
 input color  InpCloudBearColor   = C'50,0,0';
 
 input group "=== Price label ==="
-input bool   InpShowPriceLabel   = true;
+input bool   InpShowPriceLabel   = false;   // v1.11: off by default - overlapped the volume profile
+                                             // columns and the dashboard's own ST Value row already
+                                             // shows this number, per direct report ("we dont actually
+                                             // need it there")
 input int    InpPriceLabelOffsetBars = 3;   // v1.06: bars to the right of the last candle the "ST
                                              // Value" label sits - per direct request ("a little away
                                              // from the candle"), was pinned directly at TimeCurrent().
