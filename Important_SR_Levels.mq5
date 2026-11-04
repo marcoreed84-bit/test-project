@@ -45,7 +45,7 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.28"
+#property version   "1.29"
 //--- 1.24: Per direct request - "give me them all separate, each
 //--- previous day's high and low": new InpShowRecentHLPerDay (default
 //--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
@@ -865,7 +865,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.28 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.29 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s  %s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -987,6 +987,12 @@ void RefreshRightEdgeLabels(SRLevel &levels[], const int minTouchesToShow, const
    for(int k = 0; k < ArraySize(levels); k++)
      {
       if(levels[k].touches < minTouchesToShow) continue;
+      //--- v1.29 FIX (Opus audit, real wasted per-second cost): `shown`
+      //--- already tracks exactly whether this level is currently drawn
+      //--- (set by ApplyTopNFilter) - checking it first skips the
+      //--- synchronous ObjectFind call entirely for levels that cleared
+      //--- the touch threshold but aren't in the drawn top-N/nearest set.
+      if(!levels[k].shown) continue;
       if(ObjectFind(0, levels[k].labelName) < 0) continue;
       ObjectSetInteger(0, levels[k].labelName, OBJPROP_TIME, 0, nowTime);
       ObjectSetDouble(0, levels[k].labelName, OBJPROP_PRICE, levels[k].price);
@@ -1024,6 +1030,16 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
    //--- longer skips the draw pass entirely.
    int idx[];
    ArrayResize(idx, 0);
+   //--- v1.29 FIX (Opus audit, real wasted per-second cost): the "not
+   //--- shown" branches below used to call ObjectFind+ObjectDelete
+   //--- unconditionally for every level that isn't in this refresh's
+   //--- drawn set - including ones that were ALREADY not drawn last
+   //--- time, which is the common case once a layer settles. Captures
+   //--- each level's shown state from BEFORE the reset below, so those
+   //--- branches can skip the chart calls entirely when nothing changed.
+   bool prevShown[];
+   ArrayResize(prevShown, ArraySize(levels));
+   for(int k = 0; k < ArraySize(levels); k++) prevShown[k] = levels[k].shown;
    //--- v1.18: default every level to "not shown" first - levels.shown
    //--- drives CheckLevelSignals/CheckLevelProximityAlerts below, so a
    //--- level that doesn't even clear minTouchesToShow (never reached
@@ -1094,7 +1110,7 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
             RedrawLevelG(levels[idx[a]], minTouchesToShow, supCol, resCol);
             levels[idx[a]].shown = true;
            }
-         else
+         else if(prevShown[idx[a]])
            {
             if(ObjectFind(0, levels[idx[a]].lineName) >= 0)  ObjectDelete(0, levels[idx[a]].lineName);
             if(ObjectFind(0, levels[idx[a]].labelName) >= 0) ObjectDelete(0, levels[idx[a]].labelName);
@@ -1117,7 +1133,7 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
          RedrawLevelG(levels[idx[a]], minTouchesToShow, supCol, resCol);   // ensure it's drawn (idempotent)
          levels[idx[a]].shown = true;
         }
-      else
+      else if(prevShown[idx[a]])
         {
          if(ObjectFind(0, levels[idx[a]].lineName) >= 0)  ObjectDelete(0, levels[idx[a]].lineName);
          if(ObjectFind(0, levels[idx[a]].labelName) >= 0) ObjectDelete(0, levels[idx[a]].labelName);

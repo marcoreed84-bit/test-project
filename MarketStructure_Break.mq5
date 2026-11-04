@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -78,6 +78,18 @@ double   g_swingLowPrice  = 0.0;
 datetime g_swingLowTime   = 0;
 bool     g_swingLowBroken  = true;
 
+//--- v1.03 FIX (Opus audit, real per-new-bar cost): PruneOldBos used to
+//--- scan ObjectsTotal(0,0,-1) - EVERY object on the entire chart, from
+//--- every indicator and EA attached, not just this file's own - calling
+//--- the synchronous ObjectName() on each one. On a chart with several
+//--- indicators attached (exactly the user's real setup), that's hundreds
+//--- to thousands of synchronous calls in one burst every time a new bar
+//--- forms. Same bug class already fixed once in this project
+//--- (Important_SR_Levels.mq5 v1.20). Fixed by tracking this file's own
+//--- drawn BOS times in memory instead of asking the chart what exists.
+datetime g_bosTime[];
+bool     g_bosBullish[];
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
@@ -99,7 +111,9 @@ int OnInit()
    g_swingLowPrice    = 0.0;
    g_swingLowTime     = 0;
    g_swingLowBroken   = true;
-   PrintFormat("MarketStructure_Break v1.02 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
+   ArrayResize(g_bosTime, 0);
+   ArrayResize(g_bosBullish, 0);
+   PrintFormat("MarketStructure_Break v1.03 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBosDrawDays);
    return(INIT_SUCCEEDED);
@@ -127,6 +141,11 @@ void DrawBosLine(const bool bullish, const datetime t1, const datetime t2, const
       ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, id, OBJPROP_RAY_RIGHT, false);
+      int zi = ArraySize(g_bosTime);
+      ArrayResize(g_bosTime, zi + 1);
+      ArrayResize(g_bosBullish, zi + 1);
+      g_bosTime[zi] = t2;
+      g_bosBullish[zi] = bullish;
      }
    ObjectSetInteger(0, id, OBJPROP_COLOR, col);
    ObjectSetInteger(0, id, OBJPROP_STYLE, STYLE_DASH);
@@ -161,23 +180,15 @@ void PruneOldBos(const datetime lastBarTime)
   {
    if(InpBosDrawDays <= 0) return;
    datetime cutoff = lastBarTime - (datetime)((long)InpBosDrawDays * 86400);
-   string prefixes[4] = { "ln_up_", "ln_dn_", "lbl_up_", "lbl_dn_" };
-   int total = ObjectsTotal(0, 0, -1);
-   for(int i = total - 1; i >= 0; i--)
+   for(int i = ArraySize(g_bosTime) - 1; i >= 0; i--)
      {
-      string nm = ObjectName(0, i, 0, -1);
-      if(StringFind(nm, g_pfx) != 0) continue;
-      string rest = StringSubstr(nm, StringLen(g_pfx));
-      datetime t = 0;
-      for(int p = 0; p < 4; p++)
-        {
-         if(StringFind(rest, prefixes[p]) == 0)
-           {
-            t = (datetime)StringToInteger(StringSubstr(rest, StringLen(prefixes[p])));
-            break;
-           }
-        }
-      if(t > 0 && t < cutoff) ObjectDelete(0, nm);
+      if(g_bosTime[i] >= cutoff) continue;
+      string dir = g_bosBullish[i] ? "up_" : "dn_";
+      ObjectDelete(0, g_pfx + "ln_" + dir + IntegerToString((long)g_bosTime[i]));
+      ObjectDelete(0, g_pfx + "lbl_" + dir + IntegerToString((long)g_bosTime[i]));
+      int last = ArraySize(g_bosTime) - 1;
+      g_bosTime[i] = g_bosTime[last]; g_bosBullish[i] = g_bosBullish[last];
+      ArrayResize(g_bosTime, last); ArrayResize(g_bosBullish, last);
      }
   }
 

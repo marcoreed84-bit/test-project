@@ -23,7 +23,7 @@
 //|  current chart's own timeframe).                                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_buffers 3
 #property indicator_plots   3
@@ -244,10 +244,20 @@ void FillLine(double &buf[], const int handle, const ENUM_TIMEFRAMES tf,
       return;
      }
 
+   //--- v1.05 FIX (Opus audit, real one-off cost on a large backfill):
+   //--- iBarShift() used to be called once per LTF bar here - not a
+   //--- per-tick cost (this only runs on a fresh attach or when a line's
+   //--- HTF history grows), but on 300k+ bars across 3 lines that's ~1M
+   //--- series lookups, maybe up to ~1s. Since time[] (ascending) and
+   //--- opens[] (already-fetched, series/descending) are both already in
+   //--- memory, a single pointer walk finds the same answer in one pass
+   //--- with zero further API calls - O(n+m) instead of O(n) lookups.
+   int s = got - 1;
    for(int i = start; i < rates_total; i++)
      {
-      int htfShift = iBarShift(_Symbol, tf, time[i], false);
-      if(htfShift < 0 || htfShift >= got) { buf[i] = EMPTY_VALUE; continue; }
+      while(s > 0 && opens[s - 1] <= time[i]) s--;
+      if(opens[s] > time[i]) { buf[i] = EMPTY_VALUE; continue; }
+      int htfShift = s;
       double valCur = vals[htfShift];
 
       if(htfShift <= 0)

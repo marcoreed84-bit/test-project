@@ -28,7 +28,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -116,6 +116,7 @@ string   g_pfxLiq = "LIQZ_";
 int      g_atrHandle = INVALID_HANDLE;
 datetime g_lastBarTime = 0;
 ulong    g_lastDrawMs  = 0;
+datetime g_lastExtendTime = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -136,7 +137,8 @@ int OnInit()
    ArrayResize(g_liqPivots, 0);
    g_lastBarTime = 0;
    g_lastDrawMs  = 0;
-   PrintFormat("FVG_Liquidity_Zones v1.01 OnInit: %s %s  FVG=%s  Liquidity=%s  scanLookback=%dd",
+   g_lastExtendTime = 0;
+   PrintFormat("FVG_Liquidity_Zones v1.02 OnInit: %s %s  FVG=%s  Liquidity=%s  scanLookback=%dd",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpShowFVG ? "on" : "off", InpShowLiquidity ? "on" : "off", InpScanLookbackDays);
    return(INIT_SUCCEEDED);
@@ -480,14 +482,24 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
 
    //--- v1.00: right-edge extend of active zones, throttled to once/sec -
    //--- same reasoning as Important_SR_Levels' RefreshRightEdgeLabels.
+   //--- v1.02 FIX (Opus audit, real wasted cost): nowTime only genuinely
+   //--- changes once per new BAR, not once per second - the 1-second
+   //--- throttle alone still moved every unfilled zone's object (up to
+   //--- InpFvgMaxZones+InpLiqMaxZones) on every pass even when nothing
+   //--- had moved, since the previous bar's own time was identical.
+   //--- Gated on nowTime itself changing, not just the 1-second clock.
    if(GetTickCount64() - g_lastDrawMs >= 1000)
      {
       g_lastDrawMs = GetTickCount64();
       datetime nowTime = time[rates_total - 1];
-      if(InpShowFVG)       ExtendActiveZones(g_fvgZones, nowTime);
-      if(InpShowLiquidity) ExtendActiveZones(g_liqZones, nowTime);
-      PruneZones(g_fvgZones, InpFvgMaxZones, InpFvgMaxAgeDays, nowTime);
-      PruneZones(g_liqZones, InpLiqMaxZones, InpLiqMaxAgeDays, nowTime);
+      if(nowTime != g_lastExtendTime)
+        {
+         g_lastExtendTime = nowTime;
+         if(InpShowFVG)       ExtendActiveZones(g_fvgZones, nowTime);
+         if(InpShowLiquidity) ExtendActiveZones(g_liqZones, nowTime);
+         PruneZones(g_fvgZones, InpFvgMaxZones, InpFvgMaxAgeDays, nowTime);
+         PruneZones(g_liqZones, InpLiqMaxZones, InpLiqMaxAgeDays, nowTime);
+        }
      }
 
    return(rates_total);
