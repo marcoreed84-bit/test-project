@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.08"
+#property version   "1.09"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -94,7 +94,7 @@ input bool   InpShowPriceLabel   = true;
 input int    InpPriceLabelOffsetBars = 3;   // v1.06: bars to the right of the last candle the "ST
                                              // Value" label sits - per direct request ("a little away
                                              // from the candle"), was pinned directly at TimeCurrent().
-input int    InpPriceLabelBoxBars = 5;      // v1.06: width (in bars) of the dotted box drawn around
+input int    InpPriceLabelBoxBars = 9;      // v1.06: width (in bars) of the dotted box drawn around
                                              // the ST Value label, matching the reference panel.
 
 input group "=== 3. HTF line on chart ==="
@@ -108,12 +108,14 @@ input ENUM_LINE_STYLE   InpHtfLineStyle = STYLE_SOLID;
 input group "=== 4. Dashboard ==="
 input bool   InpShowDashboard    = true;
 input int    InpDashX            = 10;
-input int    InpDashY            = 30;
+input int    InpDashY            = 65;     // v1.09: pushed down below MT5's own SELL/BUY quick-trade
+                                            // panel, which sits at the chart's top-left corner too
 input color  InpDashTextColor    = clrWhite;
 input color  InpDashHeaderColor  = clrDodgerBlue;
 input color  InpDashBullColor    = clrLime;
 input color  InpDashWarnColor    = clrGold;
 input color  InpDashBearColor    = clrRed;
+input int    InpVolAvgBars       = 20;      // v1.09: closed bars averaged for the panel's Volume row
 input color  InpDashBgColor      = clrBlack;
 input int    InpDashWidth        = 210;
 //--- NOT in the original's visible inputs - my own addition to define
@@ -360,7 +362,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    if(InpShowHtfLine) UpdateHtfLine(time, rates_total);
    else ObjectsDeleteAll(0, PFX + "htfseg_");
 
-   if(InpShowDashboard) UpdateDashboard();
+   if(InpShowDashboard) UpdateDashboard(tick_volume, rates_total);
    else ObjectsDeleteAll(0, PFX + "dash_");
 
    g_lastBarTime = time[rates_total - 1];
@@ -379,25 +381,34 @@ void DrawPriceLabel(const datetime lblTime, const bool bull, const double stValu
   {
    string nm = PFX + "pricelbl";
    string txt = DoubleToString(stValue, _Digits);
+
+   //--- v1.09 FIX (real bug, per direct report "st value falls outside the
+   //--- dotted block"): the label used to anchor LEFT at the box's own left
+   //--- edge, so the text (pixel-width, unknown to us) could run past the
+   //--- box's right edge depending on digit count/font. Now anchored CENTER
+   //--- at the box's own time/price midpoint, so it's always centered
+   //--- inside it regardless of text width.
+   string box = PFX + "pricebox";
+   double halfH = (atrHere > 0.0 ? atrHere : SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100) * 0.35;
+   datetime t1 = lblTime - (datetime)(1 * PeriodSeconds(PERIOD_CURRENT));
+   datetime t2 = lblTime + (datetime)(InpPriceLabelBoxBars * PeriodSeconds(PERIOD_CURRENT));
+   datetime tMid = t1 + (datetime)(((long)t2 - (long)t1) / 2);
+
    if(ObjectFind(0, nm) < 0)
      {
       ObjectCreate(0, nm, OBJ_TEXT, 0, 0, 0);
       ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 7);
-      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_CENTER);
      }
-   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, lblTime);
+   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, tMid);
    ObjectSetDouble(0, nm, OBJPROP_PRICE, 0, stValue);
-   ObjectSetString(0, nm, OBJPROP_TEXT, " " + txt);
+   ObjectSetString(0, nm, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, bull ? InpBullColor : InpBearColor);
 
    //--- v1.06: dotted box around the ST Value label, matching the
    //--- reference "LT Super Trend" panel's boxed value reading.
-   string box = PFX + "pricebox";
-   double halfH = (atrHere > 0.0 ? atrHere : SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100) * 0.35;
-   datetime t1 = lblTime - (datetime)(1 * PeriodSeconds(PERIOD_CURRENT));
-   datetime t2 = lblTime + (datetime)(InpPriceLabelBoxBars * PeriodSeconds(PERIOD_CURRENT));
    if(ObjectFind(0, box) < 0)
      {
       ObjectCreate(0, box, OBJ_RECTANGLE, 0, t1, stValue + halfH, t2, stValue - halfH);
@@ -593,7 +604,7 @@ void UpdateDashboardRow(const int idx, const ENUM_TIMEFRAMES tf, const int atrHa
 //--- alongside this one for the same kind of context.
 bool g_dashCreated = false;
 
-void UpdateDashboard()
+void UpdateDashboard(const long &tick_volume[], const int rates_total)
   {
    UpdateDashboardRow(0, InpTF1, g_rowAtrHandle[0]);
    UpdateDashboardRow(1, InpTF2, g_rowAtrHandle[1]);
@@ -614,10 +625,22 @@ void UpdateDashboard()
    int spreadPts = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    int duration = (int)g_trendDuration[last];
 
+   //--- v1.09: volume read - forming bar's tick volume vs the average of
+   //--- the last InpVolAvgBars CLOSED bars, so the panel actually answers
+   //--- "is the volume right to take this trade" instead of showing nothing.
+   long curVol = tick_volume[rates_total - 1];
+   long volSum = 0; int volN = 0;
+   for(int k = rates_total - 2; k >= 0 && volN < InpVolAvgBars; k--, volN++) volSum += tick_volume[k];
+   double avgVol = (volN > 0) ? (double)volSum / volN : 0.0;
+   double volRatio = (avgVol > 0.0) ? (double)curVol / avgVol : 0.0;
+   string volTxt = (avgVol <= 0.0) ? "n/a" : DoubleToString(volRatio, 1) + "x avg";
+   color volCol = (avgVol <= 0.0) ? InpDashTextColor :
+                  (volRatio >= 1.2 ? InpDashBullColor : (volRatio < 0.6 ? InpDashWarnColor : InpDashTextColor));
+
    int lineH = 18;
    int y = InpDashY;
    int x = InpDashX;
-   int totalLines = 15;
+   int totalLines = 17;
 
    if(!g_dashCreated)
      {
@@ -628,11 +651,29 @@ void UpdateDashboard()
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BACK, false);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BGCOLOR, InpDashBgColor);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_COLOR, clrGray);
+      //--- v1.09: a visible accent border (was near-invisible clrGray on
+      //--- a black background) - "more professional" per direct feedback.
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_COLOR, InpDashHeaderColor);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_WIDTH, 1);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_XDISTANCE, x - 8);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YDISTANCE, y - 6);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_XSIZE, InpDashWidth);
       ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YSIZE, lineH * totalLines + 12);
+
+      //--- v1.09: thin divider under the title row, same accent color as
+      //--- the outer border, for a cleaner/more "professional" layout.
+      ObjectCreate(0, PFX + "dash_div", OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_BACK, false);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_BGCOLOR, InpDashHeaderColor);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_COLOR, InpDashHeaderColor);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_XDISTANCE, x - 8);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_YDISTANCE, y + lineH - 4);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_XSIZE, InpDashWidth);
+      ObjectSetInteger(0, PFX + "dash_div", OBJPROP_YSIZE, 1);
      }
 
    DashLabel("title", x, y, "LT Super Trend", InpDashTextColor); y += lineH;
@@ -643,6 +684,7 @@ void UpdateDashboard()
    DashLabel("stval", x, y, "ST Value:  " + DoubleToString(stVal, _Digits), InpDashTextColor); y += lineH;
    DashLabel("atr", x, y, "ATR:  " + DoubleToString(atrPips, 1) + " pips", InpDashTextColor); y += lineH;
    DashLabel("spread", x, y, "Spread:  " + IntegerToString(spreadPts) + " pts", InpDashTextColor); y += lineH;
+   DashLabel("vol", x, y, "Volume:  " + volTxt, volCol); y += lineH;
 
    DashLabel("hdr2", x, y, "MULTI-TIMEFRAME", InpDashHeaderColor); y += lineH;
    string names[4] = {StringSubstr(EnumToString(InpTF1), 7), StringSubstr(EnumToString(InpTF2), 7),
