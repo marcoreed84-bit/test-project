@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.15"
+#property version   "1.16"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -454,13 +454,30 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    bool redrew = false;
    datetime todaySourceBar = iTime(_Symbol, InpSourceTF, 0);
 
-   if(g_firstCalc || todaySourceBar != g_lastTodaySourceBar)
-     {
-      EnsureRightMargin();   // only needs (re)checking when something is about to redraw anyway
+   //--- v1.16 FIX (real bug, per direct report: "as the current day moves
+   //--- with new candles the previous day does not, it stays where it is"):
+   //--- the previous-day column's ANCHOR (its screen position) used to only
+   //--- get recomputed when prevDayStart itself changed (once a day) - but
+   //--- it's positioned relative to the TODAY column's own anchor, which
+   //--- moves every time a new "today" bar prints. So every bar, the two
+   //--- columns drifted further apart (or, once the chart's right margin
+   //--- ran out, the previous-day column scrolled off-view entirely -
+   //--- looking exactly like "doesn't show" on a fast-moving symbol like
+   //--- BTC). Both columns' anchors are now derived from the SAME endToday/
+   //--- todayAnchor computed once per bar, and the previous-day column is
+   //--- now repositioned (full rebuild - still bar-gated, not per-tick)
+   //--- whenever TODAY'S bar changes, not just when prevDayStart changes.
+   bool needToday = (g_firstCalc || todaySourceBar != g_lastTodaySourceBar);
+   bool needPrev  = (g_firstCalc || prevDayStart != g_lastPrevDayStart || needToday);
 
+   if(needToday || needPrev) EnsureRightMargin();
+
+   int endToday = rates_total - 1;
+   datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
+
+   if(needToday)
+     {
       datetime todayCutoff = todayStart - (datetime)((long)(InpDaysToShow - 1) * 86400);
-      int endToday = rates_total - 1;
-      datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
       DrawProfile(VP_PFX + "today_", todayCutoff, TimeCurrent(), todayAnchor,
                   time, endToday, perSec,
                   InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
@@ -468,17 +485,10 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       redrew = true;
      }
 
-   //--- PREVIOUS DAY column: exactly D1 bar 1's own session - the last
-   //--- fully completed one, whatever calendar day that actually was.
-   //--- Frozen, independent of InpDaysToShow, independent of how far
-   //--- today has progressed - so it only ever needs rebuilding once,
-   //--- when prevDayStart itself changes (once a day).
-   if(g_firstCalc || prevDayStart != g_lastPrevDayStart)
+   if(needPrev)
      {
       if(InpShowPrevDay && prevDayStart > 0)
         {
-         int endToday = rates_total - 1;
-         datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
          datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
          DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
                      time, endToday, perSec,
