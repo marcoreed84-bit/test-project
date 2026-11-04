@@ -16,7 +16,7 @@
 //|  shading's exact edges.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -64,7 +64,11 @@ int OnInit()
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
-   if(InpShowNews) EventSetTimer(MathMax(60, InpNewsRefreshMinutes * 60));
+   if(InpShowNews)
+     {
+      EventSetTimer(MathMax(60, InpNewsRefreshMinutes * 60));
+      RebuildNews();   // v1.03: don't make the user wait InpNewsRefreshMinutes for the first status
+     }
    return(INIT_SUCCEEDED);
   }
 
@@ -216,6 +220,29 @@ bool CurrencyWanted(const string cur)
    return(false);
   }
 
+//--- v1.03: visible proof-of-life, per direct question ("will it give
+//--- some kind of indication if it's actually seeing news events") -
+//--- a silent "0 markers shown" was indistinguishable from "feed not
+//--- working" vs. "genuinely nothing high-impact this week". Now both
+//--- Prints to the Experts log AND a small on-chart status label.
+void SetNewsStatus(const string text, const color col)
+  {
+   string nm = SN_PFX + "news_status";
+   if(ObjectFind(0, nm) < 0)
+     {
+      ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 8);
+      ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, 10);
+     }
+   ObjectSetString(0, nm, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+  }
+
 void RebuildNews()
   {
    ObjectsDeleteAll(0, SN_PFX + "news_");
@@ -226,7 +253,17 @@ void RebuildNews()
 
    MqlCalendarValue values[];
    int n = CalendarValueHistory(values, from, to, NULL, NULL);
-   if(n <= 0) return;
+   if(n <= 0)
+     {
+      //--- n<0 is a real CalendarValueHistory failure (calendar feed not
+      //--- synced/no internet); n==0 means the call worked but found
+      //--- literally zero events in the window - different problems.
+      string msg = (n < 0) ? StringFormat("News: calendar feed error (GetLastError=%d) - check Toolbox > Calendar tab", GetLastError())
+                            : "News: calendar OK, 0 events in window";
+      PrintFormat("Session_News_Overlay: %s", msg);
+      SetNewsStatus(msg, (n < 0) ? clrRed : clrGray);
+      return;
+     }
 
    double priceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
    double priceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
@@ -267,6 +304,11 @@ void RebuildNews()
 
       shown++;
      }
+
+   string msg = StringFormat("News: %d event(s) shown (of %d total in window, currencies=%s, min importance=%d)",
+                              shown, n, InpNewsCurrencies, InpNewsMinImportance);
+   PrintFormat("Session_News_Overlay: %s", msg);
+   SetNewsStatus(msg, shown > 0 ? InpNewsColor : clrGray);
   }
 
 int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
