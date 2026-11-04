@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.13"
+#property version   "1.14"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -640,6 +640,10 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
 
    int lineH = 18;
    int x = InpDashX;
+   //--- v1.14: row text centered within the panel width, per direct
+   //--- request - centerX is the panel's own horizontal midpoint
+   //--- (distance-from-right-edge), independent of each row's text length.
+   int centerX = InpDashX - 8 + InpDashWidth / 2;
    int totalLines = 17;
    int panelH = lineH * totalLines + 12;
 
@@ -684,17 +688,17 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
       ObjectSetInteger(0, PFX + "dash_div", OBJPROP_YSIZE, 1);
      }
 
-   DashLabel("title", x, y, "LT Super Trend", InpDashTextColor); y -= lineH;
-   DashLabel("hdr1", x, y, "CURRENT TIMEFRAME", InpDashHeaderColor); y -= lineH;
-   DashLabel("trend", x, y, "Trend:  " + (bull ? "BULLISH" : "BEARISH"),
+   DashLabel("title", centerX, y, "LT Super Trend", InpDashTextColor); y -= lineH;
+   DashLabel("hdr1", centerX, y, "CURRENT TIMEFRAME", InpDashHeaderColor); y -= lineH;
+   DashLabel("trend", centerX, y, "Trend:  " + (bull ? "BULLISH" : "BEARISH"),
              bull ? InpDashBullColor : InpDashBearColor); y -= lineH;
-   DashLabel("dur", x, y, "Duration:  " + IntegerToString(duration) + " bars", InpDashTextColor); y -= lineH;
-   DashLabel("stval", x, y, "ST Value:  " + DoubleToString(stVal, _Digits), InpDashTextColor); y -= lineH;
-   DashLabel("atr", x, y, "ATR:  " + DoubleToString(atrPips, 1) + " pips", InpDashTextColor); y -= lineH;
-   DashLabel("spread", x, y, "Spread:  " + IntegerToString(spreadPts) + " pts", InpDashTextColor); y -= lineH;
-   DashLabel("vol", x, y, "Volume:  " + volTxt, volCol); y -= lineH;
+   DashLabel("dur", centerX, y, "Duration:  " + IntegerToString(duration) + " bars", InpDashTextColor); y -= lineH;
+   DashLabel("stval", centerX, y, "ST Value:  " + DoubleToString(stVal, _Digits), InpDashTextColor); y -= lineH;
+   DashLabel("atr", centerX, y, "ATR:  " + DoubleToString(atrPips, 1) + " pips", InpDashTextColor); y -= lineH;
+   DashLabel("spread", centerX, y, "Spread:  " + IntegerToString(spreadPts) + " pts", InpDashTextColor); y -= lineH;
+   DashLabel("vol", centerX, y, "Volume:  " + volTxt, volCol); y -= lineH;
 
-   DashLabel("hdr2", x, y, "MULTI-TIMEFRAME", InpDashHeaderColor); y -= lineH;
+   DashLabel("hdr2", centerX, y, "MULTI-TIMEFRAME", InpDashHeaderColor); y -= lineH;
    string names[4] = {StringSubstr(EnumToString(InpTF1), 7), StringSubstr(EnumToString(InpTF2), 7),
                        StringSubstr(EnumToString(InpTF3), 7), StringSubstr(EnumToString(InpTF4), 7)};
    int bullCount = 0, bearCount = 0;
@@ -703,18 +707,18 @@ void UpdateDashboard(const long &tick_volume[], const int rates_total)
       string txt = names[idx] + ":  " + (g_rowState[idx] > 0.0 ? "BULLISH" : (g_rowState[idx] < 0.0 ? "BEARISH" : "..."));
       color col = g_rowWarn[idx] ? InpDashWarnColor : (g_rowState[idx] > 0.0 ? InpDashBullColor :
                   (g_rowState[idx] < 0.0 ? InpDashBearColor : InpDashTextColor));
-      DashLabel("row" + IntegerToString(idx), x, y, txt, col);
+      DashLabel("row" + IntegerToString(idx), centerX, y, txt, col);
       y -= lineH;
       if(g_rowState[idx] > 0.0) bullCount++;
       else if(g_rowState[idx] < 0.0) bearCount++;
      }
 
-   DashLabel("hdr3", x, y, "ALIGNMENT", InpDashHeaderColor); y -= lineH;
+   DashLabel("hdr3", centerX, y, "ALIGNMENT", InpDashHeaderColor); y -= lineH;
    int score = MathMax(bullCount, bearCount);
    bool scoreBull = bullCount >= bearCount;
-   DashLabel("score", x, y, "Score:  " + IntegerToString(score) + "/4  " + (scoreBull ? "BULLISH" : "BEARISH"),
+   DashLabel("score", centerX, y, "Score:  " + IntegerToString(score) + "/4  " + (scoreBull ? "BULLISH" : "BEARISH"),
              scoreBull ? InpDashBullColor : InpDashBearColor); y -= lineH;
-   DashLabel("status", x, y, (score >= 4 ? "STRONG" : "CAUTION"),
+   DashLabel("status", centerX, y, (score >= 4 ? "STRONG" : "CAUTION"),
              score >= 4 ? (scoreBull ? InpDashBullColor : InpDashBearColor) : InpDashWarnColor);
 
    g_dashCreated = true;
@@ -736,10 +740,12 @@ void DashLabel(const string suffix, const int x, const int y, const string text,
    if(!g_dashCreated)
      {
       ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
-      //--- v1.13: bottom-right anchored to match the panel's own corner -
-      //--- text right-aligned so it stays inside the box growing leftward.
+      //--- v1.13: bottom-right anchored to match the panel's own corner.
+      //--- v1.14: ANCHOR_UPPER (not RIGHT_UPPER) centers each row
+      //--- horizontally on its passed-in x, independent of text length -
+      //--- per direct request ("align the text... to centred text").
       ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
-      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
+      ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_UPPER);
       ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 10);
