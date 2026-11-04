@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.11"
+#property version   "1.12"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -108,8 +108,8 @@ input ENUM_LINE_STYLE   InpHtfLineStyle = STYLE_SOLID;
 input group "=== 4. Dashboard ==="
 input bool   InpShowDashboard    = true;
 input int    InpDashX            = 10;
-input int    InpDashY            = 65;     // v1.09: pushed down below MT5's own SELL/BUY quick-trade
-                                            // panel, which sits at the chart's top-left corner too
+input int    InpDashY            = 110;    // v1.12: pushed further down - still sat behind MT5's own
+                                            // SELL/BUY quick-trade panel at 65
 input color  InpDashTextColor    = clrWhite;
 input color  InpDashHeaderColor  = clrDodgerBlue;
 input color  InpDashBullColor    = clrLime;
