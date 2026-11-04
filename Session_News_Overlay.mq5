@@ -16,7 +16,7 @@
 //|  shading's exact edges.                                           |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -192,8 +192,8 @@ void RebuildSessions()
                            nyEnd + brokerOffsetSec, InpNewYorkColor);
       if(InpShowOverlap)
         {
-         datetime ovStart = MathMax((long)londonStart, (long)nyStart);
-         datetime ovEnd   = MathMin((long)londonEnd, (long)nyEnd);
+         datetime ovStart = (datetime)MathMax((long)londonStart, (long)nyStart);
+         datetime ovEnd   = (datetime)MathMin((long)londonEnd, (long)nyEnd);
          if(ovEnd > ovStart)
             DrawSessionBlock(SN_PFX + "sess_ovlp_" + tag, ovStart + brokerOffsetSec,
                               ovEnd + brokerOffsetSec, InpOverlapColor);
