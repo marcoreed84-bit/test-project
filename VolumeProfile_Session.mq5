@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.14"
+#property version   "1.15"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -86,7 +86,7 @@ input group "=== Previous day (frozen, completed session) ==="
 input bool   InpShowPrevDay      = true;    // v1.08: a second, independent profile for the full,
                                              // already-completed previous calendar day - frozen, never
                                              // changes once today starts, unlike the live today column.
-input int    InpColumnGapBars    = 2;       // blank bars between the two columns so they never touch
+input int    InpColumnGapBars    = 8;       // blank bars between the two columns so they never touch
 input color  InpPrevBarColor     = C'140,70,10';     // dim neon amber/orange - a distinct colour family
                                              // from today's blue, so the two sessions are never confused.
 input color  InpPrevPocColor     = C'255,160,60';    // bright neon orange - previous day's POC.

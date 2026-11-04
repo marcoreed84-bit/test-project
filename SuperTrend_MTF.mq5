@@ -37,9 +37,9 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
-#property indicator_buffers 9
+#property indicator_buffers 10
 #property indicator_plots   5
 #property indicator_label1  "Uptrend"
 #property indicator_type1   DRAW_LINE
@@ -83,13 +83,19 @@ input int    InpSellArrowCode    = 234;
 
 input group "=== Cloud fill ==="
 input bool   InpShowCloudFill    = true;
-input color  InpCloudBullColor   = C'20,140,20';   // v1.04: lighter - per direct report the old
-                                             // C'0,80,0'/C'80,0,0' pair was too dark, and the dark red
-                                             // specifically was hard to see against a black background.
-input color  InpCloudBearColor   = C'160,30,30';
+input color  InpCloudBullColor   = C'70,255,70';   // v1.06: lighter again (was C'20,140,20'/
+                                             // C'160,30,30') per direct follow-up report ("still too
+                                             // dark") - genuinely bright neon now, matching the
+                                             // reference screenshot's own vivid look.
+input color  InpCloudBearColor   = C'255,80,80';
 
 input group "=== Price label ==="
 input bool   InpShowPriceLabel   = true;
+input int    InpPriceLabelOffsetBars = 3;   // v1.06: bars to the right of the last candle the "ST
+                                             // Value" label sits - per direct request ("a little away
+                                             // from the candle"), was pinned directly at TimeCurrent().
+input int    InpPriceLabelBoxBars = 5;      // v1.06: width (in bars) of the dotted box drawn around
+                                             // the ST Value label, matching the reference panel.
 
 input group "=== 3. HTF line on chart ==="
 input bool             InpShowHtfLine  = false;
@@ -104,9 +110,12 @@ input bool   InpShowDashboard    = false;
 input int    InpDashX            = 10;
 input int    InpDashY            = 30;
 input color  InpDashTextColor    = clrWhite;
+input color  InpDashHeaderColor  = clrDodgerBlue;
 input color  InpDashBullColor    = clrLime;
 input color  InpDashWarnColor    = clrGold;
 input color  InpDashBearColor    = clrRed;
+input color  InpDashBgColor      = clrBlack;
+input int    InpDashWidth        = 210;
 //--- NOT in the original's visible inputs - my own addition to define
 //--- "Warning" (see file header): price within this many ATR of the
 //--- opposite band counts as about-to-flip.
@@ -126,7 +135,7 @@ input int    InpHtfLookbackBars  = 500;   // bounds the one-shot SuperTrend recu
 
 //+------------------------------------------------------------------+
 double g_lineUp[], g_lineDown[], g_arrowBuy[], g_arrowSell[], g_cloudUp[], g_cloudDn[];
-double g_finalUpper[], g_finalLower[], g_trendState[];   // calc-only, not plotted
+double g_finalUpper[], g_finalLower[], g_trendState[], g_trendDuration[];   // calc-only, not plotted
 
 int      g_atrHandle = INVALID_HANDLE;
 datetime g_lastBarTime = 0;
@@ -159,6 +168,7 @@ int OnInit()
    SetIndexBuffer(6, g_finalUpper, INDICATOR_CALCULATIONS);
    SetIndexBuffer(7, g_finalLower, INDICATOR_CALCULATIONS);
    SetIndexBuffer(8, g_trendState, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(9, g_trendDuration, INDICATOR_CALCULATIONS);
    ArraySetAsSeries(g_lineUp, false);
    ArraySetAsSeries(g_lineDown, false);
    ArraySetAsSeries(g_arrowBuy, false);
@@ -168,6 +178,7 @@ int OnInit()
    ArraySetAsSeries(g_finalUpper, false);
    ArraySetAsSeries(g_finalLower, false);
    ArraySetAsSeries(g_trendState, false);
+   ArraySetAsSeries(g_trendDuration, false);
 
    PlotIndexSetDouble(0, PLOT_EMPTY_VALUE, EMPTY_VALUE);
    PlotIndexSetDouble(1, PLOT_EMPTY_VALUE, EMPTY_VALUE);
@@ -299,6 +310,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       g_finalUpper[0] = (high[0] + low[0]) / 2.0 + InpAtrMultiplier * atrBuf[rates_total - 1];
       g_finalLower[0] = (high[0] + low[0]) / 2.0 - InpAtrMultiplier * atrBuf[rates_total - 1];
       g_trendState[0] = 1.0;
+      g_trendDuration[0] = 1.0;
       g_lineUp[0] = EMPTY_VALUE; g_lineDown[0] = EMPTY_VALUE;
       g_arrowBuy[0] = EMPTY_VALUE; g_arrowSell[0] = EMPTY_VALUE;
       g_cloudUp[0] = EMPTY_VALUE; g_cloudDn[0] = EMPTY_VALUE;
@@ -313,7 +325,12 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       SuperTrendStep(high[i], low[i], close[i], atrHere,
                       close[i - 1], g_finalUpper[i - 1], g_finalLower[i - 1], g_trendState[i - 1],
                       InpAtrMultiplier, fu, fl, tr);
-      g_finalUpper[i] = fu; g_finalLower[i] = fl; g_trendState[i] = tr;
+      g_finalUpper[i] = fu; g_finalLower[i] = fl;
+      //--- v1.06: tracks how many bars the current trend has held, for
+      //--- the dashboard's "Duration" row - compared against the PRIOR
+      //--- bar's trend (g_trendState[i-1], still unoverwritten here).
+      g_trendDuration[i] = ((tr > 0.0) == (g_trendState[i - 1] > 0.0)) ? g_trendDuration[i - 1] + 1.0 : 1.0;
+      g_trendState[i] = tr;
 
       bool bull = (tr > 0.0);
       double trendVal = bull ? fl : fu;
@@ -330,8 +347,15 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       else                 { g_cloudUp[i] = EMPTY_VALUE; g_cloudDn[i] = EMPTY_VALUE; }
      }
 
-   if(InpShowPriceLabel) DrawPriceLabel(rates_total - 1, g_trendState[rates_total - 1] > 0.0, close[rates_total - 1]);
-   else ObjectDelete(0, PFX + "pricelbl");
+   if(InpShowPriceLabel)
+     {
+      int last = rates_total - 1;
+      bool lastBull = g_trendState[last] > 0.0;
+      double stVal = lastBull ? g_finalLower[last] : g_finalUpper[last];
+      datetime lblTime = time[last] + (datetime)(InpPriceLabelOffsetBars * PeriodSeconds(PERIOD_CURRENT));
+      DrawPriceLabel(lblTime, lastBull, stVal, atrBuf[0]);
+     }
+   else { ObjectDelete(0, PFX + "pricelbl"); ObjectDelete(0, PFX + "pricebox"); }
 
    if(InpShowHtfLine) UpdateHtfLine(time, rates_total);
    else ObjectsDeleteAll(0, PFX + "htfseg_");
@@ -344,22 +368,51 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
   }
 
 //+------------------------------------------------------------------+
-void DrawPriceLabel(const int i, const bool bull, const double price)
+//--- v1.06 FIX (real bug, per direct report): used to label the candle's
+//--- own CLOSE price as "UP "/"DOWN " - the reference screenshot's "ST
+//--- Value" is the SuperTrend LINE's own current value, not the close
+//--- price, and is a plain price reading, not a trend-direction prefix.
+//--- Now shows the same thing the reference does, offset
+//--- InpPriceLabelOffsetBars bars to the right of the last candle
+//--- instead of pinned at TimeCurrent() (which could sit on/inside it).
+void DrawPriceLabel(const datetime lblTime, const bool bull, const double stValue, const double atrHere)
   {
    string nm = PFX + "pricelbl";
-   string txt = (bull ? "UP " : "DOWN ") + DoubleToString(price, _Digits);
+   string txt = "ST Value: " + DoubleToString(stValue, _Digits);
    if(ObjectFind(0, nm) < 0)
      {
       ObjectCreate(0, nm, OBJ_TEXT, 0, 0, 0);
       ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 9);
+      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 7);
       ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_LEFT);
      }
-   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, TimeCurrent());
-   ObjectSetDouble(0, nm, OBJPROP_PRICE, 0, price);
+   ObjectSetInteger(0, nm, OBJPROP_TIME, 0, lblTime);
+   ObjectSetDouble(0, nm, OBJPROP_PRICE, 0, stValue);
    ObjectSetString(0, nm, OBJPROP_TEXT, " " + txt);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, bull ? InpBullColor : InpBearColor);
+
+   //--- v1.06: dotted box around the ST Value label, matching the
+   //--- reference "LT Super Trend" panel's boxed value reading.
+   string box = PFX + "pricebox";
+   double halfH = (atrHere > 0.0 ? atrHere : SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100) * 0.35;
+   datetime t1 = lblTime - (datetime)(1 * PeriodSeconds(PERIOD_CURRENT));
+   datetime t2 = lblTime + (datetime)(InpPriceLabelBoxBars * PeriodSeconds(PERIOD_CURRENT));
+   if(ObjectFind(0, box) < 0)
+     {
+      ObjectCreate(0, box, OBJ_RECTANGLE, 0, t1, stValue + halfH, t2, stValue - halfH);
+      ObjectSetInteger(0, box, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, box, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, box, OBJPROP_STYLE, STYLE_DOT);
+      ObjectSetInteger(0, box, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, box, OBJPROP_FILL, false);
+      ObjectSetInteger(0, box, OBJPROP_BACK, true);
+     }
+   ObjectSetInteger(0, box, OBJPROP_TIME, 0, t1);
+   ObjectSetDouble(0, box, OBJPROP_PRICE, 0, stValue + halfH);
+   ObjectSetInteger(0, box, OBJPROP_TIME, 1, t2);
+   ObjectSetDouble(0, box, OBJPROP_PRICE, 1, stValue - halfH);
+   ObjectSetInteger(0, box, OBJPROP_COLOR, bull ? InpBullColor : InpBearColor);
   }
 
 //+------------------------------------------------------------------+
@@ -533,6 +586,13 @@ void UpdateDashboardRow(const int idx, const ENUM_TIMEFRAMES tf, const int atrHa
      }
   }
 
+//--- v1.06: full consolidated panel, per direct request/reference image -
+//--- current-timeframe trend/duration/ST value/distance/ATR/spread, the
+//--- same 4-timeframe alignment rows as before, plus a score+caution
+//--- readout - replaces needing HTF_Bias_Panel.mq5 as a separate window
+//--- alongside this one for the same kind of context.
+bool g_dashCreated = false;
+
 void UpdateDashboard()
   {
    UpdateDashboardRow(0, InpTF1, g_rowAtrHandle[0]);
@@ -540,25 +600,90 @@ void UpdateDashboard()
    UpdateDashboardRow(2, InpTF3, g_rowAtrHandle[2]);
    UpdateDashboardRow(3, InpTF4, g_rowAtrHandle[3]);
 
+   int last = ArraySize(g_trendState) - 1;
+   if(last < 1) return;
+   bool bull = g_trendState[last] > 0.0;
+   double stVal = bull ? g_finalLower[last] : g_finalUpper[last];
+   double pt = SymbolInfoDouble(_Symbol, SYMBOL_POINT);   // never hardcode point size
+   //--- v1.06: ATR pips read from the live indicator handle (last closed bar),
+   //--- not a nonexistent g_lastAtr global - fixes a build error.
+   double atrNow[];
+   ArraySetAsSeries(atrNow, true);
+   double atrPips = 0.0;
+   if(CopyBuffer(g_atrHandle, 0, 0, 1, atrNow) > 0 && pt > 0.0) atrPips = atrNow[0] / pt;
+   int spreadPts = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   int duration = (int)g_trendDuration[last];
+
    int lineH = 18;
    int y = InpDashY;
-   DashLabel("title", InpDashX, y, "SuperTrend MTF", InpDashTextColor); y += lineH;
+   int x = InpDashX;
+   int totalLines = 15;
+
+   if(!g_dashCreated)
+     {
+      ObjectCreate(0, PFX + "dash_bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BACK, false);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BGCOLOR, InpDashBgColor);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_COLOR, clrGray);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_XDISTANCE, x - 8);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YDISTANCE, y - 6);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_XSIZE, InpDashWidth);
+      ObjectSetInteger(0, PFX + "dash_bg", OBJPROP_YSIZE, lineH * totalLines + 12);
+     }
+
+   DashLabel("title", x, y, "LT Super Trend", InpDashTextColor); y += lineH;
+   DashLabel("hdr1", x, y, "CURRENT TIMEFRAME", InpDashHeaderColor); y += lineH;
+   DashLabel("trend", x, y, "Trend:  " + (bull ? "BULLISH" : "BEARISH"),
+             bull ? InpDashBullColor : InpDashBearColor); y += lineH;
+   DashLabel("dur", x, y, "Duration:  " + IntegerToString(duration) + " bars", InpDashTextColor); y += lineH;
+   DashLabel("stval", x, y, "ST Value:  " + DoubleToString(stVal, _Digits), InpDashTextColor); y += lineH;
+   DashLabel("atr", x, y, "ATR:  " + DoubleToString(atrPips, 1) + " pips", InpDashTextColor); y += lineH;
+   DashLabel("spread", x, y, "Spread:  " + IntegerToString(spreadPts) + " pts", InpDashTextColor); y += lineH;
+
+   DashLabel("hdr2", x, y, "MULTI-TIMEFRAME", InpDashHeaderColor); y += lineH;
    string names[4] = {StringSubstr(EnumToString(InpTF1), 7), StringSubstr(EnumToString(InpTF2), 7),
                        StringSubstr(EnumToString(InpTF3), 7), StringSubstr(EnumToString(InpTF4), 7)};
+   int bullCount = 0, bearCount = 0;
    for(int idx = 0; idx < 4; idx++)
      {
       string txt = names[idx] + ":  " + (g_rowState[idx] > 0.0 ? "BULLISH" : (g_rowState[idx] < 0.0 ? "BEARISH" : "..."));
       color col = g_rowWarn[idx] ? InpDashWarnColor : (g_rowState[idx] > 0.0 ? InpDashBullColor :
                   (g_rowState[idx] < 0.0 ? InpDashBearColor : InpDashTextColor));
-      DashLabel("row" + IntegerToString(idx), InpDashX, y, txt, col);
+      DashLabel("row" + IntegerToString(idx), x, y, txt, col);
       y += lineH;
+      if(g_rowState[idx] > 0.0) bullCount++;
+      else if(g_rowState[idx] < 0.0) bearCount++;
      }
+
+   DashLabel("hdr3", x, y, "ALIGNMENT", InpDashHeaderColor); y += lineH;
+   int score = MathMax(bullCount, bearCount);
+   bool scoreBull = bullCount >= bearCount;
+   DashLabel("score", x, y, "Score:  " + IntegerToString(score) + "/4  " + (scoreBull ? "BULLISH" : "BEARISH"),
+             scoreBull ? InpDashBullColor : InpDashBearColor); y += lineH;
+   DashLabel("status", x, y, (score >= 4 ? "STRONG" : "CAUTION"),
+             score >= 4 ? (scoreBull ? InpDashBullColor : InpDashBearColor) : InpDashWarnColor);
+
+   g_dashCreated = true;
   }
 
 void DashLabel(const string suffix, const int x, const int y, const string text, const color col)
   {
+   static string lastName[32];
+   static string lastText[32];
+   static color  lastColor[32];
+   static int    used = 0;
+
    string nm = PFX + "dash_" + suffix;
-   if(ObjectFind(0, nm) < 0)
+   int slot = -1;
+   for(int i = 0; i < used; i++)
+      if(lastName[i] == nm) { slot = i; break; }
+   if(slot < 0 && used < 32) { slot = used; lastName[slot] = nm; lastText[slot] = ""; lastColor[slot] = clrNONE; used++; }
+
+   if(!g_dashCreated)
      {
       ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -566,9 +691,14 @@ void DashLabel(const string suffix, const int x, const int y, const string text,
       ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 10);
+      ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, y);
      }
-   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, y);
-   ObjectSetString(0, nm, OBJPROP_TEXT, text);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+
+   if(slot < 0 || lastText[slot] != text || lastColor[slot] != col)
+     {
+      ObjectSetString(0, nm, OBJPROP_TEXT, text);
+      ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+      if(slot >= 0) { lastText[slot] = text; lastColor[slot] = col; }
+     }
   }
