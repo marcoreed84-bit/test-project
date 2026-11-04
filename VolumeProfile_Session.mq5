@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.13"
+#property version   "1.14"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -135,6 +135,10 @@ input double InpVAPercent        = 70.0;    // standard volume-profile conventio
 
 #define VP_PFX "VPS_"
 
+datetime g_lastTodaySourceBar = 0;
+datetime g_lastPrevDayStart = 0;
+bool     g_firstCalc = true;
+
 //+------------------------------------------------------------------+
 //| claims enough right-margin ("shift") chart space for both profile  |
 //| columns to actually fit without MT5 clipping them behind the price  |
@@ -154,7 +158,12 @@ void EnsureRightMargin()
    //--- one) plus a rough per-gap-bar allowance for InpLeadingGapBars -
    //--- still just a generous estimate, same as the base values always
    //--- were, not an exact bar->percent conversion.
-   double want = (InpShowPrevDay ? 45.0 : 25.0) + InpLeadingGapBars * 0.5;
+   //--- v1.14 FIX (Opus audit): CHART_SHIFT_SIZE only accepts 10-50 - an
+   //--- uncapped `want` past 50 (e.g. a large InpLeadingGapBars) made
+   //--- ChartSetDouble fail silently and re-run every single call (this
+   //--- function used to be called every tick, not just here - see the
+   //--- OnCalculate bar-gating fix for the bigger half of this).
+   double want = MathMin(50.0, (InpShowPrevDay ? 45.0 : 25.0) + InpLeadingGapBars * 0.5);
    if(cur < want)
       ChartSetDouble(0, CHART_SHIFT_SIZE, want);
   }
@@ -165,16 +174,13 @@ void EnsureRightMargin()
 //| path when a window has no valid range/volume - so a stale profile    |
 //| never sits on screen with no indication it's out of date).            |
 //+------------------------------------------------------------------+
+//--- v1.14 FIX (Opus audit, real per-tick cost): used to make up to 203
+//--- individual ObjectFind calls (200 bucket slots + 3 fixed names), each
+//--- a synchronous chart round-trip. ObjectsDeleteAll with this prefix
+//--- does the same job in one call.
 void DeleteProfileObjects(const string prefix)
   {
-   for(int b = 0; b < 200; b++)
-     {
-      string nm = prefix + "bucket_" + IntegerToString(b);
-      if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
-     }
-   ObjectDelete(0, prefix + "pocline");
-   ObjectDelete(0, prefix + "vah");
-   ObjectDelete(0, prefix + "val");
+   ObjectsDeleteAll(0, prefix);
   }
 
 //+------------------------------------------------------------------+
@@ -196,11 +202,27 @@ void DeleteProfileObjects(const string prefix)
 //--- timeframe the chart itself is on - same POC/VAH/VAL regardless of
 //--- chart period, only the drawing position (anchorTime/perSec, still
 //--- tied to the chart's own bars) changes.
+//--- v1.14 FIX (Opus audit, real per-tick cost - the #1 suspect for a
+//--- live-confirmed freeze report): this function used to run on EVERY
+//--- tick (OnCalculate had no bar-gating at all), and checked
+//--- ObjectFind()<0 before every single object touch to decide
+//--- create-vs-update - on gold's tick rate (5-20/sec) that added up to
+//--- roughly 68 synchronous chart calls PER TICK across both columns,
+//--- i.e. hundreds to over a thousand chart round-trips per second from
+//--- this file alone, on a terminal where all indicators on one symbol
+//--- share one calculation thread. OnCalculate now only calls this
+//--- function when something has actually changed (a new InpSourceTF
+//--- bar for "today", or a new prevDayStart for "previous day" - see the
+//--- gating there), so it unconditionally clears and rebuilds from
+//--- scratch here instead of the old find-then-branch pattern - simpler
+//--- and removes every ObjectFind call from what is now a periodic, not
+//--- per-tick, path.
 void DrawProfile(const string prefix, const datetime startTime, const datetime endTime,
                   const datetime anchorTime, const datetime &chartTime[], const int chartEnd, const int perSec,
                   const color barColor, const color pocColor, const color pocLineColor, const color vaColor)
   {
-   if(endTime <= startTime) { DeleteProfileObjects(prefix); return; }
+   DeleteProfileObjects(prefix);
+   if(endTime <= startTime) return;
 
    //--- v1.12 FIX (Opus audit): separate CopyHigh/CopyLow/CopyTickVolume/
    //--- CopyRealVolume calls each independently request the same
@@ -212,7 +234,7 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
    //--- ternary below ever touching an unfilled array.
    MqlRates r[];
    int n = CopyRates(_Symbol, InpSourceTF, startTime, endTime, r);
-   if(n <= 0) { DeleteProfileObjects(prefix); return; }
+   if(n <= 0) return;
    int start = 0, end = n - 1;
 
    double lo = r[start].low, hi = r[start].high;
@@ -221,7 +243,7 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
       lo = MathMin(lo, r[i].low);
       hi = MathMax(hi, r[i].high);
      }
-   if(hi <= lo) { DeleteProfileObjects(prefix); return; }
+   if(hi <= lo) return;
 
    double bw = (hi - lo) / InpBuckets;
    double vol[];
@@ -247,16 +269,12 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
    double pocVol = vol[0];
    for(int b = 1; b < InpBuckets; b++)
       if(vol[b] > pocVol) { pocVol = vol[b]; pocBucket = b; }
-   if(pocVol <= 0.0) { DeleteProfileObjects(prefix); return; }
+   if(pocVol <= 0.0) return;
 
    for(int b = 0; b < InpBuckets; b++)
      {
+      if(vol[b] <= 0.0) continue;
       string nm = prefix + "bucket_" + IntegerToString(b);
-      if(vol[b] <= 0.0)
-        {
-         ObjectDelete(0, nm);
-         continue;
-        }
       double gap = bw * InpBucketGapFrac * 0.5;
       double bucketLo = lo + b * bw + gap;
       double bucketHi = bucketLo + bw - 2.0 * gap;
@@ -266,34 +284,17 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
       datetime t2 = anchorTime + (datetime)(widthBars * perSec);
 
       bool isPoc = (b == pocBucket);
-      if(ObjectFind(0, nm) < 0)
-        {
-         if(!ObjectCreate(0, nm, OBJ_RECTANGLE, 0, t1, bucketLo, t2, bucketHi)) continue;
-         ObjectSetInteger(0, nm, OBJPROP_FILL, true);
-         ObjectSetInteger(0, nm, OBJPROP_BACK, true);
-         ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-         ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-         ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
-         ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
-        }
-      else
-        {
-         ObjectSetInteger(0, nm, OBJPROP_TIME, 0, t1);
-         ObjectSetDouble (0, nm, OBJPROP_PRICE, 0, bucketLo);
-         ObjectSetInteger(0, nm, OBJPROP_TIME, 1, t2);
-         ObjectSetDouble (0, nm, OBJPROP_PRICE, 1, bucketHi);
-        }
+      if(!ObjectCreate(0, nm, OBJ_RECTANGLE, 0, t1, bucketLo, t2, bucketHi)) continue;
+      ObjectSetInteger(0, nm, OBJPROP_FILL, true);
+      ObjectSetInteger(0, nm, OBJPROP_BACK, true);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
       ObjectSetInteger(0, nm, OBJPROP_COLOR, isPoc ? pocColor : barColor);
       ObjectSetString(0, nm, OBJPROP_TOOLTIP,
                        (isPoc ? "POC " : "") + "vol=" + DoubleToString(vol[b], 0) +
                        "  [" + DoubleToString(bucketLo, _Digits) + " - " + DoubleToString(bucketHi, _Digits) + "]");
-     }
-   //--- clean up any leftover buckets from a previous call with more buckets than now
-   for(int b = InpBuckets; b < 200; b++)
-     {
-      string nm = prefix + "bucket_" + IntegerToString(b);
-      if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
-      else break;
      }
 
    if(InpShowPocLine)
@@ -302,28 +303,16 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
       double pocPrice = lo + (pocBucket + 0.5) * bw;
       datetime lineStart = InpPocLineRayLeft ? anchorTime : chartTime[(int)MathMax(0, chartEnd - InpPocLineBackBars)];
       datetime lineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
-      if(ObjectFind(0, pocNm) < 0)
-        {
-         ObjectCreate(0, pocNm, OBJ_TREND, 0, lineStart, pocPrice, lineEnd, pocPrice);
-         ObjectSetInteger(0, pocNm, OBJPROP_SELECTABLE, false);
-         ObjectSetInteger(0, pocNm, OBJPROP_HIDDEN, true);
-         ObjectSetInteger(0, pocNm, OBJPROP_STYLE, STYLE_DOT);
-         ObjectSetInteger(0, pocNm, OBJPROP_WIDTH, 1);
-         ObjectSetInteger(0, pocNm, OBJPROP_BACK, true);
-        }
-      else
-        {
-         ObjectSetInteger(0, pocNm, OBJPROP_TIME, 0, lineStart);
-         ObjectSetDouble (0, pocNm, OBJPROP_PRICE, 0, pocPrice);
-         ObjectSetInteger(0, pocNm, OBJPROP_TIME, 1, lineEnd);
-         ObjectSetDouble (0, pocNm, OBJPROP_PRICE, 1, pocPrice);
-        }
+      ObjectCreate(0, pocNm, OBJ_TREND, 0, lineStart, pocPrice, lineEnd, pocPrice);
+      ObjectSetInteger(0, pocNm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, pocNm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, pocNm, OBJPROP_STYLE, STYLE_DOT);
+      ObjectSetInteger(0, pocNm, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, pocNm, OBJPROP_BACK, true);
       ObjectSetInteger(0, pocNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
       ObjectSetInteger(0, pocNm, OBJPROP_RAY_RIGHT, false);
       ObjectSetInteger(0, pocNm, OBJPROP_COLOR, pocLineColor);
      }
-   else
-      ObjectDelete(0, prefix + "pocline");
 
    if(InpShowValueArea)
      {
@@ -345,52 +334,30 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
       datetime vaLineEnd   = anchorTime + (datetime)(InpMaxBarWidthBars * perSec);
 
       string vahNm = prefix + "vah";
-      if(ObjectFind(0, vahNm) < 0)
-        {
-         ObjectCreate(0, vahNm, OBJ_TREND, 0, vaLineStart, vahPrice, vaLineEnd, vahPrice);
-         ObjectSetInteger(0, vahNm, OBJPROP_SELECTABLE, false);
-         ObjectSetInteger(0, vahNm, OBJPROP_HIDDEN, true);
-         ObjectSetInteger(0, vahNm, OBJPROP_STYLE, STYLE_DASH);
-         ObjectSetInteger(0, vahNm, OBJPROP_WIDTH, 1);
-         ObjectSetInteger(0, vahNm, OBJPROP_BACK, true);
-        }
-      else
-        {
-         ObjectSetInteger(0, vahNm, OBJPROP_TIME, 0, vaLineStart);
-         ObjectSetDouble (0, vahNm, OBJPROP_PRICE, 0, vahPrice);
-         ObjectSetInteger(0, vahNm, OBJPROP_TIME, 1, vaLineEnd);
-         ObjectSetDouble (0, vahNm, OBJPROP_PRICE, 1, vahPrice);
-        }
+      ObjectCreate(0, vahNm, OBJ_TREND, 0, vaLineStart, vahPrice, vaLineEnd, vahPrice);
+      ObjectSetInteger(0, vahNm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, vahNm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, vahNm, OBJPROP_STYLE, STYLE_DASH);
+      ObjectSetInteger(0, vahNm, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, vahNm, OBJPROP_BACK, true);
       ObjectSetInteger(0, vahNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
       ObjectSetInteger(0, vahNm, OBJPROP_RAY_RIGHT, false);
       ObjectSetInteger(0, vahNm, OBJPROP_COLOR, vaColor);
 
       string valNm = prefix + "val";
-      if(ObjectFind(0, valNm) < 0)
-        {
-         ObjectCreate(0, valNm, OBJ_TREND, 0, vaLineStart, valPrice, vaLineEnd, valPrice);
-         ObjectSetInteger(0, valNm, OBJPROP_SELECTABLE, false);
-         ObjectSetInteger(0, valNm, OBJPROP_HIDDEN, true);
-         ObjectSetInteger(0, valNm, OBJPROP_STYLE, STYLE_DASH);
-         ObjectSetInteger(0, valNm, OBJPROP_WIDTH, 1);
-         ObjectSetInteger(0, valNm, OBJPROP_BACK, true);
-        }
-      else
-        {
-         ObjectSetInteger(0, valNm, OBJPROP_TIME, 0, vaLineStart);
-         ObjectSetDouble (0, valNm, OBJPROP_PRICE, 0, valPrice);
-         ObjectSetInteger(0, valNm, OBJPROP_TIME, 1, vaLineEnd);
-         ObjectSetDouble (0, valNm, OBJPROP_PRICE, 1, valPrice);
-        }
+      ObjectCreate(0, valNm, OBJ_TREND, 0, vaLineStart, valPrice, vaLineEnd, valPrice);
+      ObjectSetInteger(0, valNm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, valNm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, valNm, OBJPROP_STYLE, STYLE_DASH);
+      ObjectSetInteger(0, valNm, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, valNm, OBJPROP_BACK, true);
       ObjectSetInteger(0, valNm, OBJPROP_RAY_LEFT, InpPocLineRayLeft);
       ObjectSetInteger(0, valNm, OBJPROP_RAY_RIGHT, false);
       ObjectSetInteger(0, valNm, OBJPROP_COLOR, vaColor);
      }
-   else
-     {
-      ObjectDelete(0, prefix + "vah");
-      ObjectDelete(0, prefix + "val");
-     }
+   //--- no else needed: DeleteProfileObjects() at the top of this function
+   //--- already cleared every object for this prefix, so an unchecked
+   //--- toggle simply isn't recreated.
   }
 
 //+------------------------------------------------------------------+
@@ -417,9 +384,11 @@ int OnInit()
       Print("VolumeProfile_Session: InpPocLineBackBars must be >= 0.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.13 (today" +
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.14 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
-   EnsureRightMargin();
+   g_firstCalc = true;
+   g_lastTodaySourceBar = 0;
+   g_lastPrevDayStart = 0;
    //--- v1.13 FIX (real bug found live in SuperTrend_MTF.mq5, same risky
    //--- pattern copied here in v1.12): the timer-based ChartSetSymbolPeriod
    //--- "force a recalc" trick is REMOVED. MT5's own docs explicitly warn
@@ -442,19 +411,28 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
-//| Full recompute every call - cheap (at most InpDaysToShow+1 days of |
-//| bars for "today" plus one more day for "previous day"). Draws TWO  |
-//| independent profile columns side by side in the chart's own blank/  |
-//| empty space to the right of the last candle - never over any         |
-//| candle, per direct request.                                           |
+//| v1.14 FIX (Opus audit, real per-tick cost - the #1 suspect for the  |
+//| live-confirmed freeze report): this used to call DrawProfile() TWICE |
+//| and ChartRedraw() once on EVERY SINGLE TICK, with no bar-gating at    |
+//| all. DrawProfile's own CopyRates (up to ~1440 M1 bars) plus its        |
+//| ObjectFind-per-object pattern meant roughly 68 synchronous chart        |
+//| round-trips per call - at gold's 5-20 ticks/sec, that's hundreds to      |
+//| over a thousand synchronous chart calls PER SECOND from this file         |
+//| alone, on a terminal where every indicator on one symbol shares ONE         |
+//| calculation thread. Now bar-gated: "today" only rebuilds when InpSourceTF  |
+//| prints a new bar (price moving within the current source bar doesn't        |
+//| change which bucket is busiest enough to matter, and DrawProfile's own       |
+//| CopyRates call only returns CLOSED-bar data via its time-range semantics      |
+//| anyway - today's rebuild was never actually seeing intra-bar ticks). "prev"    |
+//| only rebuilds when prevDayStart itself changes (once a day). EnsureRightMargin |
+//| moved inside the same gate - it doesn't need checking every tick either.        |
+//| ChartRedraw() only fires when something was actually redrawn this call.          |
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[],
                  const double &open[], const double &high[], const double &low[], const double &close[],
                  const long &tick_volume[], const long &volume[], const int &spread[])
   {
    if(rates_total < 2) return(0);
-   EnsureRightMargin();   // cheap (SetIfDiff-style guard inside) - re-asserted here in case another
-                          // EA/indicator on the same chart changed CHART_SHIFT_SIZE back since OnInit
    int perSec = PeriodSeconds(PERIOD_CURRENT);
    if(perSec <= 0) return(rates_total);
 
@@ -473,28 +451,46 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    datetime prevDayStart = iTime(_Symbol, PERIOD_D1, 1);
    if(todayStart <= 0) return(rates_total);   // D1 history not ready yet - retry next tick
 
-   datetime todayCutoff = todayStart - (datetime)((long)(InpDaysToShow - 1) * 86400);
-   int endToday = rates_total - 1;
+   bool redrew = false;
+   datetime todaySourceBar = iTime(_Symbol, InpSourceTF, 0);
 
-   datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
-   DrawProfile(VP_PFX + "today_", todayCutoff, TimeCurrent(), todayAnchor,
-               time, endToday, perSec,
-               InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
+   if(g_firstCalc || todaySourceBar != g_lastTodaySourceBar)
+     {
+      EnsureRightMargin();   // only needs (re)checking when something is about to redraw anyway
+
+      datetime todayCutoff = todayStart - (datetime)((long)(InpDaysToShow - 1) * 86400);
+      int endToday = rates_total - 1;
+      datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
+      DrawProfile(VP_PFX + "today_", todayCutoff, TimeCurrent(), todayAnchor,
+                  time, endToday, perSec,
+                  InpBarColor, InpPocColor, InpPocLineColor, InpVahValColor);
+      g_lastTodaySourceBar = todaySourceBar;
+      redrew = true;
+     }
 
    //--- PREVIOUS DAY column: exactly D1 bar 1's own session - the last
    //--- fully completed one, whatever calendar day that actually was.
    //--- Frozen, independent of InpDaysToShow, independent of how far
-   //--- today has progressed.
-   if(InpShowPrevDay && prevDayStart > 0)
+   //--- today has progressed - so it only ever needs rebuilding once,
+   //--- when prevDayStart itself changes (once a day).
+   if(g_firstCalc || prevDayStart != g_lastPrevDayStart)
      {
-      datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
-      DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
-                  time, endToday, perSec,
-                  InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
+      if(InpShowPrevDay && prevDayStart > 0)
+        {
+         int endToday = rates_total - 1;
+         datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
+         datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
+         DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
+                     time, endToday, perSec,
+                     InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
+        }
+      else
+         DeleteProfileObjects(VP_PFX + "prev_");
+      g_lastPrevDayStart = prevDayStart;
+      redrew = true;
      }
-   else
-      DeleteProfileObjects(VP_PFX + "prev_");
 
-   ChartRedraw(0);
+   g_firstCalc = false;
+   if(redrew) ChartRedraw(0);
    return(rates_total);
   }

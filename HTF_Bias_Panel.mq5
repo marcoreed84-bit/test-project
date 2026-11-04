@@ -28,7 +28,7 @@
 //|  not a running history of every past break.                                   |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -174,11 +174,36 @@ color  BiasColor(const int bias) { return(bias > 0 ? InpBullColor : (bias < 0 ? 
 //--- right-corner panel in this project (Aurelius_EA, Fulcrum_EA,
 //--- AuRebound_EA) pairs a right corner with ANCHOR_RIGHT_* for exactly
 //--- this reason.
-void DrawLabel(const string name, const int x, const int y, const string text, const color col)
+//--- v1.03 FIX (Opus audit, real per-tick cost): RedrawPanel() used to run
+//--- on EVERY tick with no gating at all, and this function called
+//--- ObjectFind() before every single label touch to decide create-vs-
+//--- update - about 14 synchronous chart calls per tick just for that,
+//--- plus an unconditional ChartRedraw() every tick regardless of whether
+//--- anything actually changed. All of this panel's object names are
+//--- FIXED (never deleted except in OnDeinit), so ObjectFind is always
+//--- redundant after the very first call - replaced with a single shared
+//--- "already created" flag. Also now caches each label's last-drawn text
+//--- and colour and skips the ObjectSet calls entirely when nothing
+//--- changed, reporting back via the `changed` out-parameter so the
+//--- caller can skip ChartRedraw() too when nothing on the whole panel
+//--- moved this tick.
+bool g_panelObjectsCreated = false;
+
+void DrawLabel(const string name, const int x, const int y, const string text, const color col, bool &changed)
   {
-   bool rightCorner = (InpCorner == CORNER_RIGHT_UPPER || InpCorner == CORNER_RIGHT_LOWER);
-   if(ObjectFind(0, name) < 0)
+   static string lastText[64];
+   static color  lastColor[64];
+   static string lastName[64];
+   static int    used = 0;
+
+   int slot = -1;
+   for(int i = 0; i < used; i++)
+      if(lastName[i] == name) { slot = i; break; }
+   if(slot < 0 && used < 64) { slot = used; lastName[slot] = name; lastText[slot] = ""; lastColor[slot] = clrNONE; used++; }
+
+   if(!g_panelObjectsCreated)
      {
+      bool rightCorner = (InpCorner == CORNER_RIGHT_UPPER || InpCorner == CORNER_RIGHT_LOWER);
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
       ObjectSetInteger(0, name, OBJPROP_ANCHOR, rightCorner ? ANCHOR_RIGHT_UPPER : ANCHOR_LEFT_UPPER);
@@ -186,11 +211,17 @@ void DrawLabel(const string name, const int x, const int y, const string text, c
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
       ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
       ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
      }
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
-   ObjectSetString(0, name, OBJPROP_TEXT, text);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+
+   if(slot < 0 || lastText[slot] != text || lastColor[slot] != col)
+     {
+      ObjectSetString(0, name, OBJPROP_TEXT, text);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+      if(slot >= 0) { lastText[slot] = text; lastColor[slot] = col; }
+      changed = true;
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -207,7 +238,9 @@ void RedrawPanel()
    //--- corner, XDISTANCE must be measured from the box's own left edge,
    //--- i.e. pushed out by the box's own width.
    bool rightCorner = (InpCorner == CORNER_RIGHT_UPPER || InpCorner == CORNER_RIGHT_LOWER);
-   if(ObjectFind(0, PFX + "bg") < 0)
+   bool changed = false;
+   int totalLines = InpShowM5M15Trend ? 13 : 11;
+   if(!g_panelObjectsCreated)
      {
       ObjectCreate(0, PFX + "bg", OBJ_RECTANGLE_LABEL, 0, 0, 0);
       ObjectSetInteger(0, PFX + "bg", OBJPROP_CORNER, InpCorner);
@@ -217,35 +250,35 @@ void RedrawPanel()
       ObjectSetInteger(0, PFX + "bg", OBJPROP_BGCOLOR, InpPanelBgColor);
       ObjectSetInteger(0, PFX + "bg", OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, PFX + "bg", OBJPROP_COLOR, clrGray);
+      ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, rightCorner ? (x - 10 + InpPanelWidth) : (x - 10));
+      ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, y - 8);
+      ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, InpPanelWidth);
+      ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * totalLines + 16);
+      changed = true;
      }
-   int totalLines = InpShowM5M15Trend ? 13 : 11;
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_XDISTANCE, rightCorner ? (x - 10 + InpPanelWidth) : (x - 10));
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YDISTANCE, y - 8);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_XSIZE, InpPanelWidth);
-   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * totalLines + 16);
 
-   DrawLabel(PFX + "title", x, y, "HTF BIAS (not a signal)", InpTextColor); y += lineH;
+   DrawLabel(PFX + "title", x, y, "HTF BIAS (not a signal)", InpTextColor, changed); y += lineH;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   DrawLabel(PFX + "h1", x, y, "H1 structure:  " + BiasText(g_h1Bias), BiasColor(g_h1Bias)); y += lineH;
+   DrawLabel(PFX + "h1", x, y, "H1 structure:  " + BiasText(g_h1Bias), BiasColor(g_h1Bias), changed); y += lineH;
 
    string momTxt = (g_h1Momentum > 0 ? "RISING" : (g_h1Momentum < 0 ? "FALLING" : "n/a"));
    DrawLabel(PFX + "h1mom", x, y, "H1 momentum (" + IntegerToString(InpMomentumBars) + "b):  " + momTxt,
-             BiasColor(g_h1Momentum)); y += lineH;
+             BiasColor(g_h1Momentum), changed); y += lineH;
 
    string stochTxt = DoubleToString(g_h1StochK, 1) + " " +
                       (g_h1StochDir > 0 ? "RISING" : (g_h1StochDir < 0 ? "FALLING" : "n/a")) +
                       (g_h1StochOB ? " (OB)" : (g_h1StochOS ? " (OS)" : ""));
-   DrawLabel(PFX + "h1stoch", x, y, "H1 Stoch %K:  " + stochTxt, BiasColor(g_h1StochDir)); y += lineH;
+   DrawLabel(PFX + "h1stoch", x, y, "H1 Stoch %K:  " + stochTxt, BiasColor(g_h1StochDir), changed); y += lineH;
 
-   DrawLabel(PFX + "d1", x, y, "Daily structure:  " + BiasText(g_d1Bias), BiasColor(g_d1Bias)); y += lineH;
+   DrawLabel(PFX + "d1", x, y, "Daily structure:  " + BiasText(g_d1Bias), BiasColor(g_d1Bias), changed); y += lineH;
 
    int maH1Side = (g_h1Ma > 0) ? (bid > g_h1Ma ? 1 : -1) : 0;
    int maD1Side = (g_d1Ma > 0) ? (bid > g_d1Ma ? 1 : -1) : 0;
    DrawLabel(PFX + "mah1", x, y, "Price vs H1 MA" + IntegerToString(InpMaPeriod) + ":  " +
-             (maH1Side == 0 ? "n/a" : (maH1Side > 0 ? "ABOVE" : "BELOW")), BiasColor(maH1Side)); y += lineH;
+             (maH1Side == 0 ? "n/a" : (maH1Side > 0 ? "ABOVE" : "BELOW")), BiasColor(maH1Side), changed); y += lineH;
    DrawLabel(PFX + "mad1", x, y, "Price vs D1 MA" + IntegerToString(InpMaPeriod) + ":  " +
-             (maD1Side == 0 ? "n/a" : (maD1Side > 0 ? "ABOVE" : "BELOW")), BiasColor(maD1Side)); y += lineH;
+             (maD1Side == 0 ? "n/a" : (maD1Side > 0 ? "ABOVE" : "BELOW")), BiasColor(maD1Side), changed); y += lineH;
 
    int pdSide = 0;
    string pdText = "n/a";
@@ -255,19 +288,19 @@ void RedrawPanel()
       else if(bid < g_prevDayLow)  { pdSide = -1; pdText = "BELOW prior-day low"; }
       else                          { pdSide = 0;  pdText = "INSIDE prior-day range"; }
      }
-   DrawLabel(PFX + "pd", x, y, "Prior-day range:  " + pdText, pdSide == 0 ? InpMixedColor : BiasColor(pdSide));
+   DrawLabel(PFX + "pd", x, y, "Prior-day range:  " + pdText, pdSide == 0 ? InpMixedColor : BiasColor(pdSide), changed);
    y += lineH;
 
    string volTxt = (g_volSide > 0 ? "ABOVE AVG" : (g_volSide < 0 ? "below avg" : "n/a"));
    DrawLabel(PFX + "vol", x, y, "Volume vs avg:  " + volTxt,
-             g_volSide > 0 ? InpBullColor : InpMixedColor); y += lineH;
+             g_volSide > 0 ? InpBullColor : InpMixedColor, changed); y += lineH;
 
    if(InpShowM5M15Trend)
      {
-      DrawLabel(PFX + "m15", x, y, "M15 trend:  " + BiasText(g_m15Bias), BiasColor(g_m15Bias)); y += lineH;
-      DrawLabel(PFX + "m5", x, y, "M5 trend:  " + BiasText(g_m5Bias), BiasColor(g_m5Bias)); y += lineH;
+      DrawLabel(PFX + "m15", x, y, "M15 trend:  " + BiasText(g_m15Bias), BiasColor(g_m15Bias), changed); y += lineH;
+      DrawLabel(PFX + "m5", x, y, "M5 trend:  " + BiasText(g_m5Bias), BiasColor(g_m5Bias), changed); y += lineH;
      }
-   else
+   else if(!g_panelObjectsCreated)
      {
       ObjectDelete(0, PFX + "m15");
       ObjectDelete(0, PFX + "m5");
@@ -289,9 +322,13 @@ void RedrawPanel()
    if(!anyZero && allBull)      { overall = "ONLY BUY";  overallCol = InpBullColor; }
    else if(!anyZero && allBear) { overall = "ONLY SELL"; overallCol = InpBearSignalColor; }
    else                          { overall = "MIXED - STAND ASIDE"; overallCol = InpMixedColor; }
-   DrawLabel(PFX + "overall", x, y, "OVERALL:  " + overall, overallCol);
+   DrawLabel(PFX + "overall", x, y, "OVERALL:  " + overall, overallCol, changed);
 
-   ChartRedraw(0);
+   g_panelObjectsCreated = true;
+   //--- v1.03 FIX (Opus audit, real per-tick cost): used to call
+   //--- ChartRedraw() unconditionally on every tick. Only redraw when
+   //--- something on the panel actually changed this call.
+   if(changed) ChartRedraw(0);
   }
 
 //+------------------------------------------------------------------+
@@ -319,7 +356,8 @@ int OnInit()
       return(INIT_FAILED);
      }
    g_lastH1Bar = 0; g_lastD1Bar = 0; g_lastM5Bar = 0; g_lastM15Bar = 0;
-   PrintFormat("HTF_Bias_Panel v1.02 OnInit: %s  pivotWindow=%d  minMoveATR=%.2f  maPeriod=%d",
+   g_panelObjectsCreated = false;
+   PrintFormat("HTF_Bias_Panel v1.03 OnInit: %s  pivotWindow=%d  minMoveATR=%.2f  maPeriod=%d",
                _Symbol, InpPivotWindow, InpMinMoveATR, InpMaPeriod);
    return(INIT_SUCCEEDED);
   }
