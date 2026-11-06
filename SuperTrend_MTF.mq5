@@ -37,7 +37,7 @@
 //|  per-tick cost either.                                                            |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.15"
+#property version   "1.16"
 #property indicator_chart_window
 #property indicator_buffers 10
 #property indicator_plots   5
@@ -155,6 +155,16 @@ int g_rowAtrHandle[4] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE, INVALID
 
 #define PFX "STM_"
 
+//--- v1.16 (freeze re-audit) - see OnCalculate / DrawPriceLabel / UpdateHtfLine
+bool     g_offCleanupDone = false;
+datetime g_htfDrawnBar    = 0;      // HTF bar whose segments are currently drawn
+datetime g_htfSeg0BarTime = 0;      // chart bar at which the open-ended segment 0 was last extended
+datetime g_plTime  = 0;
+double   g_plPrice = 0.0;
+double   g_plHalfH = 0.0;
+int      g_plBull  = -1;
+bool     g_dashCreated = false;   // (declaration moved up so OnInit can reset it)
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
@@ -239,6 +249,13 @@ int OnInit()
    //--- was meant to fix is a minor cosmetic issue; this was a severe,
    //--- unverified risk traded for it.
    IndicatorSetString(INDICATOR_SHORTNAME, "SuperTrend MTF");
+   //--- v1.16: reset the per-tick-cleanup latches and HTF/price-label
+   //--- caches - globals survive an OnDeinit/OnInit cycle, but OnDeinit
+   //--- has just deleted every PFX object, so nothing cached is valid.
+   g_offCleanupDone = false;
+   g_htfDrawnBar = 0; g_htfSeg0BarTime = 0;
+   g_plTime = 0; g_plPrice = 0.0; g_plHalfH = 0.0; g_plBull = -1;
+   g_dashCreated = false;
    return(INIT_SUCCEEDED);
   }
 
@@ -355,6 +372,25 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       else                 { g_cloudUp[i] = EMPTY_VALUE; g_cloudDn[i] = EMPTY_VALUE; }
      }
 
+   //--- v1.16 FIX (freeze re-audit, real per-tick cost present since
+   //--- v1.00/v1.03 and made default-on by v1.11): the "feature is OFF"
+   //--- branches below used to run on EVERY TICK - with the defaults
+   //--- (InpShowHtfLine=false, InpShowPriceLabel=false since v1.11) that
+   //--- was an ObjectsDeleteAll(0, PFX+"htfseg_") per tick - a call that
+   //--- returns a deleted-object COUNT, so it is a synchronous round-trip
+   //--- to the chart thread that walks EVERY object on the chart (all 5
+   //--- indicators' objects) to prefix-match - plus 2 ObjectDelete
+   //--- commands per tick for objects that don't exist. Inputs can't
+   //--- change without a reinit, and OnDeinit already deletes everything
+   //--- with PFX, so the "off" cleanup only ever needs to run ONCE.
+   if(!g_offCleanupDone)
+     {
+      if(!InpShowPriceLabel) { ObjectDelete(0, PFX + "pricelbl"); ObjectDelete(0, PFX + "pricebox"); }
+      if(!InpShowHtfLine)    ObjectsDeleteAll(0, PFX + "htfseg_");
+      if(!InpShowDashboard)  ObjectsDeleteAll(0, PFX + "dash_");
+      g_offCleanupDone = true;
+     }
+
    if(InpShowPriceLabel)
      {
       int last = rates_total - 1;
@@ -363,13 +399,10 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       datetime lblTime = time[last] + (datetime)(InpPriceLabelOffsetBars * PeriodSeconds(PERIOD_CURRENT));
       DrawPriceLabel(lblTime, lastBull, stVal, atrBuf[0]);
      }
-   else { ObjectDelete(0, PFX + "pricelbl"); ObjectDelete(0, PFX + "pricebox"); }
 
    if(InpShowHtfLine) UpdateHtfLine(time, rates_total);
-   else ObjectsDeleteAll(0, PFX + "htfseg_");
 
    if(InpShowDashboard) UpdateDashboard(tick_volume, rates_total);
-   else ObjectsDeleteAll(0, PFX + "dash_");
 
    g_lastBarTime = time[rates_total - 1];
    return(rates_total);
@@ -399,6 +432,19 @@ void DrawPriceLabel(const datetime lblTime, const bool bull, const double stValu
    datetime t1 = lblTime - (datetime)(1 * PeriodSeconds(PERIOD_CURRENT));
    datetime t2 = lblTime + (datetime)(InpPriceLabelBoxBars * PeriodSeconds(PERIOD_CURRENT));
    datetime tMid = t1 + (datetime)(((long)t2 - (long)t1) / 2);
+
+   //--- v1.16 FIX (freeze re-audit): this ran 2 synchronous ObjectFind
+   //--- calls + 9 setters on EVERY tick when enabled. Now skipped
+   //--- entirely unless something actually drawn has changed (same
+   //--- "only touch ObjectSet when the cached value changed" idiom as
+   //--- DashLabel/HTF_Bias_Panel). ATR (halfH) is the forming bar's and
+   //--- moves tick to tick, so it's compared with a small tolerance.
+   int bullI = bull ? 1 : 0;
+   double halfTol = halfH * 0.05;
+   if(g_plBull == bullI && g_plTime == lblTime && g_plPrice == stValue &&
+      MathAbs(g_plHalfH - halfH) <= halfTol)
+      return;
+   g_plBull = bullI; g_plTime = lblTime; g_plPrice = stValue; g_plHalfH = halfH;
 
    if(ObjectFind(0, nm) < 0)
      {
@@ -524,6 +570,27 @@ void UpdateHtfLine(const datetime &chartTime[], const int rates_total)
      }
    if(g_htfCount == 0) return;
 
+   //--- v1.16 FIX (freeze re-audit, real per-tick cost when this line is
+   //--- enabled): every tick used to redo all 12 segments - 12 iBarShift
+   //--- + 12 iClose + 12 SYNCHRONOUS ObjectFind + ~84 setters per tick -
+   //--- even though the segments only change when a new InpHtfTimeframe
+   //--- bar is recomputed above. Now the full segment pass only runs when
+   //--- the drawn HTF bar actually changed; between those, the only thing
+   //--- that moves is the open-ended newest segment's right edge
+   //--- (TimeCurrent()+1 HTF period), extended once per CHART bar (one
+   //--- setter), not once per tick.
+   datetime chartBar = chartTime[rates_total - 1];
+   if(g_htfDrawnBar == g_lastHtfBar && g_htfDrawnBar != 0)
+     {
+      if(chartBar != g_htfSeg0BarTime)
+        {
+         ObjectSetInteger(0, PFX + "htfseg_" + IntegerToString((long)g_htfTime[0]), OBJPROP_TIME, 1,
+                          TimeCurrent() + (datetime)PeriodSeconds(InpHtfTimeframe));
+         g_htfSeg0BarTime = chartBar;
+        }
+      return;
+     }
+
    //--- OBJ_TREND only supports 2 points - for a genuine multi-segment
    //--- step line, draw a short OBJ_TREND per segment instead, named by
    //--- segment start time so segments update in place rather than
@@ -566,6 +633,8 @@ void UpdateHtfLine(const datetime &chartTime[], const int rates_total)
    //--- prune older segments beyond what's still shown
    for(int k = segsToShow; k < pts; k++)
       ObjectDelete(0, PFX + "htfseg_" + IntegerToString((long)g_htfTime[k]));
+   g_htfDrawnBar = g_lastHtfBar;
+   g_htfSeg0BarTime = chartBar;
   }
 
 //+------------------------------------------------------------------+
@@ -608,8 +677,6 @@ void UpdateDashboardRow(const int idx, const ENUM_TIMEFRAMES tf, const int atrHa
 //--- same 4-timeframe alignment rows as before, plus a score+caution
 //--- readout - replaces needing HTF_Bias_Panel.mq5 as a separate window
 //--- alongside this one for the same kind of context.
-bool g_dashCreated = false;
-
 void UpdateDashboard(const long &tick_volume[], const int rates_total)
   {
    UpdateDashboardRow(0, InpTF1, g_rowAtrHandle[0]);
@@ -758,7 +825,9 @@ void DashLabel(const string suffix, const int x, const int y, const string text,
       ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, y);
      }
 
-   if(slot < 0 || lastText[slot] != text || lastColor[slot] != col)
+   //--- v1.16: !g_dashCreated also forces the write - the static caches
+   //--- above survive a reinit while OnDeinit has deleted the labels.
+   if(!g_dashCreated || slot < 0 || lastText[slot] != text || lastColor[slot] != col)
      {
       ObjectSetString(0, nm, OBJPROP_TEXT, text);
       ObjectSetInteger(0, nm, OBJPROP_COLOR, col);

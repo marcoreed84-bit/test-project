@@ -26,7 +26,7 @@
 //|     are listed in a stacked top-right corner panel instead.       |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -88,11 +88,23 @@ int  g_newsMarkersPrev = 0;   // v1.04: marker count from the last refresh, to p
 bool   g_panelCreated[SN_PANEL_MAX];   // v1.04: corner-panel row cache (DashLabel idiom)
 string g_panelText[SN_PANEL_MAX];
 color  g_panelColor[SN_PANEL_MAX];
+//--- v1.05 (freeze re-audit): per-slot cache of what each session block
+//--- was last written with, so a new bar only touches blocks that changed.
+//--- Slot = (dayOffset + InpDaysBack) * 4 + kind (0 asia, 1 ldn, 2 ny, 3 overlap).
+bool     g_blkExists[];
+datetime g_blkT1[];
+datetime g_blkT2[];
+double   g_blkTop[];
+double   g_blkBot[];
+color    g_blkCol[];
+double   g_covTop = 0.0, g_covBot = 0.0;   // price span the blocks currently cover
+datetime g_blkVerifiedDay = 0;            // UTC day the caches were last checked against the chart
+bool     g_sessChanged = false;           // set when any block was actually (re)written this rebuild
 
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.04");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.05");
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
@@ -101,6 +113,11 @@ int OnInit()
    //--- while OnDeinit has deleted the objects - reset the panel cache so
    //--- every row is re-created, not skipped as "unchanged".
    for(int i = 0; i < SN_PANEL_MAX; i++) { g_panelCreated[i] = false; g_panelText[i] = ""; g_panelColor[i] = clrNONE; }
+   int slots = (MathMax(0, InpDaysBack) + MathMax(0, InpDaysForward) + 1) * 4;
+   ArrayResize(g_blkExists, slots); ArrayResize(g_blkT1, slots); ArrayResize(g_blkT2, slots);
+   ArrayResize(g_blkTop, slots);    ArrayResize(g_blkBot, slots); ArrayResize(g_blkCol, slots);
+   for(int i = 0; i < slots; i++) { g_blkExists[i] = false; g_blkT1[i] = 0; g_blkT2[i] = 0; g_blkTop[i] = 0.0; g_blkBot[i] = 0.0; g_blkCol[i] = clrNONE; }
+   g_covTop = 0.0; g_covBot = 0.0; g_blkVerifiedDay = 0;
    if(InpShowNews)
      {
       EventSetTimer(MathMax(60, InpNewsRefreshMinutes * 60));
@@ -196,17 +213,34 @@ datetime LocalHourToUtc(const datetime dayStartUtc, const int localHour, const s
 //--- indicator, or attaching this overlay first, fixes it immediately.
 //--- Non-BACK objects (S/R HLINEs/text, dashboard labels) are always
 //--- painted above every BACK object regardless of order.
-void DrawSessionBlock(const string name, const datetime t1, const datetime t2, const color col)
+//--- v1.05 FIX (freeze re-audit, real per-bar burst): v1.04 called
+//--- ChartGetDouble(CHART_PRICE_MAX) + ChartGetDouble(CHART_PRICE_MIN) -
+//--- both SYNCHRONOUS chart round-trips - plus a synchronous ObjectFind
+//--- and 5 setters INSIDE this function, i.e. for every one of the
+//--- (InpDaysBack+InpDaysForward+1)*4 = 32 blocks, on every new chart bar:
+//--- ~96 blocking calls + ~160 setters per bar (every minute on M1).
+//--- Now: the chart's price range is read ONCE per rebuild by the caller
+//--- and passed in as top/bot; each slot caches what it was last written
+//--- with and skips ObjectFind + every setter when nothing changed (same
+//--- "only touch ObjectSet when the cached value actually changed" idiom
+//--- as NewsPanelRow/DashLabel). Blocks are still created once and moved
+//--- in place - the v1.04 z-order fix is untouched.
+void DrawSessionBlock(const int slot, const string name, const datetime t1, const datetime t2,
+                      const double top, const double bot, const color col)
   {
-   if(t2 <= t1) { if(ObjectFind(0, name) >= 0) ObjectDelete(0, name); return; }
-   double priceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
-   double priceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
-   if(priceMax <= priceMin) return;
-   double pad = (priceMax - priceMin) * 2.0;   // generous pad so zoom/scroll never exposes a gap
-
-   if(ObjectFind(0, name) < 0)
+   if(slot < 0 || slot >= ArraySize(g_blkExists)) return;
+   if(t2 <= t1)
      {
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, priceMax + pad, t2, priceMin - pad);
+      if(g_blkExists[slot]) { ObjectDelete(0, name); g_blkExists[slot] = false; g_sessChanged = true; }
+      return;
+     }
+   if(g_blkExists[slot] && g_blkT1[slot] == t1 && g_blkT2[slot] == t2 &&
+      g_blkTop[slot] == top && g_blkBot[slot] == bot && g_blkCol[slot] == col)
+      return;   // unchanged - the common case on every bar except a day rollover / big rescale
+
+   if(!g_blkExists[slot] && ObjectFind(0, name) < 0)
+     {
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bot);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, name, OBJPROP_FILL, true);
@@ -214,10 +248,13 @@ void DrawSessionBlock(const string name, const datetime t1, const datetime t2, c
       ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
      }
    ObjectSetInteger(0, name, OBJPROP_TIME, 0, t1);
-   ObjectSetDouble(0, name, OBJPROP_PRICE, 0, priceMax + pad);
+   ObjectSetDouble(0, name, OBJPROP_PRICE, 0, top);
    ObjectSetInteger(0, name, OBJPROP_TIME, 1, t2);
-   ObjectSetDouble(0, name, OBJPROP_PRICE, 1, priceMin - pad);
+   ObjectSetDouble(0, name, OBJPROP_PRICE, 1, bot);
    ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+   g_sessChanged = true;
+   g_blkExists[slot] = true;
+   g_blkT1[slot] = t1; g_blkT2[slot] = t2; g_blkTop[slot] = top; g_blkBot[slot] = bot; g_blkCol[slot] = col;
   }
 
 void RebuildSessions()
@@ -230,6 +267,28 @@ void RebuildSessions()
    if(!InpShowSessions) return;
 
    datetime todayUtc = (datetime)((TimeGMT() / 86400) * 86400);
+
+   //--- v1.05: chart price range read ONCE per rebuild (was 2x per block).
+   //--- The blocks' vertical span is only re-set when the visible range is
+   //--- no longer inside what they already cover - the same "generous pad
+   //--- so zoom/scroll never exposes a gap" as v1.04, without rewriting
+   //--- all 32 blocks' prices every bar.
+   double priceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+   double priceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+   if(priceMax <= priceMin) return;
+   if(g_covTop <= g_covBot || priceMax > g_covTop || priceMin < g_covBot)
+     {
+      double pad = (priceMax - priceMin) * 2.0;
+      g_covTop = priceMax + pad;
+      g_covBot = priceMin - pad;
+     }
+   //--- once per UTC day, re-verify the "exists" caches against the chart
+   //--- (one ObjectFind per block per DAY) in case something removed them
+   if(todayUtc != g_blkVerifiedDay)
+     {
+      for(int i = 0; i < ArraySize(g_blkExists); i++) g_blkExists[i] = false;
+      g_blkVerifiedDay = todayUtc;
+     }
 
    for(int dOff = -InpDaysBack; dOff <= InpDaysForward; dOff++)
      {
@@ -248,23 +307,24 @@ void RebuildSessions()
       bool brokerDst = InpServerFollowsDST && IsUsDst(dayStartUtc);
       int brokerOffsetSec = (InpServerUtcOffsetHours + (brokerDst ? 1 : 0)) * 3600;
 
+      int slot0 = (dOff + InpDaysBack) * 4;
       if(InpShowAsian)
-         DrawSessionBlock(SN_PFX + "sess_asia_" + tag, asianStart + brokerOffsetSec,
-                           asianEnd + brokerOffsetSec, InpAsianColor);
+         DrawSessionBlock(slot0 + 0, SN_PFX + "sess_asia_" + tag, asianStart + brokerOffsetSec,
+                           asianEnd + brokerOffsetSec, g_covTop, g_covBot, InpAsianColor);
       if(InpShowLondon)
-         DrawSessionBlock(SN_PFX + "sess_ldn_" + tag, londonStart + brokerOffsetSec,
-                           londonEnd + brokerOffsetSec, InpLondonColor);
+         DrawSessionBlock(slot0 + 1, SN_PFX + "sess_ldn_" + tag, londonStart + brokerOffsetSec,
+                           londonEnd + brokerOffsetSec, g_covTop, g_covBot, InpLondonColor);
       if(InpShowNewYork)
-         DrawSessionBlock(SN_PFX + "sess_ny_" + tag, nyStart + brokerOffsetSec,
-                           nyEnd + brokerOffsetSec, InpNewYorkColor);
+         DrawSessionBlock(slot0 + 2, SN_PFX + "sess_ny_" + tag, nyStart + brokerOffsetSec,
+                           nyEnd + brokerOffsetSec, g_covTop, g_covBot, InpNewYorkColor);
       if(InpShowOverlap)
         {
          datetime ovStart = (datetime)MathMax((long)londonStart, (long)nyStart);
          datetime ovEnd   = (datetime)MathMin((long)londonEnd, (long)nyEnd);
          //--- always called (DrawSessionBlock deletes the object itself if
          //--- the range is empty) so no stale in-place block can linger
-         DrawSessionBlock(SN_PFX + "sess_ovlp_" + tag, ovStart + brokerOffsetSec,
-                           ovEnd + brokerOffsetSec, InpOverlapColor);
+         DrawSessionBlock(slot0 + 3, SN_PFX + "sess_ovlp_" + tag, ovStart + brokerOffsetSec,
+                           ovEnd + brokerOffsetSec, g_covTop, g_covBot, InpOverlapColor);
         }
      }
   }
@@ -360,8 +420,32 @@ void RebuildNews()
    datetime from = TimeCurrent() - (datetime)(InpNewsWindowDaysBack * 86400);
    datetime to   = TimeCurrent() + (datetime)(InpNewsWindowDaysFwd * 86400);
 
+   //--- v1.05 (freeze re-audit): v1.04 asked for EVERY country's events
+   //--- (currency=NULL) and then did CalendarEventById + CalendarCountryById
+   //--- per value just to throw most of them away - several hundred
+   //--- calendar lookups per refresh on the indicator thread (OnInit and
+   //--- every InpNewsRefreshMinutes). The calendar API filters by currency
+   //--- itself, so fetch per wanted currency instead - same events, a
+   //--- fraction of the lookups.
    MqlCalendarValue values[];
-   int n = CalendarValueHistory(values, from, to, NULL, NULL);
+   int n = 0;
+   bool anyFail = false;
+   string curs[];
+   int nCur = StringSplit(InpNewsCurrencies, ',', curs);
+   for(int c = 0; c < nCur; c++)
+     {
+      StringTrimLeft(curs[c]);
+      StringTrimRight(curs[c]);
+      if(curs[c] == "") continue;
+      MqlCalendarValue part[];
+      int got = CalendarValueHistory(part, from, to, NULL, curs[c]);
+      if(got < 0) { anyFail = true; continue; }
+      if(got == 0) continue;
+      ArrayResize(values, n + got);
+      for(int j = 0; j < got; j++) values[n + j] = part[j];
+      n += got;
+     }
+   if(n == 0 && anyFail) n = -1;   // keep v1.03's "feed error" vs "0 events" distinction
    if(n <= 0)
      {
       //--- n<0 is a real CalendarValueHistory failure (calendar feed not
@@ -478,10 +562,13 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    datetime lastBar = time[rates_total - 1];
    if(g_firstCalc || lastBar != g_lastSessionBar)
      {
+      //--- v1.05: ChartRedraw only when a block was actually rewritten
+      //--- (day rollover / big rescale), not unconditionally every bar.
+      g_sessChanged = false;
       RebuildSessions();
       g_lastSessionBar = lastBar;
       g_firstCalc = false;
-      ChartRedraw(0);
+      if(g_sessChanged) ChartRedraw(0);
      }
    return(rates_total);
   }

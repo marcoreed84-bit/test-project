@@ -61,7 +61,7 @@
 //|  it shows have any backtested predictive edge.                          |
 //+------------------------------------------------------------------+
 #property copyright "test-project"
-#property version   "1.16"
+#property version   "1.17"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -138,6 +138,20 @@ input double InpVAPercent        = 70.0;    // standard volume-profile conventio
 datetime g_lastTodaySourceBar = 0;
 datetime g_lastPrevDayStart = 0;
 bool     g_firstCalc = true;
+
+//--- v1.17: one column's computed bucket data, so the FROZEN previous-day
+//--- column can be re-positioned without re-fetching/re-bucketing it.
+struct VPData
+  {
+   bool   ok;
+   double lo;
+   double bw;
+   int    pocBucket;
+   double pocVol;
+   double vol[];
+  };
+VPData   g_prevData;
+datetime g_lastPrevAnchor = 0;
 
 //+------------------------------------------------------------------+
 //| claims enough right-margin ("shift") chart space for both profile  |
@@ -217,12 +231,14 @@ void DeleteProfileObjects(const string prefix)
 //--- scratch here instead of the old find-then-branch pattern - simpler
 //--- and removes every ObjectFind call from what is now a periodic, not
 //--- per-tick, path.
-void DrawProfile(const string prefix, const datetime startTime, const datetime endTime,
-                  const datetime anchorTime, const datetime &chartTime[], const int chartEnd, const int perSec,
-                  const color barColor, const color pocColor, const color pocLineColor, const color vaColor)
+//--- v1.17: split into ComputeProfile (CopyRates + bucket math) and
+//--- DrawProfileObjects (chart objects only) - see OnCalculate's v1.17
+//--- comment for why. DrawProfile() keeps the old one-call behaviour for
+//--- the live "today" column.
+bool ComputeProfile(const datetime startTime, const datetime endTime, VPData &d)
   {
-   DeleteProfileObjects(prefix);
-   if(endTime <= startTime) return;
+   d.ok = false;
+   if(endTime <= startTime) return(false);
 
    //--- v1.12 FIX (Opus audit): separate CopyHigh/CopyLow/CopyTickVolume/
    //--- CopyRealVolume calls each independently request the same
@@ -234,7 +250,7 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
    //--- ternary below ever touching an unfilled array.
    MqlRates r[];
    int n = CopyRates(_Symbol, InpSourceTF, startTime, endTime, r);
-   if(n <= 0) return;
+   if(n <= 0) return(false);
    int start = 0, end = n - 1;
 
    double lo = r[start].low, hi = r[start].high;
@@ -243,7 +259,7 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
       lo = MathMin(lo, r[i].low);
       hi = MathMax(hi, r[i].high);
      }
-   if(hi <= lo) return;
+   if(hi <= lo) return(false);
 
    double bw = (hi - lo) / InpBuckets;
    double vol[];
@@ -269,7 +285,25 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
    double pocVol = vol[0];
    for(int b = 1; b < InpBuckets; b++)
       if(vol[b] > pocVol) { pocVol = vol[b]; pocBucket = b; }
-   if(pocVol <= 0.0) return;
+   if(pocVol <= 0.0) return(false);
+
+   d.lo = lo; d.bw = bw; d.pocBucket = pocBucket; d.pocVol = pocVol;
+   ArrayResize(d.vol, InpBuckets);
+   ArrayCopy(d.vol, vol);
+   d.ok = true;
+   return(true);
+  }
+
+void DrawProfileObjects(const string prefix, VPData &d,
+                         const datetime anchorTime, const datetime &chartTime[], const int chartEnd, const int perSec,
+                         const color barColor, const color pocColor, const color pocLineColor, const color vaColor)
+  {
+   DeleteProfileObjects(prefix);
+   if(!d.ok) return;
+   double lo = d.lo, bw = d.bw, pocVol = d.pocVol;
+   int pocBucket = d.pocBucket;
+   double vol[];
+   ArrayCopy(vol, d.vol);
 
    for(int b = 0; b < InpBuckets; b++)
      {
@@ -360,6 +394,15 @@ void DrawProfile(const string prefix, const datetime startTime, const datetime e
    //--- toggle simply isn't recreated.
   }
 
+void DrawProfile(const string prefix, const datetime startTime, const datetime endTime,
+                  const datetime anchorTime, const datetime &chartTime[], const int chartEnd, const int perSec,
+                  const color barColor, const color pocColor, const color pocLineColor, const color vaColor)
+  {
+   VPData d;
+   ComputeProfile(startTime, endTime, d);   // d.ok=false on failure -> DrawProfileObjects just clears the column
+   DrawProfileObjects(prefix, d, anchorTime, chartTime, chartEnd, perSec, barColor, pocColor, pocLineColor, vaColor);
+  }
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
@@ -384,11 +427,13 @@ int OnInit()
       Print("VolumeProfile_Session: InpPocLineBackBars must be >= 0.");
       return(INIT_PARAMETERS_INCORRECT);
      }
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.14 (today" +
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session Volume Profile v1.17 (today" +
                        (InpShowPrevDay ? "+prev day)" : ")"));
    g_firstCalc = true;
    g_lastTodaySourceBar = 0;
    g_lastPrevDayStart = 0;
+   g_lastPrevAnchor = 0;
+   g_prevData.ok = false;
    //--- v1.13 FIX (real bug found live in SuperTrend_MTF.mq5, same risky
    //--- pattern copied here in v1.12): the timer-based ChartSetSymbolPeriod
    //--- "force a recalc" trick is REMOVED. MT5's own docs explicitly warn
@@ -467,13 +512,34 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    //--- todayAnchor computed once per bar, and the previous-day column is
    //--- now repositioned (full rebuild - still bar-gated, not per-tick)
    //--- whenever TODAY'S bar changes, not just when prevDayStart changes.
+   //--- v1.17 FIX (freeze re-audit, REGRESSION introduced by v1.16):
+   //--- v1.16's `|| needToday` made the frozen previous-day column do a
+   //--- FULL rebuild - ObjectsDeleteAll (a synchronous, all-chart-objects
+   //--- prefix scan), a fresh CopyRates of the WHOLE previous day (~1440
+   //--- M1 bars), the bucket math, and ~30 rectangles + 3 lines x ~9
+   //--- object calls each - on every new InpSourceTF (M1) bar, i.e. every
+   //--- minute regardless of chart timeframe, instead of once a day. The
+   //--- data itself is frozen (a completed day) - only its SCREEN POSITION
+   //--- has to follow today's anchor, and that anchor is derived from the
+   //--- CHART's own last bar time, so it only moves when a new CHART bar
+   //--- prints (not every M1 bar on M5/M15/H1 charts). Now: the previous
+   //--- day's bucket data is computed once (cached in g_prevData) and only
+   //--- re-fetched when prevDayStart changes (or a failed fetch is retried
+   //--- on the next source bar); the column's objects are only rebuilt
+   //--- when prevAnchor actually changes. The v1.16 visual fix (both
+   //--- columns move together) is preserved exactly - same anchor math.
+   //--- Still a delete+recreate (not move-in-place) on purpose: that keeps
+   //--- these BACK rectangles painted above Session_News_Overlay's
+   //--- shading blocks, which that overlay's own z-order notes rely on.
    bool needToday = (g_firstCalc || todaySourceBar != g_lastTodaySourceBar);
-   bool needPrev  = (g_firstCalc || prevDayStart != g_lastPrevDayStart || needToday);
-
-   if(needToday || needPrev) EnsureRightMargin();
 
    int endToday = rates_total - 1;
    datetime todayAnchor = time[endToday] + (datetime)((1 + InpLeadingGapBars) * perSec);
+   datetime prevAnchor  = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
+   bool prevDataStale = (g_firstCalc || prevDayStart != g_lastPrevDayStart || (!g_prevData.ok && needToday));
+   bool needPrev  = (prevDataStale || prevAnchor != g_lastPrevAnchor);
+
+   if(needToday || needPrev) EnsureRightMargin();
 
    if(needToday)
      {
@@ -489,14 +555,15 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
      {
       if(InpShowPrevDay && prevDayStart > 0)
         {
-         datetime prevAnchor = todayAnchor + (datetime)((InpMaxBarWidthBars + InpColumnGapBars) * perSec);
-         DrawProfile(VP_PFX + "prev_", prevDayStart, todayStart - 1, prevAnchor,
-                     time, endToday, perSec,
-                     InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
+         if(prevDataStale) ComputeProfile(prevDayStart, todayStart - 1, g_prevData);
+         DrawProfileObjects(VP_PFX + "prev_", g_prevData, prevAnchor,
+                            time, endToday, perSec,
+                            InpPrevBarColor, InpPrevPocColor, InpPrevPocLineColor, InpPrevVahValColor);
         }
       else
          DeleteProfileObjects(VP_PFX + "prev_");
       g_lastPrevDayStart = prevDayStart;
+      g_lastPrevAnchor = prevAnchor;
       redrew = true;
      }
 

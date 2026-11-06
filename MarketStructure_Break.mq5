@@ -29,7 +29,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marco"
 #property link      ""
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -113,7 +113,7 @@ int OnInit()
    g_swingLowBroken   = true;
    ArrayResize(g_bosTime, 0);
    ArrayResize(g_bosBullish, 0);
-   PrintFormat("MarketStructure_Break v1.03 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
+   PrintFormat("MarketStructure_Break v1.04 OnInit: %s %s  pivotWindow=%d  minMoveATR=%.2f  drawDays=%d",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpPivotWindow, InpMinMoveATR, InpBosDrawDays);
    return(INIT_SUCCEEDED);
@@ -250,6 +250,13 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    if(freshAttach)
      {
       ObjectsDeleteAll(0, g_pfx);
+      //--- v1.04 FIX (freeze re-audit, leak check): the in-memory BOS list
+      //--- wasn't cleared with the objects - every prev_calculated==0
+      //--- rescan (history reload/reconnect, not just attach) re-appended
+      //--- every break in the draw window as a duplicate entry. Bounded by
+      //--- PruneOldBos, but it grew with each reload; now reset together.
+      ArrayResize(g_bosTime, 0);
+      ArrayResize(g_bosBullish, 0);
       g_swingHighPrice = 0.0; g_swingHighTime = 0; g_swingHighBroken = true;
       g_swingLowPrice  = 0.0; g_swingLowTime  = 0; g_swingLowBroken  = true;
      }

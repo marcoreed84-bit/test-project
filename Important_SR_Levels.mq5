@@ -45,7 +45,7 @@
 //|  able to silently misbehave on a bad input value.                  |
 //+------------------------------------------------------------------+
 #property copyright "Marco"
-#property version   "1.30"
+#property version   "1.31"
 //--- 1.24: Per direct request - "give me them all separate, each
 //--- previous day's high and low": new InpShowRecentHLPerDay (default
 //--- true) draws InpRecentHLDays SEPARATE high/low line pairs, one per
@@ -716,6 +716,11 @@ struct SRLevel
    //--- one ObjectFind and nothing else.
    int      drawnTouches;
    double   drawnPrice;
+   //--- v1.31 (freeze re-audit): what RefreshRightEdgeLabels last wrote to
+   //--- this level's right-edge label - lblTime=0 means "not written/unknown".
+   datetime lblTime;
+   double   lblPrice;
+   int      lblTouches;
   };
 
 SRLevel  g_levels[];
@@ -741,6 +746,7 @@ datetime g_lastRecentHLBarTime = 0;
 //--- (4995+4995+1321 bars) - see this var's use in OnInit.
 string   g_lastSymbol = "";
 ulong    g_lastUiRefreshMs = 0;   // v1.11 FIX - see its own use in OnCalculate
+datetime g_rhlLblTime = 0;        // v1.31: nowTime the recent-HL/per-day/OC labels were last written at (0 = dirty)
 double   g_recentHLHi = 0.0;
 double   g_recentHLLo = 0.0;
 double   g_recentOpen  = 0.0;
@@ -835,6 +841,14 @@ int OnInit()
    //--- intraday genuinely depends on the chart's own period, so it
    //--- always resets on any reinit, timeframe switch included.
    ArrayResize(g_levels, 0);
+   //--- v1.31: the H4/D/W arrays survive a same-symbol reinit (see v1.26
+   //--- below) - invalidate their draw/label caches so a parameter change
+   //--- (colours, font, label offset) or timeframe switch is still written
+   //--- once, now that RedrawLevelG/RefreshRightEdgeLabels skip unchanged ones.
+   g_rhlLblTime = 0;
+   for(int k = 0; k < ArraySize(g_levelsH4); k++) { g_levelsH4[k].drawnTouches = -1; g_levelsH4[k].lblTime = 0; }
+   for(int k = 0; k < ArraySize(g_levelsD);  k++) { g_levelsD[k].drawnTouches  = -1; g_levelsD[k].lblTime  = 0; }
+   for(int k = 0; k < ArraySize(g_levelsW);  k++) { g_levelsW[k].drawnTouches  = -1; g_levelsW[k].lblTime  = 0; }
 
    //--- v1.26 FIX (real cause of "freezes when flipping timeframes" -
    //--- user-confirmed): H4/Daily/Weekly/recent-HL are entirely
@@ -870,7 +884,7 @@ int OnInit()
    //--- indicator only ever printed on an ERROR, so "nothing in the
    //--- journal" told you nothing about whether it was actually
    //--- running. Now it always confirms attach + settings here.
-   PrintFormat("Important_SR_Levels v1.30 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
+   PrintFormat("Important_SR_Levels v1.31 OnInit: %s %s  window=%d  minTouches=%d  maxLevels=%d  atrMult=%.2f  "
                "intraday=%s  H4=%s  daily=%s  weekly=%s  %s",
                _Symbol, StringSubstr(EnumToString((ENUM_TIMEFRAMES)_Period), 7),
                InpLeftRightWindow, InpMinTouchesToShow, InpMaxLevels, InpAtrMultiplier,
@@ -921,6 +935,15 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
    if(lvl.touches < minTouchesToShow) return;
 
    color col = lvl.isSupport ? supCol : resCol;
+
+   //--- v1.31 FIX (freeze re-audit): the v1.25 "nothing changed" early
+   //--- return used to sit AFTER a synchronous ObjectFind, so every shown
+   //--- level still cost one blocking chart round-trip every second
+   //--- forever. Checked first now. Every path in this file that deletes
+   //--- a level's objects either resets drawnTouches to -1 (ApplyTopNFilter's
+   //--- hide branches) or discards the level array entirely (ScanHigherTF /
+   //--- intraday wipe / symbol change), so the cache can't go stale.
+   if(lvl.drawnTouches == lvl.touches && lvl.drawnPrice == lvl.price) return;
 
    if(ObjectFind(0, lvl.lineName) < 0)
      {
@@ -973,6 +996,7 @@ void RedrawLevelG(SRLevel &lvl, const int minTouchesToShow, const color supCol, 
          ObjectSetInteger(0, lvl.labelName, OBJPROP_SELECTABLE, false);
          ObjectSetInteger(0, lvl.labelName, OBJPROP_HIDDEN, true);
          ObjectSetInteger(0, lvl.labelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+         lvl.lblTime = 0;   // v1.31: fresh label - force RefreshRightEdgeLabels to position it
         }
       ObjectSetInteger(0, lvl.labelName, OBJPROP_COLOR, InpLabelColor);
       ObjectSetInteger(0, lvl.labelName, OBJPROP_FONTSIZE, InpLabelFontSize);
@@ -998,11 +1022,18 @@ void RefreshRightEdgeLabels(SRLevel &levels[], const int minTouchesToShow, const
       //--- synchronous ObjectFind call entirely for levels that cleared
       //--- the touch threshold but aren't in the drawn top-N/nearest set.
       if(!levels[k].shown) continue;
+      //--- v1.31 FIX (freeze re-audit): skip the synchronous ObjectFind and
+      //--- all 3 setters when nothing this label shows has changed since the
+      //--- last write (nowTime is bar-quantized in OnCalculate, so in steady
+      //--- state this is once per chart bar, not once per second).
+      if(levels[k].lblTime == nowTime && levels[k].lblPrice == levels[k].price &&
+         levels[k].lblTouches == levels[k].touches) continue;
       if(ObjectFind(0, levels[k].labelName) < 0) continue;
       ObjectSetInteger(0, levels[k].labelName, OBJPROP_TIME, 0, nowTime);
       ObjectSetDouble(0, levels[k].labelName, OBJPROP_PRICE, levels[k].price);
       ObjectSetString(0, levels[k].labelName, OBJPROP_TEXT,
                        (levels[k].isSupport ? " S x" : " R x") + IntegerToString(levels[k].touches));
+      levels[k].lblTime = nowTime; levels[k].lblPrice = levels[k].price; levels[k].lblTouches = levels[k].touches;
      }
   }
 
@@ -1119,6 +1150,7 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
            {
             if(ObjectFind(0, levels[idx[a]].lineName) >= 0)  ObjectDelete(0, levels[idx[a]].lineName);
             if(ObjectFind(0, levels[idx[a]].labelName) >= 0) ObjectDelete(0, levels[idx[a]].labelName);
+            levels[idx[a]].drawnTouches = -1; levels[idx[a]].lblTime = 0;   // v1.31: cache invalid once deleted
            }
         }
       return;
@@ -1142,6 +1174,7 @@ void ApplyTopNFilter(SRLevel &levels[], const int minTouchesToShow, const int to
         {
          if(ObjectFind(0, levels[idx[a]].lineName) >= 0)  ObjectDelete(0, levels[idx[a]].lineName);
          if(ObjectFind(0, levels[idx[a]].labelName) >= 0) ObjectDelete(0, levels[idx[a]].labelName);
+         levels[idx[a]].drawnTouches = -1; levels[idx[a]].lblTime = 0;   // v1.31: cache invalid once deleted
         }
      }
   }
@@ -1312,6 +1345,9 @@ void RegisterTouchG(SRLevel &levels[], const datetime t, const double price, con
    levels[n].lastProxAlertAt = 0;
    levels[n].drawnTouches   = -1;   // see RedrawLevelG - forces the first real draw to actually write
    levels[n].drawnPrice     = 0.0;
+   levels[n].lblTime        = 0;    // v1.31 - see RefreshRightEdgeLabels
+   levels[n].lblPrice       = 0.0;
+   levels[n].lblTouches     = -1;
    if(drawInline) RedrawLevelG(levels[n], minTouchesToShow, supCol, resCol);
   }
 
@@ -1368,6 +1404,7 @@ void ScanRecentHL()
    g_recentOpen  = iOpen(_Symbol, PERIOD_D1, n);
    g_recentClose = iClose(_Symbol, PERIOD_D1, 1);
    g_recentHLReady = true;
+   g_rhlLblTime = 0;   // v1.31: values changed - force the right-edge labels to rewrite
 
    if(InpShowRecentHL)
      {
@@ -2078,14 +2115,30 @@ int OnCalculate(const int rates_total,
    //--- every call, not just when a level is actually touched
    //--- v1.27: pushed InpLabelRightOffsetBars bars further right than
    //--- "now" - see that input's own comment.
-   datetime nowTime = TimeCurrent() + (datetime)((long)InpLabelRightOffsetBars * PeriodSeconds());
+   //--- v1.31 FIX (freeze re-audit, real cost missed by the v1.11/v1.29
+   //--- passes): nowTime used to be raw TimeCurrent(), which changes every
+   //--- second - so every second, every right-edge label (up to 12 S/R +
+   //--- 6 per-day D-N Hi/Lo by default) paid a SYNCHRONOUS ObjectFind plus
+   //--- 3-5 setters, forever, even though the label had nowhere new to go.
+   //--- Quantized to the chart's own bar grid (labels sit at bar
+   //--- resolution anyway; this is at most one bar to the left of the old
+   //--- position, against an InpLabelRightOffsetBars=45-bar offset), and
+   //--- each label now caches what it last wrote, so steady state is one
+   //--- write per label per CHART BAR instead of per second.
+   int lblPer = PeriodSeconds();
+   datetime nowBar = (lblPer > 0) ? (datetime)(((long)TimeCurrent() / lblPer) * lblPer) : TimeCurrent();
+   datetime nowTime = nowBar + (datetime)((long)InpLabelRightOffsetBars * lblPer);
    RefreshRightEdgeLabels(g_levels,   InpMinTouchesToShow,   nowTime);
    RefreshRightEdgeLabels(g_levelsH4, InpDWMinTouchesToShow, nowTime);
    RefreshRightEdgeLabels(g_levelsD,  InpDWMinTouchesToShow, nowTime);
    RefreshRightEdgeLabels(g_levelsW,  InpDWMinTouchesToShow, nowTime);
-   RefreshRecentHLLabels(nowTime);
-   RefreshRecentHLPerDayLabels(nowTime);
-   RefreshRecentOCLabels(nowTime);
+   if(nowTime != g_rhlLblTime)
+     {
+      RefreshRecentHLLabels(nowTime);
+      RefreshRecentHLPerDayLabels(nowTime);
+      RefreshRecentOCLabels(nowTime);
+      if(g_recentHLReady) g_rhlLblTime = nowTime;
+     }
 
    //--- v1.28: buy/sell level-reaction signals removed entirely per
    //--- direct request - proximity alerts (a plain "approaching" notice,
