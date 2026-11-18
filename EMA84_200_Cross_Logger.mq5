@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.17"
+#property version   "1.18"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -186,7 +186,7 @@ int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                       StringFormat("EMA%d/%d Cross Logger v1.17", InpFastPeriod, InpSlowPeriod));
+                       StringFormat("EMA%d/%d Cross Logger v1.18", InpFastPeriod, InpSlowPeriod));
    g_firstCalc = true;
    g_lastBarTime = 0;
 
@@ -202,7 +202,7 @@ int OnInit()
    //--- draw on any chart, on any timeframe. _Period is the predefined
    //--- variable holding the chart's REAL timeframe.
    for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
-   PrintFormat("EMA Cross Logger v1.17: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+   PrintFormat("EMA Cross Logger v1.18: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
                EnumToString(_Period), g_chartTfSlot,
                g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
@@ -352,7 +352,19 @@ void BuildHistoricalMarkers()
    int ah = g_atrHandle[g_chartTfSlot];
    int lh = g_ltTrendHandle[g_chartTfSlot];
    if(fh == INVALID_HANDLE || sh == INVALID_HANDLE || ah == INVALID_HANDLE) return;
+   if(InpUseLTTrendFilter && lh == INVALID_HANDLE) return;
    if(BarsCalculated(fh) < need + 1 || BarsCalculated(sh) < need + 1 || BarsCalculated(ah) < need + 1) return;   // still warming up - retry next bar
+   //--- v1.18 FIX (real bug, per direct report "now it gives no signals",
+   //--- confirmed by unstable repeated-reattach counts with IDENTICAL
+   //--- settings - the exact signature of a handle-warmup race): lh was
+   //--- never checked here before reading it, same class of bug already
+   //--- fixed once for fh/sh/ah in v1.04. SuperTrend_MTF.mq5 recalculates
+   //--- its ENTIRE chart history on a fresh attach, which can take several
+   //--- seconds for a large M15 dataset - reading its buffers before that
+   //--- finishes returns missing/partial data, which both LT checks
+   //--- correctly treat as "can't confirm" and reject - silently
+   //--- suppressing every single entry until it's actually ready.
+   if(InpUseLTTrendFilter && BarsCalculated(lh) < need + 1) return;
 
    double ef[], es[], cl[], atrArr[];
    ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true); ArraySetAsSeries(atrArr, true);
@@ -449,7 +461,7 @@ void BuildHistoricalMarkers()
    //--- active - fixed, per direct report "still no change" with no way
    //--- to verify from the log what was actually running.
    PrintFormat("EMA Cross Logger v%s: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars, min gap %.2fxATR)",
-               "1.17", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
+               "1.18", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
                InpMinSlopeATR, InpSlopeLookbackBars, InpMinGapATR);
   }
 
@@ -566,6 +578,7 @@ void CheckTimeframe(const int k)
    if(InpUseLTTrendFilter && g_ltTrendHandle[k] == INVALID_HANDLE)
       g_ltTrendHandle[k] = iCustom(_Symbol, tf, "SuperTrend_MTF", InpLTTrend_AtrPeriod, InpLTTrend_AtrMultiplier);
    if(g_fastHandle[k] == INVALID_HANDLE || g_slowHandle[k] == INVALID_HANDLE || g_atrHandle[k] == INVALID_HANDLE) return;
+   if(InpUseLTTrendFilter && g_ltTrendHandle[k] == INVALID_HANDLE) return;
 
    //--- v1.06: fetch InpSlopeLookbackBars of extra history ahead of the
    //--- normal window so ef[j - InpSlopeLookbackBars] is always in range
@@ -574,6 +587,9 @@ void CheckTimeframe(const int k)
    int need = InpLookbackBars + 2 + warm;
    if(BarsCalculated(g_fastHandle[k]) < need || BarsCalculated(g_slowHandle[k]) < need ||
       BarsCalculated(g_atrHandle[k]) < need) return;
+   //--- v1.18 FIX: same handle-warmup gate as BuildHistoricalMarkers - see
+   //--- that function's comment for the full root-cause explanation.
+   if(InpUseLTTrendFilter && BarsCalculated(g_ltTrendHandle[k]) < need) return;
 
    double ef[], es[], cl[], atrArr[];
    ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true); ArraySetAsSeries(atrArr, true);
