@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.03"
+#property version   "1.04"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -232,22 +232,38 @@ void BuildHistoricalMarkers()
   {
    if(g_chartTfSlot < 0) { g_markersBuilt = true; return; }   // none of the 4 tracked TFs is this chart's own - nothing to draw, don't keep re-checking every bar
    ENUM_TIMEFRAMES tf = g_tf[g_chartTfSlot];
-   int need = MathMin(InpHistoricalMarkerBars, iBars(_Symbol, tf) - 1) + InpSlowPeriod;
-   need = MathMin(need, iBars(_Symbol, tf) - 1);
+   int need = MathMin(InpHistoricalMarkerBars, iBars(_Symbol, tf) - 2) + InpSlowPeriod;
+   need = MathMin(need, iBars(_Symbol, tf) - 2);
    if(need < InpSlowPeriod + 2) return;   // not enough history YET - retry next bar (don't mark built)
 
-   int fh = iMA(_Symbol, tf, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
-   int sh = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   //--- v1.04 FIX (real bug, per direct report "there are no signals on
+   //--- the chart"): this used to create its OWN fresh handles and check
+   //--- BarsCalculated in the very same call - a freshly-created handle
+   //--- has ZERO computed bars until MT5 has a moment to warm it up (the
+   //--- exact handle-churn gotcha already documented/fixed elsewhere in
+   //--- this repo), and since fh/sh were local and released every call,
+   //--- it recreated them from scratch every single bar and could never
+   //--- actually finish. Now reuses the SAME persistent per-slot handle
+   //--- the live tracker already creates once in CheckTimeframe/OnInit -
+   //--- created here if CheckTimeframe hasn't run yet this session, but
+   //--- never released until OnDeinit, so it gets real time to warm up.
+   if(g_fastHandle[g_chartTfSlot] == INVALID_HANDLE)
+      g_fastHandle[g_chartTfSlot] = iMA(_Symbol, tf, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_slowHandle[g_chartTfSlot] == INVALID_HANDLE)
+      g_slowHandle[g_chartTfSlot] = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   int fh = g_fastHandle[g_chartTfSlot];
+   int sh = g_slowHandle[g_chartTfSlot];
    if(fh == INVALID_HANDLE || sh == INVALID_HANDLE) return;
-   if(BarsCalculated(fh) < need || BarsCalculated(sh) < need) { IndicatorRelease(fh); IndicatorRelease(sh); return; }
+   if(BarsCalculated(fh) < need + 1 || BarsCalculated(sh) < need + 1) return;   // still warming up - retry next bar
 
    double ef[], es[], cl[];
    ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true);
-   if(CopyBuffer(fh, 0, 0, need, ef) < need || CopyBuffer(sh, 0, 0, need, es) < need ||
-      CopyClose(_Symbol, tf, 0, need, cl) < need)
-     { IndicatorRelease(fh); IndicatorRelease(sh); return; }
+   //--- shift 1..need = CLOSED bars only (shift 0 would still be forming)
+   //--- - same lookahead-safe convention as CheckTimeframe's own scan.
+   if(CopyBuffer(fh, 0, 1, need, ef) < need || CopyBuffer(sh, 0, 1, need, es) < need ||
+      CopyClose(_Symbol, tf, 1, need, cl) < need)
+      return;
    ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false);   // 0 = oldest
-   IndicatorRelease(fh); IndicatorRelease(sh);
 
    //--- show only the last InpHistoricalMarkerBars of this (possibly
    //--- warmup-padded) window, so the EMA itself still had InpSlowPeriod
@@ -259,7 +275,7 @@ void BuildHistoricalMarkers()
 
    for(int j = startIdx; j < need; j++)
      {
-      datetime t = iTime(_Symbol, tf, need - 1 - j);
+      datetime t = iTime(_Symbol, tf, need - j);   // matches ef[j]/es[j]/cl[j]'s shift-1-based fetch above
       double px = cl[j];
       bool regimeUp = ef[j] > es[j];
       bool regimeUpPrev = ef[j - 1] > es[j - 1];
