@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -73,6 +73,20 @@ input int    InpHistoricalMarkerBars  = 2000;  // how far back (in this chart's 
                                                 // freeze bugs from indicators creating too many chart
                                                 // objects at once, so "all history" is not the default.
 input int    InpArrowSize             = 1;
+input int    InpArrowGapPoints        = 150;   // v1.06: arrows now offset this many points away from
+                                                // the candle (below for a bullish/UP marker, above for
+                                                // a bearish/DOWN one) instead of sitting on the close -
+                                                // per direct report "over the candles"
+
+input group "=== Trend-strength filter (no trades while EMA84 is sideways) ==="
+input int    InpSlopeLookbackBars     = 10;    // EMA84's slope is measured over this many bars back
+input double InpMinSlopeATR           = 0.15;  // v1.06: per direct instruction - a NEW position (entry
+                                                // OR re-entry) only opens if EMA84 moved at least this
+                                                // many ATR(14) over InpSlopeLookbackBars bars; otherwise
+                                                // EMA84 is judged "sideways" and no trade is taken.
+                                                // Existing open positions are NOT force-closed just
+                                                // because the slope flattens mid-trade - this only gates
+                                                // NEW entries, per "cannot take trades when sideways".
 
 input group "=== Panel ==="
 input bool   InpShowPanel        = true;
@@ -92,6 +106,7 @@ datetime g_lastBarTime = 0;
 ENUM_TIMEFRAMES g_tf[4];
 int    g_fastHandle[4];
 int    g_slowHandle[4];
+int    g_atrHandle[4];
 datetime g_lastTfBarTime[4];
 string g_lastDir[4];      // regime direction: "UP" / "DOWN" / "" (unknown yet)
 datetime g_lastCrossTime[4];
@@ -142,6 +157,7 @@ int OnInit()
      {
       g_fastHandle[k] = INVALID_HANDLE;
       g_slowHandle[k] = INVALID_HANDLE;
+      g_atrHandle[k] = INVALID_HANDLE;
       g_lastTfBarTime[k] = 0;
       g_lastDir[k] = "";
       g_lastCrossTime[k] = 0;
@@ -181,6 +197,7 @@ void OnDeinit(const int reason)
      {
       if(g_fastHandle[k] != INVALID_HANDLE) IndicatorRelease(g_fastHandle[k]);
       if(g_slowHandle[k] != INVALID_HANDLE) IndicatorRelease(g_slowHandle[k]);
+      if(g_atrHandle[k] != INVALID_HANDLE) IndicatorRelease(g_atrHandle[k]);
      }
    ObjectsDeleteAll(0, PFX);
   }
@@ -211,7 +228,13 @@ void DrawMarker(const datetime t, const double price, const bool isEntry, const 
    int code = isEntry ? (isUp ? 233 : 234) : 251;   // 233=up arrow, 234=down arrow, 251=small x (exit)
    color col = isUp ? InpPanelUpColor : InpPanelDownColor;
 
-   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   //--- v1.06: offset away from the candle (below for UP, above for DOWN)
+   //--- instead of sitting exactly on the close - per direct report
+   //--- "over the candles".
+   double gap = InpArrowGapPoints * _Point;
+   double drawPrice = isUp ? price - gap : price + gap;
+
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, drawPrice);
    ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, code);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpArrowSize);
@@ -223,7 +246,7 @@ void DrawMarker(const datetime t, const double price, const bool isEntry, const 
      {
       string tagNm = PFX + "tag_" + IntegerToString(g_markerSeq);
       string txt = (dollarMove >= 0 ? "+$" : "-$") + DoubleToString(MathAbs(dollarMove), 2);
-      ObjectCreate(0, tagNm, OBJ_TEXT, 0, t, price);
+      ObjectCreate(0, tagNm, OBJ_TEXT, 0, t, drawPrice);
       ObjectSetString(0, tagNm, OBJPROP_TEXT, " " + txt);
       ObjectSetInteger(0, tagNm, OBJPROP_COLOR, dollarMove >= 0 ? InpPanelUpColor : InpPanelDownColor);
       ObjectSetInteger(0, tagNm, OBJPROP_FONTSIZE, 7);
@@ -244,9 +267,10 @@ void BuildHistoricalMarkers()
   {
    if(g_chartTfSlot < 0) { g_markersBuilt = true; return; }   // none of the 4 tracked TFs is this chart's own - nothing to draw, don't keep re-checking every bar
    ENUM_TIMEFRAMES tf = g_tf[g_chartTfSlot];
-   int need = MathMin(InpHistoricalMarkerBars, iBars(_Symbol, tf) - 2) + InpSlowPeriod;
+   int warm = InpSlopeLookbackBars;   // v1.06: extra lookback so the slope check always has room
+   int need = MathMin(InpHistoricalMarkerBars, iBars(_Symbol, tf) - 2 - warm) + InpSlowPeriod + warm;
    need = MathMin(need, iBars(_Symbol, tf) - 2);
-   if(need < InpSlowPeriod + 2) return;   // not enough history YET - retry next bar (don't mark built)
+   if(need < InpSlowPeriod + warm + 2) return;   // not enough history YET - retry next bar (don't mark built)
 
    //--- v1.04 FIX (real bug, per direct report "there are no signals on
    //--- the chart"): this used to create its OWN fresh handles and check
@@ -263,24 +287,27 @@ void BuildHistoricalMarkers()
       g_fastHandle[g_chartTfSlot] = iMA(_Symbol, tf, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
    if(g_slowHandle[g_chartTfSlot] == INVALID_HANDLE)
       g_slowHandle[g_chartTfSlot] = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_atrHandle[g_chartTfSlot] == INVALID_HANDLE)
+      g_atrHandle[g_chartTfSlot] = iATR(_Symbol, tf, 14);
    int fh = g_fastHandle[g_chartTfSlot];
    int sh = g_slowHandle[g_chartTfSlot];
-   if(fh == INVALID_HANDLE || sh == INVALID_HANDLE) return;
-   if(BarsCalculated(fh) < need + 1 || BarsCalculated(sh) < need + 1) return;   // still warming up - retry next bar
+   int ah = g_atrHandle[g_chartTfSlot];
+   if(fh == INVALID_HANDLE || sh == INVALID_HANDLE || ah == INVALID_HANDLE) return;
+   if(BarsCalculated(fh) < need + 1 || BarsCalculated(sh) < need + 1 || BarsCalculated(ah) < need + 1) return;   // still warming up - retry next bar
 
-   double ef[], es[], cl[];
-   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true);
+   double ef[], es[], cl[], atrArr[];
+   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true); ArraySetAsSeries(atrArr, true);
    //--- shift 1..need = CLOSED bars only (shift 0 would still be forming)
    //--- - same lookahead-safe convention as CheckTimeframe's own scan.
    if(CopyBuffer(fh, 0, 1, need, ef) < need || CopyBuffer(sh, 0, 1, need, es) < need ||
-      CopyClose(_Symbol, tf, 1, need, cl) < need)
+      CopyBuffer(ah, 0, 1, need, atrArr) < need || CopyClose(_Symbol, tf, 1, need, cl) < need)
       return;
-   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false);   // 0 = oldest
+   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false); ArraySetAsSeries(atrArr, false);   // 0 = oldest
 
    //--- show only the last InpHistoricalMarkerBars of this (possibly
-   //--- warmup-padded) window, so the EMA itself still had InpSlowPeriod
-   //--- bars to settle before the first drawn signal.
-   int startIdx = MathMax(1, need - InpHistoricalMarkerBars);
+   //--- warmup-padded) window, so the EMA itself still had InpSlowPeriod+
+   //--- InpSlopeLookbackBars bars to settle before the first drawn signal.
+   int startIdx = MathMax(warm + 1, need - InpHistoricalMarkerBars);
 
    bool posOpen = false; string posDir = ""; datetime entryTime = 0; double entryPx = 0.0;
    string regimeDir = (ef[startIdx - 1] > es[startIdx - 1]) ? "UP" : "DOWN";
@@ -299,9 +326,15 @@ void BuildHistoricalMarkers()
            {
             double mv = (px - entryPx) * (posDir == "UP" ? 1.0 : -1.0);
             DrawMarker(t, px, false, posDir == "UP", mv);
+            posOpen = false;
            }
-         DrawMarker(t, px, true, regimeUp, 0.0);
-         regimeDir = newDir; posOpen = true; posDir = newDir; entryTime = t; entryPx = px;
+         regimeDir = newDir;
+         //--- v1.06: same sideways gate as the live tracker.
+         if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+           {
+            DrawMarker(t, px, true, regimeUp, 0.0);
+            posOpen = true; posDir = newDir; entryTime = t; entryPx = px;
+           }
          continue;
         }
 
@@ -320,7 +353,7 @@ void BuildHistoricalMarkers()
         {
          bool reenterUp = (regimeDir == "UP" && closeAboveFast);
          bool reenterDn = (regimeDir == "DOWN" && !closeAboveFast);
-         if(reenterUp || reenterDn)
+         if((reenterUp || reenterDn) && IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
            {
             string dir = reenterUp ? "UP" : "DOWN";
             DrawMarker(t, px, true, reenterUp, 0.0);
@@ -358,6 +391,23 @@ void LogPosition(const datetime t, const string sym, const string per,
 //--- Persistent handles (created once, released once in OnDeinit - the
 //--- handle-churn bug this project already fixed elsewhere), only
 //--- re-scanned when THAT timeframe's own last bar actually changes.
+//--- v1.06: per direct instruction - "cannot take trades when [EMA84] is
+//--- moving sideways". Slope = EMA84's own change over InpSlopeLookbackBars
+//--- bars, normalized by ATR(14) so the same threshold means something
+//--- comparable across instruments/timeframes with very different price
+//--- scales (same reasoning as this project's %PF-on-pnl/entry_price rule
+//--- elsewhere - never compare raw price units across different scales).
+//--- Gates NEW entries only (both the regime-flip entry and a re-entry) -
+//--- an already-open position is not force-closed just because the slope
+//--- flattens mid-trade.
+bool IsTrending(const double &ef[], const double &atrArr[], const int j, const int lookback)
+  {
+   if(j < lookback) return(false);
+   if(!(atrArr[j] > 0.0)) return(false);
+   double slope = MathAbs(ef[j] - ef[j - lookback]);
+   return(slope >= InpMinSlopeATR * atrArr[j]);
+  }
+
 void CheckTimeframe(const int k)
   {
    ENUM_TIMEFRAMES tf = g_tf[k];
@@ -369,19 +419,26 @@ void CheckTimeframe(const int k)
 
    if(g_fastHandle[k] == INVALID_HANDLE) g_fastHandle[k] = iMA(_Symbol, tf, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
    if(g_slowHandle[k] == INVALID_HANDLE) g_slowHandle[k] = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
-   if(g_fastHandle[k] == INVALID_HANDLE || g_slowHandle[k] == INVALID_HANDLE) return;
+   if(g_atrHandle[k] == INVALID_HANDLE) g_atrHandle[k] = iATR(_Symbol, tf, 14);
+   if(g_fastHandle[k] == INVALID_HANDLE || g_slowHandle[k] == INVALID_HANDLE || g_atrHandle[k] == INVALID_HANDLE) return;
 
-   int need = InpLookbackBars + 2;
-   if(BarsCalculated(g_fastHandle[k]) < need || BarsCalculated(g_slowHandle[k]) < need) return;
+   //--- v1.06: fetch InpSlopeLookbackBars of extra history ahead of the
+   //--- normal window so ef[j - InpSlopeLookbackBars] is always in range
+   //--- for the slope check below, even at the oldest bar actually scanned.
+   int warm = InpSlopeLookbackBars;
+   int need = InpLookbackBars + 2 + warm;
+   if(BarsCalculated(g_fastHandle[k]) < need || BarsCalculated(g_slowHandle[k]) < need ||
+      BarsCalculated(g_atrHandle[k]) < need) return;
 
-   double ef[], es[], cl[];
-   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true);
-   //--- shift 1..InpLookbackBars+1 = CLOSED bars only (shift 0 would still
-   //--- be forming) - oldest to newest once reversed below.
+   double ef[], es[], cl[], atrArr[];
+   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true); ArraySetAsSeries(atrArr, true);
+   //--- shift 1..need = CLOSED bars only (shift 0 would still be forming) -
+   //--- oldest to newest once reversed below.
    if(CopyBuffer(g_fastHandle[k], 0, 1, need, ef) < need) return;
    if(CopyBuffer(g_slowHandle[k], 0, 1, need, es) < need) return;
+   if(CopyBuffer(g_atrHandle[k], 0, 1, need, atrArr) < need) return;
    if(CopyClose(_Symbol, tf, 1, need, cl) < need) return;
-   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false);   // index 0 = oldest
+   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false); ArraySetAsSeries(atrArr, false);
 
    if(freshTf)
      {
@@ -394,7 +451,7 @@ void CheckTimeframe(const int k)
       return;
      }
 
-   for(int j = 1; j < need; j++)
+   for(int j = warm + 1; j < need; j++)
      {
       datetime barTime = iTime(_Symbol, tf, need - j);   // closed-bar shift matching ef[j]/es[j]/cl[j]
       if(barTime <= g_lastProcessedBarTime[k]) continue;  // already scanned this bar
@@ -418,11 +475,19 @@ void CheckTimeframe(const int k)
             LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
             if(k == g_chartTfSlot && g_markersBuilt)
                DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0));
+            g_posOpen[k] = false;
            }
-         LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
-         if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0);
          g_lastDir[k] = newDir; g_lastCrossTime[k] = barTime; g_lastCrossPrice[k] = px;
-         g_posOpen[k] = true; g_posDir[k] = newDir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
+         //--- v1.06: only open the new-regime position immediately if
+         //--- EMA84 is actually trending on this bar - otherwise stay flat
+         //--- (the re-entry branch below will open it on a later bar once
+         //--- the slope condition is met, same as any other re-entry).
+         if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+           {
+            LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
+            if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0);
+            g_posOpen[k] = true; g_posDir[k] = newDir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
+           }
          continue;
         }
 
@@ -447,7 +512,7 @@ void CheckTimeframe(const int k)
         {
          bool reenterUp = (g_lastDir[k] == "UP" && closeAboveFast);
          bool reenterDn = (g_lastDir[k] == "DOWN" && !closeAboveFast);
-         if(reenterUp || reenterDn)
+         if((reenterUp || reenterDn) && IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
            {
             string dir = reenterUp ? "UP" : "DOWN";
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", dir, px);
