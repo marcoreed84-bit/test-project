@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.11"
+#property version   "1.12"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -97,10 +97,16 @@ input double InpMinSlopeATR           = 0.40;  // a NEW position (entry OR re-en
                                                 // "sideways" and no trade is taken. Existing open
                                                 // positions are NOT force-closed just because the slope
                                                 // flattens mid-trade - this only gates NEW entries.
-input double InpMinGapATR             = 1.0;   // v1.10: EMA84 must also sit at least this many ATR(14)
-                                                // away from EMA200 - per direct confirmation "when it's
-                                                // flat it is near the 200ema" / a real trend needs EMA84
-                                                // to have pulled away again, not just be moving locally.
+input double InpMinGapATR             = 3.0;   // v1.12: 1.0->3.0, per direct evidence from the Experts
+                                                // log (v1.10's own diagnostic, once it actually showed
+                                                // the gap setting) - 1.0xATR drew the IDENTICAL 54/185
+                                                // split as having no gap check at all, meaning it was
+                                                // never the binding constraint once the slope condition
+                                                // was already met. Raised meaningfully so it can actually
+                                                // bite. EMA84 must sit at least this many ATR(14) away
+                                                // from EMA200 - per direct confirmation "when it's flat
+                                                // it is near the 200ema" / a real trend needs EMA84 to
+                                                // have pulled away again, not just be moving locally.
                                                 // Required ALONGSIDE the slope check, not instead of it.
 
 input group "=== Panel ==="
@@ -147,7 +153,7 @@ int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                       StringFormat("EMA%d/%d Cross Logger v1.11", InpFastPeriod, InpSlowPeriod));
+                       StringFormat("EMA%d/%d Cross Logger v1.12", InpFastPeriod, InpSlowPeriod));
    g_firstCalc = true;
    g_lastBarTime = 0;
 
@@ -163,7 +169,7 @@ int OnInit()
    //--- draw on any chart, on any timeframe. _Period is the predefined
    //--- variable holding the chart's REAL timeframe.
    for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
-   PrintFormat("EMA Cross Logger v1.11: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+   PrintFormat("EMA Cross Logger v1.12: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
                EnumToString(_Period), g_chartTfSlot,
                g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
@@ -391,7 +397,7 @@ void BuildHistoricalMarkers()
    //--- active - fixed, per direct report "still no change" with no way
    //--- to verify from the log what was actually running.
    PrintFormat("EMA Cross Logger v%s: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars, min gap %.2fxATR)",
-               "1.11", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
+               "1.12", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
                InpMinSlopeATR, InpSlopeLookbackBars, InpMinGapATR);
   }
 
