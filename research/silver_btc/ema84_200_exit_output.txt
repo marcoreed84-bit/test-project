@@ -1,0 +1,276 @@
+EXIT GRID (K=25 per series): FIXED sl=1ATR tp=1ATR; FIXED sl=1ATR tp=2ATR; FIXED sl=1ATR tp=3ATR; FIXED sl=1ATR tp=4ATR; FIXED sl=1.5ATR tp=1ATR; FIXED sl=1.5ATR tp=2ATR; FIXED sl=1.5ATR tp=3ATR; FIXED sl=1.5ATR tp=4ATR; FIXED sl=2ATR tp=1ATR; FIXED sl=2ATR tp=2ATR; FIXED sl=2ATR tp=3ATR; FIXED sl=2ATR tp=4ATR; FIXED sl=3ATR tp=1ATR; FIXED sl=3ATR tp=2ATR; FIXED sl=3ATR tp=3ATR; FIXED sl=3ATR tp=4ATR; TRAIL 1.5ATR; TRAIL 2ATR; TRAIL 3ATR; TIME 10bars no-stop; TIME 10bars sl=2ATR; TIME 20bars no-stop; TIME 20bars sl=2ATR; TIME 40bars no-stop; TIME 40bars sl=2ATR
+Series searched (pre-declared): GOLD M15, H1, H4 (exception floor 30), BTCUSD M15, H1; BTCUSD H4 not searched (18 IS crosses). K_total = 125.
+[GOLD contamination filter] dropped 9802 pre-2014-06-13 01:30:00 rows (daily/hourly bars mislabeled M15, spread=0) BEFORE any EMA/resample
+
+==============================================================================================================
+GOLD M15 - EMA(84)xEMA(200) entry, exit grid K=25
+GOLD: n=290054 bars 2014-06-13 01:30:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 01:30:00 -> 2020-12-31 18:45:00 (154599 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+point=0.01; IS crosses=708 OOS crosses=635; IS floor=100
+==============================================================================================================
+  [M15 entry] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  IS grid (all 25, IS bars only; trades force-closed at the last IS bar):
+     FIXED sl=3ATR tp=3ATR        IS n= 708  win%= 51.4  IS %PF=0.891
+     FIXED sl=3ATR tp=4ATR        IS n= 708  win%= 42.8  IS %PF=0.877
+     TIME 40bars no-stop          IS n= 708  win%= 43.9  IS %PF=0.866
+     TRAIL 3ATR                   IS n= 708  win%= 34.3  IS %PF=0.861
+     FIXED sl=3ATR tp=2ATR        IS n= 708  win%= 60.9  IS %PF=0.852
+     TIME 20bars no-stop          IS n= 708  win%= 42.7  IS %PF=0.815
+     TIME 40bars sl=2ATR          IS n= 708  win%= 33.2  IS %PF=0.811
+     FIXED sl=2ATR tp=2ATR        IS n= 708  win%= 51.1  IS %PF=0.803
+     FIXED sl=2ATR tp=3ATR        IS n= 708  win%= 41.1  IS %PF=0.800
+     FIXED sl=3ATR tp=1ATR        IS n= 708  win%= 75.4  IS %PF=0.793
+     TIME 20bars sl=2ATR          IS n= 708  win%= 37.7  IS %PF=0.778
+     FIXED sl=1.5ATR tp=3ATR      IS n= 708  win%= 34.7  IS %PF=0.776
+     FIXED sl=2ATR tp=4ATR        IS n= 708  win%= 32.9  IS %PF=0.775
+     TIME 10bars no-stop          IS n= 708  win%= 41.8  IS %PF=0.765
+     FIXED sl=1.5ATR tp=2ATR      IS n= 708  win%= 43.8  IS %PF=0.762
+     FIXED sl=1.5ATR tp=4ATR      IS n= 708  win%= 27.8  IS %PF=0.761
+     TRAIL 2ATR                   IS n= 708  win%= 32.2  IS %PF=0.755
+     TIME 10bars sl=2ATR          IS n= 708  win%= 39.5  IS %PF=0.748
+     FIXED sl=1ATR tp=2ATR        IS n= 708  win%= 35.5  IS %PF=0.739
+     TRAIL 1.5ATR                 IS n= 708  win%= 30.5  IS %PF=0.739
+     FIXED sl=2ATR tp=1ATR        IS n= 708  win%= 67.2  IS %PF=0.737
+     FIXED sl=1ATR tp=3ATR        IS n= 708  win%= 27.3  IS %PF=0.736
+     FIXED sl=1ATR tp=4ATR        IS n= 708  win%= 21.5  IS %PF=0.728
+     FIXED sl=1.5ATR tp=1ATR      IS n= 708  win%= 61.3  IS %PF=0.721
+     FIXED sl=1ATR tp=1ATR        IS n= 708  win%= 51.8  IS %PF=0.694
+  FROZEN IS WINNER: FIXED sl=3ATR tp=3ATR  IS n=708  IS %PF=0.891  (0/25 grid configs had IS %PF > 1)
+  [M15 exit] independent Python exit re-implementation, IS: 708 vs 708 trades, ALL IDENTICAL (exit bar + pnl)
+  [M15 exit] independent Python exit re-implementation, OOS: 635 vs 635 trades, ALL IDENTICAL (exit bar + pnl)
+  [M15 exit] EXIT truncation (OHLC/ATR/crosses rebuilt from data[:exit_bar+1], 300 trades): mismatches=0 -> PASS
+  [M15 exit] EXIT future-perturbation (all bars after the exit bar replaced by garbage, 300 trades): mismatches=0 -> PASS
+  [M15 exit] POSITIVE CONTROL (stop/target tested on bar k+1's range): perturbation test caught it on 57/100 trades (DETECTED as required); leaky IS %PF=0.895 (what a one-bar peek would look like)
+  IS  frozen: n=708 win%=51.4 %PF=0.891 sum%=-15.3 | LONG n=354 %PF=0.892 sum%=-7.7 | SHORT n=354 %PF=0.891 sum%=-7.7 | median hold=17 bars; buy&hold=+48.9%
+      by entry year: 2014: n=64 %PF=0.81 sum%=-2.7; 2015: n=105 %PF=0.94 sum%=-1.3; 2016: n=111 %PF=0.79 sum%=-6.1; 2017: n=90 %PF=0.78 sum%=-3.6; 2018: n=118 %PF=0.84 sum%=-2.9; 2019: n=116 %PF=0.94 sum%=-1.2; 2020: n=104 %PF=1.10 sum%=+2.4
+      IS null A (mean n=707 vs 708): median=0.852 -> IS winner p(K=1)=0.3050, vs best-of-25 random (median 1.013) p=0.9998
+  OOS frozen (untouched): n=635 win%=48.5 %PF=0.933 sum%=-10.0 | LONG n=317 %PF=0.963 sum%=-2.6 | SHORT n=318 %PF=0.906 sum%=-7.4 | median hold=18 bars; buy&hold=+124.5%
+      by entry year: 2021: n=118 %PF=0.98 sum%=-0.3; 2022: n=112 %PF=0.87 sum%=-3.0; 2023: n=97 %PF=1.09 sum%=+1.5; 2024: n=120 %PF=0.81 sum%=-5.1; 2025: n=98 %PF=0.96 sum%=-0.9; 2026: n=90 %PF=0.94 sum%=-2.1
+      2021-2023: n=327 %PF=0.971 (long %PF=1.110 n=163, short %PF=0.856 n=164)
+      2024+: n=308 %PF=0.904 (long %PF=0.859 n=154, short %PF=0.945 n=154)
+      null A (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=648 vs 635): median=0.944 p95=1.097 -> real at 44.5th pct; p(K=1)=0.5550 p(K=25)=1.0000 (best-of-K median 1.125) p(K=125)=1.0000
+      null Ad (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=612 vs 635): median=0.937 p95=1.106 -> real at 48.0th pct; p(K=1)=0.5200 p(K=25)=1.0000 (best-of-K median 1.131) p(K=125)=1.0000
+  VERDICT (worse of A/Ad at K=25): DOES NOT SURVIVE
+  DIAGNOSTIC ONLY (not used for selection; shows whether the frozen pick was unlucky): OOS %PF across all 25 configs: median=0.936, 5/25 > 1.0; hindsight-best TIME 40bars sl=2ATR OOS %PF=1.076 (picked with hindsight: compare to the best-of-25 null median above, not to p(K=1))
+
+==============================================================================================================
+GOLD H1 - EMA(84)xEMA(200) entry, exit grid K=25
+GOLD: n=72694 bars 2014-06-13 02:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-13 02:00:00 -> 2020-12-31 18:00:00 (38812 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+point=0.01; IS crosses=195 OOS crosses=169; IS floor=100
+==============================================================================================================
+  [H1 entry] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H1] RESAMPLE truncation: 300 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 297/299, bar correctly ABSENT with the filter on in 299/299
+  IS grid (all 25, IS bars only; trades force-closed at the last IS bar):
+     FIXED sl=3ATR tp=4ATR        IS n= 195  win%= 38.5  IS %PF=0.849
+     FIXED sl=1ATR tp=4ATR        IS n= 195  win%= 20.0  IS %PF=0.845
+     FIXED sl=1.5ATR tp=3ATR      IS n= 195  win%= 29.7  IS %PF=0.833
+     FIXED sl=3ATR tp=3ATR        IS n= 195  win%= 44.1  IS %PF=0.829
+     TIME 40bars no-stop          IS n= 195  win%= 43.1  IS %PF=0.827
+     TIME 40bars sl=2ATR          IS n= 195  win%= 29.7  IS %PF=0.826
+     FIXED sl=2ATR tp=3ATR        IS n= 195  win%= 34.9  IS %PF=0.810
+     FIXED sl=1.5ATR tp=4ATR      IS n= 195  win%= 24.6  IS %PF=0.790
+     FIXED sl=3ATR tp=2ATR        IS n= 195  win%= 53.8  IS %PF=0.785
+     TRAIL 2ATR                   IS n= 195  win%= 32.3  IS %PF=0.783
+     FIXED sl=1.5ATR tp=2ATR      IS n= 195  win%= 37.9  IS %PF=0.775
+     FIXED sl=2ATR tp=1ATR        IS n= 195  win%= 63.1  IS %PF=0.763
+     FIXED sl=2ATR tp=2ATR        IS n= 195  win%= 44.1  IS %PF=0.761
+     FIXED sl=2ATR tp=4ATR        IS n= 195  win%= 28.7  IS %PF=0.759
+     TRAIL 3ATR                   IS n= 195  win%= 31.8  IS %PF=0.740
+     TRAIL 1.5ATR                 IS n= 195  win%= 28.2  IS %PF=0.738
+     FIXED sl=1.5ATR tp=1ATR      IS n= 195  win%= 55.9  IS %PF=0.732
+     FIXED sl=1ATR tp=2ATR        IS n= 195  win%= 30.3  IS %PF=0.730
+     FIXED sl=3ATR tp=1ATR        IS n= 195  win%= 70.3  IS %PF=0.724
+     FIXED sl=1ATR tp=1ATR        IS n= 195  win%= 46.2  IS %PF=0.722
+     FIXED sl=1ATR tp=3ATR        IS n= 195  win%= 22.6  IS %PF=0.719
+     TIME 20bars no-stop          IS n= 195  win%= 40.0  IS %PF=0.697
+     TIME 10bars sl=2ATR          IS n= 195  win%= 39.0  IS %PF=0.693
+     TIME 20bars sl=2ATR          IS n= 195  win%= 34.4  IS %PF=0.679
+     TIME 10bars no-stop          IS n= 195  win%= 40.5  IS %PF=0.646
+  FROZEN IS WINNER: FIXED sl=3ATR tp=4ATR  IS n=195  IS %PF=0.849  (0/25 grid configs had IS %PF > 1)
+  [H1 exit] independent Python exit re-implementation, IS: 195 vs 195 trades, ALL IDENTICAL (exit bar + pnl)
+  [H1 exit] independent Python exit re-implementation, OOS: 169 vs 169 trades, ALL IDENTICAL (exit bar + pnl)
+  [H1 exit] EXIT truncation (OHLC/ATR/crosses rebuilt from data[:exit_bar+1], 300 trades): mismatches=0 -> PASS
+  [H1 exit] EXIT future-perturbation (all bars after the exit bar replaced by garbage, 300 trades): mismatches=0 -> PASS
+  [H1 exit] POSITIVE CONTROL (stop/target tested on bar k+1's range): perturbation test caught it on 56/100 trades (DETECTED as required); leaky IS %PF=0.846 (what a one-bar peek would look like)
+  IS  frozen: n=195 win%=38.5 %PF=0.849 sum%=-13.4 | LONG n=98 %PF=1.120 sum%=4.5 | SHORT n=97 %PF=0.648 sum%=-18.0 | median hold=21 bars; buy&hold=+48.9%
+      by entry year: 2014: n=8 %PF=5.83 sum%=+7.7; 2015: n=32 %PF=0.91 sum%=-1.3; 2016: n=33 %PF=0.57 sum%=-7.7; 2017: n=16 %PF=1.30 sum%=+1.4; 2018: n=38 %PF=0.42 sum%=-9.0; 2019: n=34 %PF=1.16 sum%=+1.8; 2020: n=34 %PF=0.73 sum%=-6.3
+      IS null A (mean n=202 vs 195): median=0.929 -> IS winner p(K=1)=0.7140, vs best-of-25 random (median 1.254) p=1.0000
+  OOS frozen (untouched): n=169 win%=40.2 %PF=0.798 sum%=-19.3 | LONG n=84 %PF=0.839 sum%=-6.9 | SHORT n=85 %PF=0.765 sum%=-12.5 | median hold=19 bars; buy&hold=+124.0%
+      by entry year: 2021: n=26 %PF=0.91 sum%=-1.0; 2022: n=26 %PF=0.83 sum%=-2.3; 2023: n=22 %PF=1.44 sum%=+3.0; 2024: n=37 %PF=0.98 sum%=-0.3; 2025: n=36 %PF=0.71 sum%=-6.7; 2026: n=22 %PF=0.53 sum%=-12.0
+      2021-2023: n=74 %PF=0.988 (long %PF=0.809 n=37, short %PF=1.178 n=37)
+      2024+: n=95 %PF=0.704 (long %PF=0.857 n=47, short %PF=0.597 n=48)
+      null A (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=171 vs 169): median=0.977 p95=1.281 -> real at 12.4th pct; p(K=1)=0.8760 p(K=25)=1.0000 (best-of-K median 1.353) p(K=125)=1.0000
+      null Ad (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=165 vs 169): median=0.976 p95=1.295 -> real at 13.9th pct; p(K=1)=0.8610 p(K=25)=1.0000 (best-of-K median 1.350) p(K=125)=1.0000
+  VERDICT (worse of A/Ad at K=25): DOES NOT SURVIVE
+  DIAGNOSTIC ONLY (not used for selection; shows whether the frozen pick was unlucky): OOS %PF across all 25 configs: median=0.775, 0/25 > 1.0; hindsight-best FIXED sl=3ATR tp=2ATR OOS %PF=0.927 (picked with hindsight: compare to the best-of-25 null median above, not to p(K=1))
+
+==============================================================================================================
+GOLD H4 - EMA(84)xEMA(200) entry, exit grid K=25
+GOLD: n=18943 bars 2014-06-13 04:00:00 -> 2026-09-25 20:00:00 | IS 2014-06-13 04:00:00 -> 2020-12-31 16:00:00 (10083 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 20:00:00 (8860 bars, untouched)
+point=0.01; IS crosses=53 OOS crosses=35; IS floor=30 (DECLARED H4 EXCEPTION, below folder floor 100)
+==============================================================================================================
+  [H4 entry] truncation test on 88 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H4] RESAMPLE truncation: 88 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 88/88, bar correctly ABSENT with the filter on in 88/88
+  IS grid (all 25, IS bars only; trades force-closed at the last IS bar):
+     FIXED sl=1.5ATR tp=2ATR      IS n=  53  win%= 45.3  IS %PF=1.073
+     TRAIL 2ATR                   IS n=  53  win%= 34.0  IS %PF=1.057
+     FIXED sl=2ATR tp=2ATR        IS n=  53  win%= 50.9  IS %PF=0.963
+     TIME 10bars sl=2ATR          IS n=  53  win%= 37.7  IS %PF=0.879
+     FIXED sl=1ATR tp=2ATR        IS n=  53  win%= 32.1  IS %PF=0.869
+     FIXED sl=3ATR tp=2ATR        IS n=  53  win%= 58.5  IS %PF=0.845
+     FIXED sl=1.5ATR tp=4ATR      IS n=  53  win%= 28.3  IS %PF=0.843
+     TRAIL 1.5ATR                 IS n=  53  win%= 35.8  IS %PF=0.837
+     FIXED sl=1.5ATR tp=1ATR      IS n=  53  win%= 58.5  IS %PF=0.824
+     TRAIL 3ATR                   IS n=  53  win%= 34.0  IS %PF=0.791
+     FIXED sl=1ATR tp=1ATR        IS n=  53  win%= 49.1  IS %PF=0.776
+     TIME 20bars sl=2ATR          IS n=  53  win%= 37.7  IS %PF=0.750
+     FIXED sl=1.5ATR tp=3ATR      IS n=  53  win%= 32.1  IS %PF=0.737
+     TIME 10bars no-stop          IS n=  53  win%= 43.4  IS %PF=0.736
+     FIXED sl=2ATR tp=1ATR        IS n=  53  win%= 62.3  IS %PF=0.723
+     TIME 20bars no-stop          IS n=  53  win%= 45.3  IS %PF=0.720
+     FIXED sl=1ATR tp=4ATR        IS n=  53  win%= 20.8  IS %PF=0.689
+     FIXED sl=2ATR tp=4ATR        IS n=  53  win%= 30.2  IS %PF=0.678
+     TIME 40bars sl=2ATR          IS n=  53  win%= 26.4  IS %PF=0.616
+     FIXED sl=3ATR tp=1ATR        IS n=  53  win%= 67.9  IS %PF=0.595
+     FIXED sl=2ATR tp=3ATR        IS n=  53  win%= 34.0  IS %PF=0.590
+     FIXED sl=1ATR tp=3ATR        IS n=  53  win%= 22.6  IS %PF=0.581
+     FIXED sl=3ATR tp=4ATR        IS n=  53  win%= 35.8  IS %PF=0.576
+     FIXED sl=3ATR tp=3ATR        IS n=  53  win%= 39.6  IS %PF=0.495
+     TIME 40bars no-stop          IS n=  53  win%= 35.8  IS %PF=0.486
+  FROZEN IS WINNER: FIXED sl=1.5ATR tp=2ATR  IS n=53  IS %PF=1.073  (2/25 grid configs had IS %PF > 1)
+  [H4 exit] independent Python exit re-implementation, IS: 53 vs 53 trades, ALL IDENTICAL (exit bar + pnl)
+  [H4 exit] independent Python exit re-implementation, OOS: 35 vs 35 trades, ALL IDENTICAL (exit bar + pnl)
+  [H4 exit] EXIT truncation (OHLC/ATR/crosses rebuilt from data[:exit_bar+1], 88 trades): mismatches=0 -> PASS
+  [H4 exit] EXIT future-perturbation (all bars after the exit bar replaced by garbage, 88 trades): mismatches=0 -> PASS
+  [H4 exit] POSITIVE CONTROL (stop/target tested on bar k+1's range): perturbation test caught it on 47/87 trades (DETECTED as required); leaky IS %PF=1.130 (what a one-bar peek would look like)
+  IS  frozen: n=53 win%=45.3 %PF=1.073 sum%=1.6 | LONG n=27 %PF=0.650 sum%=-4.6 | SHORT n=26 %PF=1.670 sum%=6.2 | median hold=7 bars; buy&hold=+48.9%
+      by entry year: 2014: n=2 %PF=0.00 sum%=-2.1; 2015: n=16 %PF=0.77 sum%=-1.7; 2016: n=6 %PF=2.15 sum%=+1.7; 2017: n=11 %PF=2.06 sum%=+2.5; 2018: n=4 %PF=0.40 sum%=-1.1; 2019: n=8 %PF=0.66 sum%=-1.0; 2020: n=6 %PF=1.88 sum%=+3.4
+      IS null A (mean n=51 vs 53): median=0.917 -> IS winner p(K=1)=0.3140, vs best-of-25 random (median 1.696) p=0.9998
+  OOS frozen (untouched): n=35 win%=51.4 %PF=1.409 sum%=5.5 | LONG n=17 %PF=2.908 sum%=7.4 | SHORT n=18 %PF=0.804 sum%=-1.9 | median hold=5 bars; buy&hold=+123.6%
+      by entry year: 2021: n=8 %PF=0.61 sum%=-1.8; 2022: n=4 %PF=1.41 sum%=+0.6; 2023: n=6 %PF=2.70 sum%=+2.4; 2024: n=9 %PF=0.79 sum%=-0.9; 2025: n=5 %PF=1.03 sum%=+0.0; 2026: n=3 %PF=inf sum%=+5.1
+      2021-2023: n=18 %PF=1.166 (long %PF=2.047 n=9, short %PF=0.702 n=9)
+      2024+: n=17 %PF=1.707 (long %PF=4.572 n=8, short %PF=0.909 n=9)
+      null A (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=37 vs 35): median=0.975 p95=1.793 -> real at 87.2th pct; p(K=1)=0.1280 p(K=25)=0.9708 (best-of-K median 2.085) p(K=125)=1.0000
+      null Ad (random timing, p_long=0.49, same exit + cross backstop + real spread; 1000 draws, mean n=34 vs 35): median=0.960 p95=1.947 -> real at 82.6th pct; p(K=1)=0.1740 p(K=25)=0.9916 (best-of-K median 2.200) p(K=125)=1.0000
+  VERDICT (worse of A/Ad at K=25): DOES NOT SURVIVE (LOW POWER; below folder IS floor)
+  DIAGNOSTIC ONLY (not used for selection; shows whether the frozen pick was unlucky): OOS %PF across all 25 configs: median=1.111, 16/25 > 1.0; hindsight-best TRAIL 1.5ATR OOS %PF=1.777 (picked with hindsight: compare to the best-of-25 null median above, not to p(K=1))
+
+==============================================================================================================
+BTCUSD M15 - EMA(84)xEMA(200) entry, exit grid K=25
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+point=0.01; IS crosses=438 OOS crosses=454; IS floor=100
+==============================================================================================================
+  [M15 entry] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  IS grid (all 25, IS bars only; trades force-closed at the last IS bar):
+     FIXED sl=3ATR tp=4ATR        IS n= 438  win%= 43.4  IS %PF=0.889
+     FIXED sl=2ATR tp=4ATR        IS n= 438  win%= 34.0  IS %PF=0.873
+     FIXED sl=2ATR tp=3ATR        IS n= 438  win%= 41.8  IS %PF=0.825
+     FIXED sl=1.5ATR tp=4ATR      IS n= 438  win%= 27.9  IS %PF=0.820
+     FIXED sl=1.5ATR tp=3ATR      IS n= 438  win%= 35.4  IS %PF=0.820
+     TIME 40bars no-stop          IS n= 438  win%= 40.6  IS %PF=0.820
+     FIXED sl=3ATR tp=3ATR        IS n= 438  win%= 50.2  IS %PF=0.812
+     TIME 40bars sl=2ATR          IS n= 438  win%= 31.3  IS %PF=0.791
+     TIME 20bars no-stop          IS n= 438  win%= 39.0  IS %PF=0.789
+     TIME 20bars sl=2ATR          IS n= 438  win%= 34.2  IS %PF=0.787
+     TRAIL 2ATR                   IS n= 438  win%= 27.2  IS %PF=0.771
+     FIXED sl=1.5ATR tp=2ATR      IS n= 438  win%= 46.8  IS %PF=0.761
+     TRAIL 3ATR                   IS n= 438  win%= 27.2  IS %PF=0.759
+     FIXED sl=3ATR tp=2ATR        IS n= 438  win%= 61.2  IS %PF=0.747
+     FIXED sl=2ATR tp=2ATR        IS n= 438  win%= 53.0  IS %PF=0.746
+     TRAIL 1.5ATR                 IS n= 438  win%= 26.3  IS %PF=0.744
+     FIXED sl=1ATR tp=3ATR        IS n= 438  win%= 26.0  IS %PF=0.710
+     FIXED sl=1ATR tp=4ATR        IS n= 438  win%= 19.6  IS %PF=0.706
+     FIXED sl=1ATR tp=2ATR        IS n= 438  win%= 36.8  IS %PF=0.679
+     FIXED sl=3ATR tp=1ATR        IS n= 438  win%= 72.4  IS %PF=0.677
+     FIXED sl=1.5ATR tp=1ATR      IS n= 438  win%= 60.3  IS %PF=0.648
+     FIXED sl=2ATR tp=1ATR        IS n= 438  win%= 65.3  IS %PF=0.640
+     TIME 10bars no-stop          IS n= 438  win%= 34.7  IS %PF=0.622
+     TIME 10bars sl=2ATR          IS n= 438  win%= 33.1  IS %PF=0.621
+     FIXED sl=1ATR tp=1ATR        IS n= 438  win%= 50.7  IS %PF=0.553
+  FROZEN IS WINNER: FIXED sl=3ATR tp=4ATR  IS n=438  IS %PF=0.889  (0/25 grid configs had IS %PF > 1)
+  [M15 exit] independent Python exit re-implementation, IS: 438 vs 438 trades, ALL IDENTICAL (exit bar + pnl)
+  [M15 exit] independent Python exit re-implementation, OOS: 454 vs 454 trades, ALL IDENTICAL (exit bar + pnl)
+  [M15 exit] EXIT truncation (OHLC/ATR/crosses rebuilt from data[:exit_bar+1], 300 trades): mismatches=0 -> PASS
+  [M15 exit] EXIT future-perturbation (all bars after the exit bar replaced by garbage, 300 trades): mismatches=0 -> PASS
+  [M15 exit] POSITIVE CONTROL (stop/target tested on bar k+1's range): perturbation test caught it on 51/100 trades (DETECTED as required); leaky IS %PF=0.878 (what a one-bar peek would look like)
+  IS  frozen: n=438 win%=43.4 %PF=0.889 sum%=-40.9 | LONG n=219 %PF=0.815 sum%=-33.3 | SHORT n=219 %PF=0.960 sum%=-7.6 | median hold=24 bars; buy&hold=+27.8%
+      by entry year: 2021: n=110 %PF=0.99 sum%=-0.7; 2022: n=167 %PF=0.90 sum%=-13.8; 2023: n=161 %PF=0.72 sum%=-26.3
+      IS null A (mean n=446 vs 438): median=0.796 -> IS winner p(K=1)=0.1590, vs best-of-25 random (median 0.987) p=0.9850
+  OOS frozen (untouched): n=454 win%=41.6 %PF=0.722 sum%=-84.3 | LONG n=227 %PF=0.727 sum%=-40.3 | SHORT n=227 %PF=0.719 sum%=-44.0 | median hold=20 bars; buy&hold=+99.3%
+      by entry year: 2024: n=154 %PF=0.61 sum%=-49.0; 2025: n=189 %PF=0.67 sum%=-40.6; 2026: n=111 %PF=1.09 sum%=+5.3
+      null A (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=452 vs 454): median=0.844 p95=0.995 -> real at 9.2th pct; p(K=1)=0.9080 p(K=25)=1.0000 (best-of-K median 1.032) p(K=125)=1.0000
+      null Ad (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=442 vs 454): median=0.840 p95=1.001 -> real at 8.6th pct; p(K=1)=0.9140 p(K=25)=1.0000 (best-of-K median 1.036) p(K=125)=1.0000
+  VERDICT (worse of A/Ad at K=25): DOES NOT SURVIVE
+  DIAGNOSTIC ONLY (not used for selection; shows whether the frozen pick was unlucky): OOS %PF across all 25 configs: median=0.607, 0/25 > 1.0; hindsight-best FIXED sl=1.5ATR tp=4ATR OOS %PF=0.737 (picked with hindsight: compare to the best-of-25 null median above, not to p(K=1))
+
+==============================================================================================================
+BTCUSD H1 - EMA(84)xEMA(200) entry, exit grid K=25
+BTCUSD: n=69052 bars 2017-07-03 00:00:00 -> 2026-09-27 11:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:00:00 (23459 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 11:00:00 (24012 bars, untouched)
+point=0.01; IS crosses=105 OOS crosses=105; IS floor=100
+==============================================================================================================
+  [H1 entry] truncation test on 290 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H1] RESAMPLE truncation: 290 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 290/290, bar correctly ABSENT with the filter on in 290/290
+  IS grid (all 25, IS bars only; trades force-closed at the last IS bar):
+     FIXED sl=2ATR tp=4ATR        IS n= 105  win%= 41.0  IS %PF=1.311
+     FIXED sl=3ATR tp=3ATR        IS n= 105  win%= 56.2  IS %PF=1.260
+     FIXED sl=2ATR tp=3ATR        IS n= 105  win%= 46.7  IS %PF=1.253
+     FIXED sl=3ATR tp=2ATR        IS n= 105  win%= 67.6  IS %PF=1.207
+     FIXED sl=3ATR tp=4ATR        IS n= 105  win%= 48.6  IS %PF=1.203
+     TIME 20bars no-stop          IS n= 105  win%= 48.6  IS %PF=1.199
+     TIME 20bars sl=2ATR          IS n= 105  win%= 43.8  IS %PF=1.175
+     FIXED sl=1ATR tp=4ATR        IS n= 105  win%= 25.7  IS %PF=1.161
+     FIXED sl=2ATR tp=2ATR        IS n= 105  win%= 57.1  IS %PF=1.156
+     TRAIL 3ATR                   IS n= 105  win%= 39.0  IS %PF=1.151
+     FIXED sl=1ATR tp=3ATR        IS n= 105  win%= 31.4  IS %PF=1.136
+     TRAIL 2ATR                   IS n= 105  win%= 37.1  IS %PF=1.127
+     TIME 40bars sl=2ATR          IS n= 105  win%= 41.9  IS %PF=1.106
+     FIXED sl=1.5ATR tp=4ATR      IS n= 105  win%= 30.5  IS %PF=1.078
+     TIME 40bars no-stop          IS n= 105  win%= 48.6  IS %PF=1.065
+     TIME 10bars no-stop          IS n= 105  win%= 46.7  IS %PF=1.044
+     FIXED sl=1.5ATR tp=3ATR      IS n= 105  win%= 36.2  IS %PF=1.034
+     FIXED sl=3ATR tp=1ATR        IS n= 105  win%= 80.0  IS %PF=0.942
+     TIME 10bars sl=2ATR          IS n= 105  win%= 42.9  IS %PF=0.938
+     FIXED sl=1.5ATR tp=2ATR      IS n= 105  win%= 44.8  IS %PF=0.935
+     FIXED sl=1ATR tp=2ATR        IS n= 105  win%= 38.1  IS %PF=0.922
+     FIXED sl=2ATR tp=1ATR        IS n= 105  win%= 71.4  IS %PF=0.872
+     TRAIL 1.5ATR                 IS n= 105  win%= 30.5  IS %PF=0.868
+     FIXED sl=1.5ATR tp=1ATR      IS n= 105  win%= 58.1  IS %PF=0.663
+     FIXED sl=1ATR tp=1ATR        IS n= 105  win%= 50.5  IS %PF=0.656
+  FROZEN IS WINNER: FIXED sl=2ATR tp=4ATR  IS n=105  IS %PF=1.311  (17/25 grid configs had IS %PF > 1)
+  [H1 exit] independent Python exit re-implementation, IS: 105 vs 105 trades, ALL IDENTICAL (exit bar + pnl)
+  [H1 exit] independent Python exit re-implementation, OOS: 105 vs 105 trades, ALL IDENTICAL (exit bar + pnl)
+  [H1 exit] EXIT truncation (OHLC/ATR/crosses rebuilt from data[:exit_bar+1], 210 trades): mismatches=0 -> PASS
+  [H1 exit] EXIT future-perturbation (all bars after the exit bar replaced by garbage, 210 trades): mismatches=0 -> PASS
+  [H1 exit] POSITIVE CONTROL (stop/target tested on bar k+1's range): perturbation test caught it on 56/100 trades (DETECTED as required); leaky IS %PF=1.309 (what a one-bar peek would look like)
+  IS  frozen: n=105 win%=41.0 %PF=1.311 sum%=40.0 | LONG n=52 %PF=1.392 sum%=24.8 | SHORT n=53 %PF=1.232 sum%=15.1 | median hold=16 bars; buy&hold=+28.4%
+      by entry year: 2021: n=29 %PF=1.42 sum%=+22.7; 2022: n=40 %PF=1.56 sum%=+23.3; 2023: n=36 %PF=0.82 sum%=-6.1
+      IS null A (mean n=108 vs 105): median=0.828 -> IS winner p(K=1)=0.0290, vs best-of-25 random (median 1.327) p=0.5160
+  OOS frozen (untouched): n=105 win%=42.9 %PF=1.304 sum%=26.9 | LONG n=53 %PF=1.269 sum%=11.2 | SHORT n=52 %PF=1.335 sum%=15.7 | median hold=16 bars; buy&hold=+100.7%
+      by entry year: 2024: n=40 %PF=1.26 sum%=+10.4; 2025: n=43 %PF=1.37 sum%=+11.7; 2026: n=22 %PF=1.30 sum%=+4.8
+      null A (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=106 vs 105): median=0.934 p95=1.300 -> real at 95.3th pct; p(K=1)=0.0470 p(K=25)=0.6998 (best-of-K median 1.367) p(K=125)=0.9968
+      null Ad (random timing, p_long=0.50, same exit + cross backstop + real spread; 1000 draws, mean n=100 vs 105): median=0.942 p95=1.371 -> real at 92.0th pct; p(K=1)=0.0800 p(K=25)=0.8750 (best-of-K median 1.479) p(K=125)=1.0000
+  VERDICT (worse of A/Ad at K=25): DOES NOT SURVIVE
+  DIAGNOSTIC ONLY (not used for selection; shows whether the frozen pick was unlucky): OOS %PF across all 25 configs: median=0.980, 11/25 > 1.0; hindsight-best FIXED sl=2ATR tp=4ATR OOS %PF=1.304 (picked with hindsight: compare to the best-of-25 null median above, not to p(K=1))
+
+==============================================================================================================
+BTCUSD H4 - EMA(84)xEMA(200) entry, exit grid K=25
+BTCUSD: n=17276 bars 2017-07-03 00:00:00 -> 2026-09-27 08:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 20:00:00 (5866 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 08:00:00 (6003 bars, untouched)
+point=0.01; IS crosses=18 OOS crosses=30; IS floor=30 (DECLARED H4 EXCEPTION, below folder floor 100)
+==============================================================================================================
+  IS crosses 18 < 30 -> NOT SEARCHED (pre-declared), no verdict, not in K.
+
+==============================================================================================================
+SUMMARY (verdict = worse of null A / Ad at K=25; p at K=125 = across all searched series)
+==============================================================================================================
+series      frozen IS winner              aud  IS n  IS%PF  ISp25  OOS n  OOS%PF  L %PF  S %PF  pctA    pA1   pAd1   pA25  pAd25  pA125 pAd125  verdict
+GOLD M15    FIXED sl=3ATR tp=3ATR        PASS   708  0.891  1.000    635   0.933  0.963  0.906    44  0.555  0.520  1.000  1.000  1.000  1.000  DOES NOT SURVIVE
+GOLD H1     FIXED sl=3ATR tp=4ATR        PASS   195  0.849  1.000    169   0.798  0.839  0.765    12  0.876  0.861  1.000  1.000  1.000  1.000  DOES NOT SURVIVE
+GOLD H4     FIXED sl=1.5ATR tp=2ATR      PASS    53  1.073  1.000     35   1.409  2.908  0.804    87  0.128  0.174  0.971  0.992  1.000  1.000  DOES NOT SURVIVE (LOW POWER; below folder IS floor)
+BTCUSD M15  FIXED sl=3ATR tp=4ATR        PASS   438  0.889  0.985    454   0.722  0.727  0.719     9  0.908  0.914  1.000  1.000  1.000  1.000  DOES NOT SURVIVE
+BTCUSD H1   FIXED sl=2ATR tp=4ATR        PASS   105  1.311  0.516    105   1.304  1.269  1.335    95  0.047  0.080  0.700  0.875  0.997  1.000  DOES NOT SURVIVE
+BTCUSD H4   -                               -     -      -      -      -       -      -      -     -      -      -      -      -      -      -  NOT SEARCHED (IS n too small)
+Diagnostic (NOT selection): median OOS %PF over the whole grid / hindsight-best config per series:
+   GOLD M15     grid median OOS %PF=0.936; hindsight-best TIME 40bars sl=2ATR 1.076
+   GOLD H1      grid median OOS %PF=0.775; hindsight-best FIXED sl=3ATR tp=2ATR 0.927
+   GOLD H4      grid median OOS %PF=1.111; hindsight-best TRAIL 1.5ATR 1.777
+   BTCUSD M15   grid median OOS %PF=0.607; hindsight-best FIXED sl=1.5ATR tp=4ATR 0.737
+   BTCUSD H1    grid median OOS %PF=0.980; hindsight-best FIXED sl=2ATR tp=4ATR 1.304
