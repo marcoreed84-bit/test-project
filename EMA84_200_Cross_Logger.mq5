@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.02"
+#property version   "1.03"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -60,6 +60,19 @@ input int    InpLookbackBars     = 200;       // v1.01: how many closed bars bac
                                                // leave the platform closed longer than that on any
                                                // tracked timeframe, or a gap longer than this will
                                                // silently skip the crosses inside it.
+
+input group "=== Historical markers (chart's own timeframe only) ==="
+input bool   InpShowHistoricalMarkers = true;  // draws past ENTRY/EXIT signals under the v1.02 rule,
+                                                // with a $ tag at each exit, for whichever of
+                                                // InpTF1-4 matches the CHART's own timeframe - a
+                                                // marker needs real time/price coordinates on a
+                                                // specific chart, so it can't be drawn for the other
+                                                // 3 tracked timeframes from here.
+input int    InpHistoricalMarkerBars  = 2000;  // how far back (in this chart's own bars) to draw -
+                                                // capped deliberately: this project has hit real MT5
+                                                // freeze bugs from indicators creating too many chart
+                                                // objects at once, so "all history" is not the default.
+input int    InpArrowSize             = 1;
 
 input group "=== Panel ==="
 input bool   InpShowPanel        = true;
@@ -93,6 +106,13 @@ datetime g_posEntryTime[4];
 double   g_posEntryPrice[4];
 datetime g_lastProcessedBarTime[4];   // watermark so bars already scanned for pos events aren't rechecked
 
+//--- v1.03: historical chart markers - only meaningful for whichever
+//--- tracked TF equals the chart's own PERIOD_CURRENT, since a marker
+//--- needs real time/price coordinates on this specific chart.
+int  g_chartTfSlot = -1;        // index into g_tf[] matching PERIOD_CURRENT, -1 if none
+bool g_markersBuilt = false;
+int  g_markerSeq = 0;           // unique suffix for marker object names
+
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
@@ -102,6 +122,10 @@ int OnInit()
    g_lastBarTime = 0;
 
    g_tf[0] = InpTF1; g_tf[1] = InpTF2; g_tf[2] = InpTF3; g_tf[3] = InpTF4;
+   g_chartTfSlot = -1;
+   for(int s = 0; s < 4; s++) if(g_tf[s] == PERIOD_CURRENT) { g_chartTfSlot = s; break; }
+   g_markersBuilt = false;
+   g_markerSeq = 0;
    for(int k = 0; k < 4; k++)
      {
       g_fastHandle[k] = INVALID_HANDLE;
@@ -160,6 +184,124 @@ void LogCross(const datetime t, const string sym, const string per,
    FileClose(h);
    PrintFormat("EMA Cross Logger: %s %s %s cross at %s (%.*f)",
                sym, per, dir, TimeToString(t, TIME_DATE | TIME_SECONDS), _Digits, price);
+  }
+
+//--- v1.03: draws an entry arrow, or an exit arrow + a "$+12.34" text tag,
+//--- on the chart. Only called for the TF that matches this chart's own
+//--- PERIOD_CURRENT (see g_chartTfSlot) - every object name is unique
+//--- (g_markerSeq) so nothing here is ever re-touched/animated, it's a
+//--- one-shot draw per historical event, cheap and not a per-tick cost.
+void DrawMarker(const datetime t, const double price, const bool isEntry, const bool isUp,
+                 const double dollarMove)
+  {
+   g_markerSeq++;
+   string nm = PFX + "mk_" + IntegerToString(g_markerSeq);
+   int code = isEntry ? (isUp ? 233 : 234) : 251;   // 233=up arrow, 234=down arrow, 251=small x (exit)
+   color col = isUp ? InpPanelUpColor : InpPanelDownColor;
+
+   ObjectCreate(0, nm, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, code);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, InpArrowSize);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, isUp ? ANCHOR_TOP : ANCHOR_BOTTOM);
+
+   if(!isEntry)
+     {
+      string tagNm = PFX + "tag_" + IntegerToString(g_markerSeq);
+      string txt = (dollarMove >= 0 ? "+$" : "-$") + DoubleToString(MathAbs(dollarMove), 2);
+      ObjectCreate(0, tagNm, OBJ_TEXT, 0, t, price);
+      ObjectSetString(0, tagNm, OBJPROP_TEXT, " " + txt);
+      ObjectSetInteger(0, tagNm, OBJPROP_COLOR, dollarMove >= 0 ? InpPanelUpColor : InpPanelDownColor);
+      ObjectSetInteger(0, tagNm, OBJPROP_FONTSIZE, 7);
+      ObjectSetInteger(0, tagNm, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, tagNm, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, tagNm, OBJPROP_ANCHOR, isUp ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER);
+     }
+  }
+
+//--- v1.03: one-shot historical replay of the v1.02 regime+position rule
+//--- over up to InpHistoricalMarkerBars closed bars, drawing every past
+//--- ENTRY/EXIT. Runs ONCE per attach (g_markersBuilt), only for the TF
+//--- slot matching this chart's own PERIOD_CURRENT - everything here is a
+//--- single bounded pass over already-fetched arrays, no further API
+//--- calls inside the loop, same cost shape as this file's other
+//--- bounded recomputes.
+void BuildHistoricalMarkers()
+  {
+   if(g_chartTfSlot < 0) { g_markersBuilt = true; return; }   // none of the 4 tracked TFs is this chart's own - nothing to draw, don't keep re-checking every bar
+   ENUM_TIMEFRAMES tf = g_tf[g_chartTfSlot];
+   int need = MathMin(InpHistoricalMarkerBars, iBars(_Symbol, tf) - 1) + InpSlowPeriod;
+   need = MathMin(need, iBars(_Symbol, tf) - 1);
+   if(need < InpSlowPeriod + 2) return;   // not enough history YET - retry next bar (don't mark built)
+
+   int fh = iMA(_Symbol, tf, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   int sh = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(fh == INVALID_HANDLE || sh == INVALID_HANDLE) return;
+   if(BarsCalculated(fh) < need || BarsCalculated(sh) < need) { IndicatorRelease(fh); IndicatorRelease(sh); return; }
+
+   double ef[], es[], cl[];
+   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true);
+   if(CopyBuffer(fh, 0, 0, need, ef) < need || CopyBuffer(sh, 0, 0, need, es) < need ||
+      CopyClose(_Symbol, tf, 0, need, cl) < need)
+     { IndicatorRelease(fh); IndicatorRelease(sh); return; }
+   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false);   // 0 = oldest
+   IndicatorRelease(fh); IndicatorRelease(sh);
+
+   //--- show only the last InpHistoricalMarkerBars of this (possibly
+   //--- warmup-padded) window, so the EMA itself still had InpSlowPeriod
+   //--- bars to settle before the first drawn signal.
+   int startIdx = MathMax(1, need - InpHistoricalMarkerBars);
+
+   bool posOpen = false; string posDir = ""; datetime entryTime = 0; double entryPx = 0.0;
+   string regimeDir = (ef[startIdx - 1] > es[startIdx - 1]) ? "UP" : "DOWN";
+
+   for(int j = startIdx; j < need; j++)
+     {
+      datetime t = iTime(_Symbol, tf, need - 1 - j);
+      double px = cl[j];
+      bool regimeUp = ef[j] > es[j];
+      bool regimeUpPrev = ef[j - 1] > es[j - 1];
+
+      if(regimeUp != regimeUpPrev)
+        {
+         string newDir = regimeUp ? "UP" : "DOWN";
+         if(posOpen)
+           {
+            double mv = (px - entryPx) * (posDir == "UP" ? 1.0 : -1.0);
+            DrawMarker(t, px, false, posDir == "UP", mv);
+           }
+         DrawMarker(t, px, true, regimeUp, 0.0);
+         regimeDir = newDir; posOpen = true; posDir = newDir; entryTime = t; entryPx = px;
+         continue;
+        }
+
+      bool closeAboveFast = px > ef[j];
+      if(posOpen)
+        {
+         bool exitNow = (posDir == "UP" && !closeAboveFast) || (posDir == "DOWN" && closeAboveFast);
+         if(exitNow)
+           {
+            double mv = (px - entryPx) * (posDir == "UP" ? 1.0 : -1.0);
+            DrawMarker(t, px, false, posDir == "UP", mv);
+            posOpen = false;
+           }
+        }
+      else
+        {
+         bool reenterUp = (regimeDir == "UP" && closeAboveFast);
+         bool reenterDn = (regimeDir == "DOWN" && !closeAboveFast);
+         if(reenterUp || reenterDn)
+           {
+            string dir = reenterUp ? "UP" : "DOWN";
+            DrawMarker(t, px, true, reenterUp, 0.0);
+            posOpen = true; posDir = dir; entryTime = t; entryPx = px;
+           }
+        }
+     }
+
+   g_markersBuilt = true;
   }
 
 void LogPosition(const datetime t, const string sym, const string per,
@@ -243,8 +385,13 @@ void CheckTimeframe(const int k)
          string newDir = regimeUp ? "UP" : "DOWN";
          LogCross(barTime, _Symbol, EnumToString(tf), newDir, px, ef[j], es[j]);
          if(g_posOpen[k])
+           {
             LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
+            if(k == g_chartTfSlot && g_markersBuilt)
+               DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0));
+           }
          LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
+         if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0);
          g_lastDir[k] = newDir; g_lastCrossTime[k] = barTime; g_lastCrossPrice[k] = px;
          g_posOpen[k] = true; g_posDir[k] = newDir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
          continue;
@@ -262,6 +409,8 @@ void CheckTimeframe(const int k)
          if(exitNow)
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
+            if(k == g_chartTfSlot && g_markersBuilt)
+               DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0));
             g_posOpen[k] = false;
            }
         }
@@ -273,6 +422,7 @@ void CheckTimeframe(const int k)
            {
             string dir = reenterUp ? "UP" : "DOWN";
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", dir, px);
+            if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, reenterUp, 0.0);
             g_posOpen[k] = true; g_posDir[k] = dir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
            }
         }
@@ -396,6 +546,8 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
    bool newChartBar = (g_firstCalc || lastBar != g_lastBarTime);
    g_lastBarTime = lastBar;
    g_firstCalc = false;
+
+   if(InpShowHistoricalMarkers && !g_markersBuilt) BuildHistoricalMarkers();
 
    for(int k = 0; k < 4; k++) CheckTimeframe(k);
 
