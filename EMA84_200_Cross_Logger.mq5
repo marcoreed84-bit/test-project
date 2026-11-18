@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.13"
+#property version   "1.14"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -114,6 +114,23 @@ input double InpMinGapATR             = 1.5;   // v1.13: 3.0->1.5, per direct re
                                                 // have pulled away again, not just be moving locally.
                                                 // Required ALONGSIDE the slope check, not instead of it.
 
+input group "=== LT Super Trend confluence filter ==="
+input bool   InpUseLTTrendFilter      = false;  // v1.14: per direct request - a NEW entry (or re-entry)
+                                                 // also requires SuperTrend_MTF.mq5's OWN trend direction
+                                                 // (the "LT Trend" indicator) to agree, on the SAME
+                                                 // timeframe being checked. Read live via iCustom() from
+                                                 // SuperTrend_MTF.mq5's trend-state buffer (index 8) -
+                                                 // SuperTrend_MTF.mq5 must be present/compiled in your
+                                                 // Indicators folder for this to work; it does not need
+                                                 // to be attached to any chart itself, iCustom() runs it
+                                                 // internally regardless. Off by default - an existing
+                                                 // chart setup is unaffected unless you turn this on.
+input int    InpLTTrend_AtrPeriod     = 10;     // matches SuperTrend_MTF's own InpAtrPeriod default -
+                                                 // change this if you run LT Trend with different
+                                                 // settings, so the confluence check matches what you
+                                                 // actually see on your chart.
+input double InpLTTrend_AtrMultiplier = 3.0;    // matches SuperTrend_MTF's own InpAtrMultiplier default
+
 input group "=== Panel ==="
 input bool   InpShowPanel        = true;
 input int    InpPanelX            = 10;
@@ -133,6 +150,7 @@ ENUM_TIMEFRAMES g_tf[4];
 int    g_fastHandle[4];
 int    g_slowHandle[4];
 int    g_atrHandle[4];
+int    g_ltTrendHandle[4];   // v1.14: SuperTrend_MTF.mq5 confluence, only created if InpUseLTTrendFilter
 datetime g_lastTfBarTime[4];
 string g_lastDir[4];      // regime direction: "UP" / "DOWN" / "" (unknown yet)
 datetime g_lastCrossTime[4];
@@ -158,7 +176,7 @@ int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                       StringFormat("EMA%d/%d Cross Logger v1.13", InpFastPeriod, InpSlowPeriod));
+                       StringFormat("EMA%d/%d Cross Logger v1.14", InpFastPeriod, InpSlowPeriod));
    g_firstCalc = true;
    g_lastBarTime = 0;
 
@@ -174,7 +192,7 @@ int OnInit()
    //--- draw on any chart, on any timeframe. _Period is the predefined
    //--- variable holding the chart's REAL timeframe.
    for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
-   PrintFormat("EMA Cross Logger v1.13: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+   PrintFormat("EMA Cross Logger v1.14: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
                EnumToString(_Period), g_chartTfSlot,
                g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
@@ -184,6 +202,7 @@ int OnInit()
       g_fastHandle[k] = INVALID_HANDLE;
       g_slowHandle[k] = INVALID_HANDLE;
       g_atrHandle[k] = INVALID_HANDLE;
+      g_ltTrendHandle[k] = INVALID_HANDLE;
       g_lastTfBarTime[k] = 0;
       g_lastDir[k] = "";
       g_lastCrossTime[k] = 0;
@@ -224,6 +243,7 @@ void OnDeinit(const int reason)
       if(g_fastHandle[k] != INVALID_HANDLE) IndicatorRelease(g_fastHandle[k]);
       if(g_slowHandle[k] != INVALID_HANDLE) IndicatorRelease(g_slowHandle[k]);
       if(g_atrHandle[k] != INVALID_HANDLE) IndicatorRelease(g_atrHandle[k]);
+      if(g_ltTrendHandle[k] != INVALID_HANDLE) IndicatorRelease(g_ltTrendHandle[k]);
      }
    ObjectsDeleteAll(0, PFX);
   }
@@ -315,9 +335,12 @@ void BuildHistoricalMarkers()
       g_slowHandle[g_chartTfSlot] = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
    if(g_atrHandle[g_chartTfSlot] == INVALID_HANDLE)
       g_atrHandle[g_chartTfSlot] = iATR(_Symbol, tf, 14);
+   if(InpUseLTTrendFilter && g_ltTrendHandle[g_chartTfSlot] == INVALID_HANDLE)
+      g_ltTrendHandle[g_chartTfSlot] = iCustom(_Symbol, tf, "SuperTrend_MTF", InpLTTrend_AtrPeriod, InpLTTrend_AtrMultiplier);
    int fh = g_fastHandle[g_chartTfSlot];
    int sh = g_slowHandle[g_chartTfSlot];
    int ah = g_atrHandle[g_chartTfSlot];
+   int lh = g_ltTrendHandle[g_chartTfSlot];
    if(fh == INVALID_HANDLE || sh == INVALID_HANDLE || ah == INVALID_HANDLE) return;
    if(BarsCalculated(fh) < need + 1 || BarsCalculated(sh) < need + 1 || BarsCalculated(ah) < need + 1) return;   // still warming up - retry next bar
 
@@ -356,8 +379,11 @@ void BuildHistoricalMarkers()
             posOpen = false;
            }
          regimeDir = newDir;
-         //--- v1.06: same sideways gate as the live tracker.
-         if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
+         //--- v1.06: same sideways gate as the live tracker. v1.14: also
+         //--- require LT Trend agreement if the filter is on.
+         bool ltOk1 = true;
+         if(InpUseLTTrendFilter) { bool got; ltOk1 = LTTrendAgrees(lh, need - j, regimeUp, got); if(!got) ltOk1 = false; }
+         if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars) && ltOk1)
            {
             DrawMarker(t, px, true, regimeUp, 0.0, atrArr[j]);
             posOpen = true; posDir = newDir; entryTime = t; entryPx = px;
@@ -384,7 +410,9 @@ void BuildHistoricalMarkers()
          bool reenterDn = (regimeDir == "DOWN" && !closeAboveFast);
          if(reenterUp || reenterDn)
            {
-            if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
+            bool ltOk2 = true;
+            if(InpUseLTTrendFilter) { bool got; ltOk2 = LTTrendAgrees(lh, need - j, reenterUp, got); if(!got) ltOk2 = false; }
+            if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars) && ltOk2)
               {
                string dir = reenterUp ? "UP" : "DOWN";
                DrawMarker(t, px, true, reenterUp, 0.0, atrArr[j]);
@@ -402,7 +430,7 @@ void BuildHistoricalMarkers()
    //--- active - fixed, per direct report "still no change" with no way
    //--- to verify from the log what was actually running.
    PrintFormat("EMA Cross Logger v%s: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars, min gap %.2fxATR)",
-               "1.13", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
+               "1.14", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
                InpMinSlopeATR, InpSlopeLookbackBars, InpMinGapATR);
   }
 
@@ -457,6 +485,26 @@ bool IsTrending(const double &ef[], const double &es[], const double &atrArr[], 
    return(gap >= InpMinGapATR * atrArr[j]);
   }
 
+//--- v1.14: confluence check against SuperTrend_MTF.mq5's own trend-state
+//--- buffer (index 8 - confirmed from its own SetIndexBuffer() calls).
+//--- Reads via iCustom() on the SAME timeframe/shift being evaluated, so
+//--- it's asking "does LT Trend agree on THIS bar", not a different one.
+//--- ok=false means the read failed (handle not warmed up yet, or
+//--- SuperTrend_MTF.mq5 isn't compiled/available) - callers treat that as
+//--- "can't confirm agreement" and skip the entry, same conservative
+//--- default as every other warm-up gate in this file.
+bool LTTrendAgrees(const int handle, const int shift, const bool wantBull, bool &ok)
+  {
+   ok = false;
+   if(handle == INVALID_HANDLE) return(false);
+   double buf[];
+   ArraySetAsSeries(buf, true);
+   if(CopyBuffer(handle, 8, shift, 1, buf) < 1) return(false);
+   if(buf[0] == EMPTY_VALUE) return(false);
+   ok = true;
+   return((buf[0] > 0.0) == wantBull);
+  }
+
 void CheckTimeframe(const int k)
   {
    ENUM_TIMEFRAMES tf = g_tf[k];
@@ -469,6 +517,8 @@ void CheckTimeframe(const int k)
    if(g_fastHandle[k] == INVALID_HANDLE) g_fastHandle[k] = iMA(_Symbol, tf, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
    if(g_slowHandle[k] == INVALID_HANDLE) g_slowHandle[k] = iMA(_Symbol, tf, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
    if(g_atrHandle[k] == INVALID_HANDLE) g_atrHandle[k] = iATR(_Symbol, tf, 14);
+   if(InpUseLTTrendFilter && g_ltTrendHandle[k] == INVALID_HANDLE)
+      g_ltTrendHandle[k] = iCustom(_Symbol, tf, "SuperTrend_MTF", InpLTTrend_AtrPeriod, InpLTTrend_AtrMultiplier);
    if(g_fastHandle[k] == INVALID_HANDLE || g_slowHandle[k] == INVALID_HANDLE || g_atrHandle[k] == INVALID_HANDLE) return;
 
    //--- v1.06: fetch InpSlopeLookbackBars of extra history ahead of the
@@ -531,7 +581,10 @@ void CheckTimeframe(const int k)
          //--- EMA84 is actually trending on this bar - otherwise stay flat
          //--- (the re-entry branch below will open it on a later bar once
          //--- the slope condition is met, same as any other re-entry).
-         if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
+         //--- v1.14: also require LT Trend agreement if the filter is on.
+         bool ltOk1 = true;
+         if(InpUseLTTrendFilter) { bool got; ltOk1 = LTTrendAgrees(g_ltTrendHandle[k], need - j, regimeUp, got); if(!got) ltOk1 = false; }
+         if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars) && ltOk1)
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
             if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0, atrArr[j]);
@@ -561,7 +614,10 @@ void CheckTimeframe(const int k)
         {
          bool reenterUp = (g_lastDir[k] == "UP" && closeAboveFast);
          bool reenterDn = (g_lastDir[k] == "DOWN" && !closeAboveFast);
-         if((reenterUp || reenterDn) && IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
+         bool ltOk2 = true;
+         if(InpUseLTTrendFilter && (reenterUp || reenterDn))
+           { bool got; ltOk2 = LTTrendAgrees(g_ltTrendHandle[k], need - j, reenterUp, got); if(!got) ltOk2 = false; }
+         if((reenterUp || reenterDn) && IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars) && ltOk2)
            {
             string dir = reenterUp ? "UP" : "DOWN";
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", dir, px);
