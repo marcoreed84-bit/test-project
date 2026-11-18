@@ -1,0 +1,172 @@
+[GOLD contamination filter] dropped 9802 pre-2014-06-13 01:30:00 rows (daily/hourly bars mislabeled M15, spread=0) BEFORE any EMA/resample
+
+====================================================================================================
+GOLD M15 -- EMA(84) x EMA(200) crossover, stop-and-reverse
+GOLD: n=290054 bars 2014-06-13 01:30:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 01:30:00 -> 2020-12-31 18:45:00 (154599 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+point=0.01 (CSV meta header); crosses IS=708 OOS=635; honest K: 6 per instrument, 12 across Gold+BTC
+====================================================================================================
+  [M15] EMA check: common.ema vs explicit recursion max|diff|=0.00e+00; crossover bars identical to an MT5-style SMA-seeded EMA after warm-up: 100.00% (1343 vs 1343 crosses)
+  [M15 REAL] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [M15 LEAKY control (must FAIL)] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=300 -> FAIL - LOOKAHEAD
+  [M15] leaky positive control IS: n=708 %PF=1.116  <- what a one-bar forming-bar leak would look like (E1)
+   E1_SAR IS: n=708  win%=28.0  %PF=0.955  sum%=-13.6  long %PF=1.104 (n=354) short %PF=0.818 (n=354); median hold=152 bars; time long=51%; exits by opposite cross=708/708; buy&hold over window=+48.9%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=469 vs 708): median=0.968 p95=1.237 -> real at 46.3th pct; p(K=1)=0.5370 p(K=6)=0.9912 p(K=12)=0.9998 [Sidak K=6: 0.9901]; direction-matched p(K=1)=0.5640
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.950 p95=1.150 -> real at 51.5th pct; p(K=1)=0.4850 p(K=6)=0.9802 p(K=12)=0.9998 [Sidak K=6: 0.9813]
+      NOTE: null A mean n=469 misses real n=708 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E1_SAR OOS: n=635  win%=30.2  %PF=1.170  sum%=48.7  long %PF=1.527 (n=317) short %PF=0.871 (n=318); median hold=144 bars; time long=54%; exits by opposite cross=634/635; buy&hold over window=+124.5%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=420 vs 635): median=1.049 p95=1.371 -> real at 74.2th pct; p(K=1)=0.2580 p(K=6)=0.8364 p(K=12)=0.9756 [Sidak K=6: 0.8331]; direction-matched p(K=1)=0.2630
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.006 p95=1.215 -> real at 90.4th pct; p(K=1)=0.0960 p(K=6)=0.4620 p(K=12)=0.7030 [Sidak K=6: 0.4542]
+      NOTE: null A mean n=420 misses real n=635 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E2_SAR+2ATR IS: n=708  win%=14.7  %PF=0.907  sum%=-15.7  long %PF=1.168 (n=354) short %PF=0.653 (n=354); median hold=27 bars; time long=54%; exits by opposite cross=130/708; buy&hold over window=+48.9%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=715 vs 708): median=0.947 p95=1.174 -> real at 39.6th pct; p(K=1)=0.6040 p(K=6)=0.9966 p(K=12)=1.0000 [Sidak K=6: 0.9961]; direction-matched p(K=1)=0.6240
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.812 p95=1.001 -> real at 79.5th pct; p(K=1)=0.2050 p(K=6)=0.7486 p(K=12)=0.9316 [Sidak K=6: 0.7475]
+   E2_SAR+2ATR OOS: n=635  win%=15.4  %PF=1.015  sum%=2.5  long %PF=1.243 (n=317) short %PF=0.811 (n=318); median hold=27 bars; time long=55%; exits by opposite cross=129/635; buy&hold over window=+124.5%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=636 vs 635): median=1.020 p95=1.277 -> real at 48.9th pct; p(K=1)=0.5110 p(K=6)=0.9874 p(K=12)=1.0000 [Sidak K=6: 0.9863]; direction-matched p(K=1)=0.5010
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.920 p95=1.140 -> real at 76.7th pct; p(K=1)=0.2330 p(K=6)=0.7978 p(K=12)=0.9562 [Sidak K=6: 0.7964]
+
+====================================================================================================
+GOLD H1 (resampled from M15, closed bars only) -- EMA(84) x EMA(200) crossover, stop-and-reverse
+GOLD: n=72694 bars 2014-06-13 02:00:00 -> 2026-09-25 23:00:00 | IS 2014-06-13 02:00:00 -> 2020-12-31 18:00:00 (38812 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:00:00 (33882 bars, untouched)
+point=0.01 (CSV meta header); crosses IS=195 OOS=169; honest K: 6 per instrument, 12 across Gold+BTC
+====================================================================================================
+  [H1] EMA check: common.ema vs explicit recursion max|diff|=0.00e+00; crossover bars identical to an MT5-style SMA-seeded EMA after warm-up: 100.00% (364 vs 364 crosses)
+  [H1 REAL] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H1 LEAKY control (must FAIL)] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=300 -> FAIL - LOOKAHEAD
+  [H1] leaky positive control IS: n=195 %PF=0.963  <- what a one-bar forming-bar leak would look like (E1)
+  [H1] RESAMPLE truncation: 300 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 297/299, bar correctly ABSENT with the filter on in 299/299
+   E1_SAR IS: n=195  win%=24.6  %PF=0.887  sum%=-18.8  long %PF=1.140 (n=98) short %PF=0.678 (n=97); median hold=114 bars; time long=55%; exits by opposite cross=195/195; buy&hold over window=+48.9%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=130 vs 195): median=0.932 p95=1.468 -> real at 43.8th pct; p(K=1)=0.5620 p(K=6)=0.9920 p(K=12)=1.0000 [Sidak K=6: 0.9929]; direction-matched p(K=1)=0.5820
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.998 p95=1.393 -> real at 28.3th pct; p(K=1)=0.7170 p(K=6)=0.9994 p(K=12)=1.0000 [Sidak K=6: 0.9995]
+      NOTE: null A mean n=130 misses real n=195 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E1_SAR OOS: n=169  win%=28.4  %PF=1.134  sum%=21.2  long %PF=1.825 (n=84) short %PF=0.597 (n=85); median hold=127 bars; time long=57%; exits by opposite cross=168/169; buy&hold over window=+124.0%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=112 vs 169): median=1.048 p95=1.740 -> real at 59.3th pct; p(K=1)=0.4070 p(K=6)=0.9558 p(K=12)=0.9986 [Sidak K=6: 0.9565]; direction-matched p(K=1)=0.4350
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.044 p95=1.569 -> real at 62.6th pct; p(K=1)=0.3740 p(K=6)=0.9400 p(K=12)=0.9966 [Sidak K=6: 0.9398]
+      NOTE: null A mean n=112 misses real n=169 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E2_SAR+2ATR IS: n=195  win%=12.3  %PF=0.869  sum%=-11.6  long %PF=0.981 (n=98) short %PF=0.760 (n=97); median hold=21 bars; time long=56%; exits by opposite cross=37/195; buy&hold over window=+48.9%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=207 vs 195): median=0.989 p95=1.433 -> real at 28.9th pct; p(K=1)=0.7110 p(K=6)=0.9996 p(K=12)=1.0000 [Sidak K=6: 0.9994]; direction-matched p(K=1)=0.7080
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.900 p95=1.343 -> real at 44.1th pct; p(K=1)=0.5590 p(K=6)=0.9930 p(K=12)=1.0000 [Sidak K=6: 0.9926]
+   E2_SAR+2ATR OOS: n=169  win%=14.8  %PF=0.907  sum%=-8.4  long %PF=1.242 (n=84) short %PF=0.639 (n=85); median hold=18 bars; time long=50%; exits by opposite cross=35/169; buy&hold over window=+124.0%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=173 vs 169): median=1.143 p95=1.705 -> real at 20.8th pct; p(K=1)=0.7920 p(K=6)=1.0000 p(K=12)=1.0000 [Sidak K=6: 0.9999]; direction-matched p(K=1)=0.7800
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.947 p95=1.430 -> real at 43.0th pct; p(K=1)=0.5700 p(K=6)=0.9944 p(K=12)=0.9998 [Sidak K=6: 0.9937]
+
+====================================================================================================
+GOLD H4 (resampled from M15, closed bars only) -- EMA(84) x EMA(200) crossover, stop-and-reverse
+GOLD: n=18943 bars 2014-06-13 04:00:00 -> 2026-09-25 20:00:00 | IS 2014-06-13 04:00:00 -> 2020-12-31 16:00:00 (10083 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 20:00:00 (8860 bars, untouched)
+point=0.01 (CSV meta header); crosses IS=53 OOS=35; honest K: 6 per instrument, 12 across Gold+BTC
+====================================================================================================
+  [H4] EMA check: common.ema vs explicit recursion max|diff|=0.00e+00; crossover bars identical to an MT5-style SMA-seeded EMA after warm-up: 100.00% (88 vs 88 crosses)
+  [H4 REAL] truncation test on 88 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H4 LEAKY control (must FAIL)] truncation test on 88 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=88 -> FAIL - LOOKAHEAD
+  [H4] leaky positive control IS: n=53 %PF=0.971  <- what a one-bar forming-bar leak would look like (E1)
+  [H4] RESAMPLE truncation: 88 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 88/88, bar correctly ABSENT with the filter on in 88/88
+  H4 alignment vs NATIVE GOLD_H4.csv (2022-07-04 04:00:00 -> 2026-09-25 20:00:00): 6544 common bars, 0 native-only, 0 resampled-only; exact-match (<=1 point) open=99.98%, high=100.00%, low=99.98%, close=100.00%
+   E1_SAR IS: n=53  win%=24.5  %PF=0.826  sum%=-14.9  long %PF=1.380 (n=27) short %PF=0.384 (n=26); median hold=84 bars; time long=56%; exits by opposite cross=53/53; buy&hold over window=+48.9%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=36 vs 53): median=0.927 p95=2.111 -> real at 42.1th pct; p(K=1)=0.5790 p(K=6)=0.9974 p(K=12)=1.0000 [Sidak K=6: 0.9944]; direction-matched p(K=1)=0.5790
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.044 p95=2.099 -> real at 27.0th pct; p(K=1)=0.7300 p(K=6)=0.9998 p(K=12)=1.0000 [Sidak K=6: 0.9996]
+      NOTE: null A mean n=36 misses real n=53 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E1_SAR OOS: n=35  win%=37.1  %PF=2.341  sum%=60.8  long %PF=6.127 (n=17) short %PF=0.439 (n=18); median hold=171 bars; time long=62%; exits by opposite cross=34/35; buy&hold over window=+123.6%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=23 vs 35): median=1.185 p95=4.405 -> real at 81.7th pct; p(K=1)=0.1830 p(K=6)=0.7000 p(K=12)=0.9074 [Sidak K=6: 0.7026]; direction-matched p(K=1)=0.1980
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.331 p95=2.824 -> real at 89.3th pct; p(K=1)=0.1070 p(K=6)=0.4976 p(K=12)=0.7540 [Sidak K=6: 0.4929]
+      NOTE: null A mean n=23 misses real n=35 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E2_SAR+2ATR IS: n=53  win%=5.7  %PF=0.307  sum%=-34.7  long %PF=0.591 (n=27) short %PF=0.034 (n=26); median hold=17 bars; time long=64%; exits by opposite cross=6/53; buy&hold over window=+48.9%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=56 vs 53): median=0.911 p95=1.865 -> real at 3.6th pct; p(K=1)=0.9640 p(K=6)=1.0000 p(K=12)=1.0000 [Sidak K=6: 1.0000]; direction-matched p(K=1)=0.9540
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.964 p95=1.846 -> real at 0.9th pct; p(K=1)=0.9910 p(K=6)=1.0000 p(K=12)=1.0000 [Sidak K=6: 1.0000]
+   E2_SAR+2ATR OOS: n=35  win%=17.1  %PF=2.010  sum%=31.2  long %PF=5.367 (n=17) short %PF=0.015 (n=18); median hold=25 bars; time long=78%; exits by opposite cross=9/35; buy&hold over window=+123.6%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=36 vs 35): median=1.318 p95=3.200 -> real at 78.0th pct; p(K=1)=0.2200 p(K=6)=0.7740 p(K=12)=0.9492 [Sidak K=6: 0.7748]; direction-matched p(K=1)=0.2170
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.064 p95=2.626 -> real at 86.0th pct; p(K=1)=0.1400 p(K=6)=0.5976 p(K=12)=0.8330 [Sidak K=6: 0.5954]
+
+GOLD D1 (count only, not tested, not in K): crosses IS=4 OOS=8 -> far below any usable sample size
+
+====================================================================================================
+SILVER: no SILVER data of any timeframe in this environment -> NOT RUN (no verdict).
+
+====================================================================================================
+BTCUSD M15 -- EMA(84) x EMA(200) crossover, stop-and-reverse
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+point=0.01 (CSV meta header); crosses IS=438 OOS=454; honest K: 6 per instrument, 12 across Gold+BTC
+====================================================================================================
+  [M15] EMA check: common.ema vs explicit recursion max|diff|=0.00e+00; crossover bars identical to an MT5-style SMA-seeded EMA after warm-up: 100.00% (1231 vs 1231 crosses)
+  [M15 REAL] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [M15 LEAKY control (must FAIL)] truncation test on 300 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=300 -> FAIL - LOOKAHEAD
+  [M15] leaky positive control IS: n=438 %PF=1.168  <- what a one-bar forming-bar leak would look like (E1)
+   E1_SAR IS: n=438  win%=23.5  %PF=1.040  sum%=26.8  long %PF=1.183 (n=219) short %PF=0.901 (n=219); median hold=132 bars; time long=50%; exits by opposite cross=438/438; buy&hold over window=+27.8%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=291 vs 438): median=0.978 p95=1.349 -> real at 61.2th pct; p(K=1)=0.3880 p(K=6)=0.9538 p(K=12)=0.9966 [Sidak K=6: 0.9475]; direction-matched p(K=1)=0.3630
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.899 p95=1.198 -> real at 79.5th pct; p(K=1)=0.2050 p(K=6)=0.7576 p(K=12)=0.9418 [Sidak K=6: 0.7475]
+      NOTE: null A mean n=291 misses real n=438 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E1_SAR OOS: n=454  win%=28.2  %PF=0.952  sum%=-24.9  long %PF=1.150 (n=227) short %PF=0.773 (n=227); median hold=146 bars; time long=52%; exits by opposite cross=453/454; buy&hold over window=+99.3%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=300 vs 454): median=0.952 p95=1.303 -> real at 50.0th pct; p(K=1)=0.5000 p(K=6)=0.9840 p(K=12)=0.9998 [Sidak K=6: 0.9844]; direction-matched p(K=1)=0.5100
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.939 p95=1.202 -> real at 54.3th pct; p(K=1)=0.4570 p(K=6)=0.9754 p(K=12)=0.9994 [Sidak K=6: 0.9744]
+      NOTE: null A mean n=300 misses real n=454 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E2_SAR+2ATR IS: n=438  win%=12.3  %PF=0.974  sum%=-10.3  long %PF=1.078 (n=219) short %PF=0.874 (n=219); median hold=28 bars; time long=44%; exits by opposite cross=71/438; buy&hold over window=+27.8%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=446 vs 438): median=0.980 p95=1.279 -> real at 48.9th pct; p(K=1)=0.5110 p(K=6)=0.9856 p(K=12)=1.0000 [Sidak K=6: 0.9863]; direction-matched p(K=1)=0.4820
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.726 p95=0.978 -> real at 94.9th pct; p(K=1)=0.0510 p(K=6)=0.2698 p(K=12)=0.4644 [Sidak K=6: 0.2695]
+   E2_SAR+2ATR OOS: n=454  win%=12.6  %PF=0.777  sum%=-68.2  long %PF=0.913 (n=227) short %PF=0.652 (n=227); median hold=23 bars; time long=53%; exits by opposite cross=76/454; buy&hold over window=+99.3%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=471 vs 454): median=0.900 p95=1.181 -> real at 21.3th pct; p(K=1)=0.7870 p(K=6)=1.0000 p(K=12)=1.0000 [Sidak K=6: 0.9999]; direction-matched p(K=1)=0.8080
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.786 p95=1.028 -> real at 46.9th pct; p(K=1)=0.5310 p(K=6)=0.9890 p(K=12)=1.0000 [Sidak K=6: 0.9894]
+
+====================================================================================================
+BTCUSD H1 (resampled from M15, closed bars only) -- EMA(84) x EMA(200) crossover, stop-and-reverse
+BTCUSD: n=69052 bars 2017-07-03 00:00:00 -> 2026-09-27 11:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:00:00 (23459 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 11:00:00 (24012 bars, untouched)
+point=0.01 (CSV meta header); crosses IS=105 OOS=105; honest K: 6 per instrument, 12 across Gold+BTC
+====================================================================================================
+  [H1] EMA check: common.ema vs explicit recursion max|diff|=0.00e+00; crossover bars identical to an MT5-style SMA-seeded EMA after warm-up: 100.00% (290 vs 290 crosses)
+  [H1 REAL] truncation test on 290 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H1 LEAKY control (must FAIL)] truncation test on 290 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=290 -> FAIL - LOOKAHEAD
+  [H1] leaky positive control IS: n=105 %PF=1.359  <- what a one-bar forming-bar leak would look like (E1)
+  [H1] RESAMPLE truncation: 290 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 290/290, bar correctly ABSENT with the filter on in 290/290
+   E1_SAR IS: n=105  win%=26.7  %PF=1.192  sum%=59.4  long %PF=1.487 (n=52) short %PF=0.914 (n=53); median hold=135 bars; time long=49%; exits by opposite cross=105/105; buy&hold over window=+28.4%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=70 vs 105): median=1.037 p95=1.920 -> real at 64.9th pct; p(K=1)=0.3510 p(K=6)=0.9340 p(K=12)=0.9958 [Sidak K=6: 0.9253]; direction-matched p(K=1)=0.3700
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.956 p95=1.660 -> real at 74.2th pct; p(K=1)=0.2580 p(K=6)=0.8314 p(K=12)=0.9738 [Sidak K=6: 0.8331]
+      NOTE: null A mean n=70 misses real n=105 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E1_SAR OOS: n=105  win%=34.3  %PF=1.412  sum%=86.8  long %PF=1.863 (n=53) short %PF=0.945 (n=52); median hold=161 bars; time long=53%; exits by opposite cross=104/105; buy&hold over window=+100.7%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=70 vs 105): median=1.211 p95=2.339 -> real at 63.9th pct; p(K=1)=0.3610 p(K=6)=0.9332 p(K=12)=0.9964 [Sidak K=6: 0.9319]; direction-matched p(K=1)=0.3530
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.004 p95=1.689 -> real at 86.6th pct; p(K=1)=0.1340 p(K=6)=0.5708 p(K=12)=0.8260 [Sidak K=6: 0.5782]
+      NOTE: null A mean n=70 misses real n=105 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E2_SAR+2ATR IS: n=105  win%=17.1  %PF=1.678  sum%=120.6  long %PF=1.966 (n=52) short %PF=1.399 (n=53); median hold=36 bars; time long=49%; exits by opposite cross=24/105; buy&hold over window=+28.4%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=109 vs 105): median=0.984 p95=1.673 -> real at 95.2th pct; p(K=1)=0.0480 p(K=6)=0.2548 p(K=12)=0.4430 [Sidak K=6: 0.2556]; direction-matched p(K=1)=0.0630
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.855 p95=1.491 -> real at 98.5th pct; p(K=1)=0.0150 p(K=6)=0.0902 p(K=12)=0.1668 [Sidak K=6: 0.0867]
+   E2_SAR+2ATR OOS: n=105  win%=20.0  %PF=1.476  sum%=55.5  long %PF=1.905 (n=53) short %PF=1.085 (n=52); median hold=31 bars; time long=53%; exits by opposite cross=24/105; buy&hold over window=+100.7%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=108 vs 105): median=1.241 p95=2.059 -> real at 67.9th pct; p(K=1)=0.3210 p(K=6)=0.8946 p(K=12)=0.9880 [Sidak K=6: 0.9020]; direction-matched p(K=1)=0.3090
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.879 p95=1.540 -> real at 93.3th pct; p(K=1)=0.0670 p(K=6)=0.3462 p(K=12)=0.5690 [Sidak K=6: 0.3404]
+
+====================================================================================================
+BTCUSD H4 (resampled from M15, closed bars only) -- EMA(84) x EMA(200) crossover, stop-and-reverse
+BTCUSD: n=17276 bars 2017-07-03 00:00:00 -> 2026-09-27 08:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 20:00:00 (5866 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 08:00:00 (6003 bars, untouched)
+point=0.01 (CSV meta header); crosses IS=18 OOS=30; honest K: 6 per instrument, 12 across Gold+BTC
+====================================================================================================
+  [H4] EMA check: common.ema vs explicit recursion max|diff|=0.00e+00; crossover bars identical to an MT5-style SMA-seeded EMA after warm-up: 100.00% (64 vs 64 crosses)
+  [H4 REAL] truncation test on 64 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=0 -> PASS - no future dependence
+  [H4 LEAKY control (must FAIL)] truncation test on 64 signals (EMAs+crosses recomputed on close[:i+1] only): mismatches=64 -> FAIL - LOOKAHEAD
+  [H4] leaky positive control IS: n=18 %PF=2.271  <- what a one-bar forming-bar leak would look like (E1)
+  [H4] RESAMPLE truncation: 64 signals, M15 cut at the signal bar's close clock, bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS); forming-bar positive control detected in 64/64, bar correctly ABSENT with the filter on in 64/64
+   E1_SAR IS: n=18  win%=55.6  %PF=2.230  sum%=110.7  long %PF=2.743 (n=9) short %PF=1.854 (n=9); median hold=294 bars; time long=45%; exits by opposite cross=18/18; buy&hold over window=+28.1%
+   E1_SAR IS: n=18 < 20 -> INSUFFICIENT DATA for a null comparison
+   E1_SAR OOS: n=30  win%=30.0  %PF=1.505  sum%=68.0  long %PF=2.441 (n=15) short %PF=0.749 (n=15); median hold=128 bars; time long=54%; exits by opposite cross=29/30; buy&hold over window=+99.1%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=20 vs 30): median=1.153 p95=3.764 -> real at 62.9th pct; p(K=1)=0.3710 p(K=6)=0.9380 p(K=12)=0.9966 [Sidak K=6: 0.9381]; direction-matched p(K=1)=0.3860
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=0.990 p95=2.777 -> real at 76.6th pct; p(K=1)=0.2340 p(K=6)=0.7922 p(K=12)=0.9610 [Sidak K=6: 0.7980]
+      NOTE: null A mean n=20 misses real n=30 by >10% (structural for pure SAR) -> A n-MISMATCH, excluded from the verdict; null B (exactly count-matched) carries it
+   E2_SAR+2ATR IS: n=18  win%=33.3  %PF=2.317  sum%=58.3  long %PF=3.509 (n=9) short %PF=1.654 (n=9); median hold=114 bars; time long=57%; exits by opposite cross=6/18; buy&hold over window=+28.1%
+   E2_SAR+2ATR IS: n=18 < 20 -> INSUFFICIENT DATA for a null comparison
+   E2_SAR+2ATR OOS: n=30  win%=16.7  %PF=1.793  sum%=51.2  long %PF=3.544 (n=15) short %PF=0.538 (n=15); median hold=34 bars; time long=58%; exits by opposite cross=6/30; buy&hold over window=+99.1%
+      null A (random timing, same exit, real spread; 1000 draws, mean n=30 vs 30): median=1.326 p95=3.400 -> real at 69.4th pct; p(K=1)=0.3060 p(K=6)=0.8858 p(K=12)=0.9864 [Sidak K=6: 0.8883]; direction-matched p(K=1)=0.3230
+      null B (segment permutation: same n, holds, directions, long-exposure; 1000 draws): median=1.110 p95=2.877 -> real at 77.4th pct; p(K=1)=0.2260 p(K=6)=0.7856 p(K=12)=0.9524 [Sidak K=6: 0.7850]
+
+BTCUSD D1 (count only, not tested, not in K): crosses IS=2 OOS=2 -> far below any usable sample size
+
+====================================================================================================
+SUMMARY  (verdict = worse of null A / null B at honest K=6 per instrument, null B alone where null A is count-MISMATCHED; p at K=12 across both instruments also shown)
+====================================================================================================
+config                       audit   IS n  IS %PF  IS pA1  IS pB1  OOS n  OOS %PF     pA1     pB1     pA6     pB6    pA12    pB12   A n  OOS verdict
+GOLD M15 E1_SAR               PASS    708   0.955   0.537   0.485    635    1.170   0.258   0.096   0.836   0.462   0.976   0.703  MISM  DOES NOT SURVIVE
+GOLD M15 E2_SAR+2ATR          PASS    708   0.907   0.604   0.205    635    1.015   0.511   0.233   0.987   0.798   1.000   0.956    ok  DOES NOT SURVIVE
+GOLD H1 E1_SAR                PASS    195   0.887   0.562   0.717    169    1.134   0.407   0.374   0.956   0.940   0.999   0.997  MISM  DOES NOT SURVIVE
+GOLD H1 E2_SAR+2ATR           PASS    195   0.869   0.711   0.559    169    0.907   0.792   0.570   1.000   0.994   1.000   1.000    ok  DOES NOT SURVIVE
+GOLD H4 E1_SAR                PASS     53   0.826   0.579   0.730     35    2.341   0.183   0.107   0.700   0.498   0.907   0.754  MISM  DOES NOT SURVIVE (LOW POWER)
+GOLD H4 E2_SAR+2ATR           PASS     53   0.307   0.964   0.991     35    2.010   0.220   0.140   0.774   0.598   0.949   0.833    ok  DOES NOT SURVIVE (LOW POWER)
+BTCUSD M15 E1_SAR             PASS    438   1.040   0.388   0.205    454    0.952   0.500   0.457   0.984   0.975   1.000   0.999  MISM  DOES NOT SURVIVE
+BTCUSD M15 E2_SAR+2ATR        PASS    438   0.974   0.511   0.051    454    0.777   0.787   0.531   1.000   0.989   1.000   1.000    ok  DOES NOT SURVIVE
+BTCUSD H1 E1_SAR              PASS    105   1.192   0.351   0.258    105    1.412   0.361   0.134   0.933   0.571   0.996   0.826  MISM  DOES NOT SURVIVE
+BTCUSD H1 E2_SAR+2ATR         PASS    105   1.678   0.048   0.015    105    1.476   0.321   0.067   0.895   0.346   0.988   0.569    ok  DOES NOT SURVIVE
+BTCUSD H4 E1_SAR              PASS     18   2.230       -       -     30    1.505   0.371   0.234   0.938   0.792   0.997   0.961  MISM  DOES NOT SURVIVE (LOW POWER)
+BTCUSD H4 E2_SAR+2ATR         PASS     18   2.317       -       -     30    1.793   0.306   0.226   0.886   0.786   0.986   0.952    ok  DOES NOT SURVIVE (LOW POWER)
+SILVER: NOT RUN (no data in this environment).
