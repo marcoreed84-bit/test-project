@@ -1,0 +1,135 @@
+[GOLD contamination filter] dropped 9802 pre-2014-06-13 01:30:00 M15-file rows (2001-2012 daily + 2013 hourly bars, all spread=0) BEFORE resampling to H4
+
+==========================================================================================
+GOLD H4 (resampled from M15, closed bars only) -- Mechanical Elliott 5-wave impulse -> fade into ABC
+GOLD: n=18943 bars 2014-06-13 04:00:00 -> 2026-09-25 20:00:00 | IS 2014-06-13 04:00:00 -> 2020-12-31 16:00:00 (10083 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 20:00:00 (8860 bars, untouched)
+point=0.01 (from CSV meta header); median M15 bars per H4 bar=16 (nominal 16); H4 bars with < half the nominal M15 count: 48
+GRID K=12 per timeframe (same as M15); honest family K=36 (M15+H4+D1); selection = highest IS %PF with IS n>=100
+==========================================================================================
+  H4 alignment vs NATIVE GOLD_H4.csv (2022-07-04 04:00:00 -> 2026-09-25 20:00:00): 6544 common bars, 0 native-only, 0 resampled-only; exact-match (<=1 point) open=99.98%, high=100.00%, low=99.98%, close=100.00%
+all combos (IS): cfg -> confirmed pivots / valid-impulse signals / trades taken / IS %PF [OOS signal COUNT only, no OOS performance looked at]
+   (2.0, 'strict', False): pivots= 1080  signals=  61  n=  59  IS %PF=1.027   [OOS signals=70]
+   (2.0, 'strict', True): pivots= 1080  signals=  41  n=  41  IS %PF=0.955   [OOS signals=50]
+   (2.0, 'relaxed', False): pivots= 1080  signals= 164  n= 143  IS %PF=1.042   [OOS signals=155]
+   (2.0, 'relaxed', True): pivots= 1080  signals=  88  n=  84  IS %PF=0.979   [OOS signals=91]
+   (3.0, 'strict', False): pivots=  484  signals=  24  n=  24  IS %PF=0.679   [OOS signals=31]
+   (3.0, 'strict', True): pivots=  484  signals=  14  n=  14  IS %PF=1.051   [OOS signals=22]
+   (3.0, 'relaxed', False): pivots=  484  signals=  80  n=  72  IS %PF=1.185   [OOS signals=75]
+   (3.0, 'relaxed', True): pivots=  484  signals=  42  n=  40  IS %PF=1.066   [OOS signals=41]
+   (5.0, 'strict', False): pivots=  188  signals=  12  n=  11  IS %PF=0.727   [OOS signals=10]
+   (5.0, 'strict', True): pivots=  188  signals=   7  n=   7  IS %PF=0.798   [OOS signals=3]
+   (5.0, 'relaxed', False): pivots=  188  signals=  30  n=  26  IS %PF=0.558   [OOS signals=25]
+   (5.0, 'relaxed', True): pivots=  188  signals=  12  n=  12  IS %PF=0.544   [OOS signals=8]
+1/12 combos had IS n>=100; 1 have IS %PF > 1.0
+FROZEN WINNER (IS only): (2.0, 'relaxed', False)  IS n=143  IS %PF=1.042
+  lookahead audit [REAL]: structural asserts OK; truncation test on 300 signals -> signal mismatches=0, pivot-prefix mismatches=0 (PASS - no future dependence)
+  positive control (DELIBERATELY LEAKY: enter at P5's own pivot bar): IS n=153 IS %PF=3.553  <- what a pivot-confirmation leak would look like
+  lookahead audit [LEAKY control (must FAIL)]: structural asserts OK; truncation test on 300 signals -> signal mismatches=300, pivot-prefix mismatches=0 (FAIL - LOOKAHEAD)
+  RESAMPLE truncation audit: 300 signals, M15 cut at the signal bar's close clock, HTF bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS - no future M15 data used)
+  RESAMPLE positive control (forming-bar bug, clock strictly inside bar i, no completeness filter): detected as mismatch in 298/300 cases; with the filter ON bar i is correctly ABSENT in 300/300 cases
+  knowability check on 319 signals (0 short windows: early close / missing final M15 slots, known only at the window-end clock): end-time lookup errors=0; CLAUDE.md searchsorted(htf_time, t+15m, 'right')-2 at the last M15 close -> leaky=0, one-bar-conservative=8 (window closed before a session gap / short window)
+IS sanity: random-timing IS pool median=0.936; IS winner vs best-of-12 random (median 1.339): p=0.9910
+OOS (untouched): n=140  win%=52.1  %PF=1.090  sum%=7.0  long%=46 (long %PF=1.009 n=64, short %PF=1.161 n=76)  median stop=2.17 ATR, median target_r=0.87; median hold=5 bars, MAX_HOLD backstop exits=0/140
+  ABC diagnostic IS (descriptive, NOT a signal input): textbook ABC follows a valid impulse 27.4% of 164 vs 32.7% after ANY confirmed pivot (base rate, n=1080)
+  ABC diagnostic OOS (descriptive, NOT a signal input): textbook ABC follows a valid impulse 29.2% of 154 vs 33.2% after ANY confirmed pivot (base rate, n=949)
+random-timing OOS null (1000 draws, p_fire=0.02009, mean n=145 vs real 140; same _run_one exit, real spread, (stop,target_r) pairs from real OOS trades): median=0.973  p95=1.394
+REAL OOS %PF=1.090 -> 70.3th percentile; p(K=1)=0.2970 [DOES NOT SURVIVE]; p(K=12)=0.9840 (best-of-K median 1.380) [DOES NOT SURVIVE]; p(family K=36)=1.0000 (median 1.568) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.46): median=0.957  p(K=1)=0.2790
+[GOLD contamination filter] dropped 9802 pre-2014-06-13 01:30:00 M15-file rows (2001-2012 daily + 2013 hourly bars, all spread=0) BEFORE resampling to D1
+
+==========================================================================================
+GOLD D1 (resampled from M15, closed bars only) -- Mechanical Elliott 5-wave impulse -> fade into ABC
+GOLD: n=3171 bars 2014-06-16 00:00:00 -> 2026-09-25 00:00:00 | IS 2014-06-16 00:00:00 -> 2020-12-31 00:00:00 (1691 bars) | OOS 2021-01-04 00:00:00 -> 2026-09-25 00:00:00 (1480 bars, untouched)
+point=0.01 (from CSV meta header); median M15 bars per D1 bar=92 (nominal 96); D1 bars with < half the nominal M15 count: 1
+GRID K=12 per timeframe (same as M15); honest family K=36 (M15+H4+D1); selection = highest IS %PF with IS n>=100
+==========================================================================================
+all combos (IS): cfg -> confirmed pivots / valid-impulse signals / trades taken / IS %PF [OOS signal COUNT only, no OOS performance looked at]
+   (2.0, 'strict', False): pivots=  155  signals=   8  n=   7  IS %PF=1.499   [OOS signals=10]
+   (2.0, 'strict', True): pivots=  155  signals=   5  n=   5  IS %PF=1.304   [OOS signals=3]
+   (2.0, 'relaxed', False): pivots=  155  signals=  26  n=  19  IS %PF=2.252   [OOS signals=23]
+   (2.0, 'relaxed', True): pivots=  155  signals=  12  n=  11  IS %PF=2.259   [OOS signals=7]
+   (3.0, 'strict', False): pivots=   79  signals=   4  n=   3  IS %PF=0.583   [OOS signals=7]
+   (3.0, 'strict', True): pivots=   79  signals=   1  n=   1  IS %PF=0.000   [OOS signals=6]
+   (3.0, 'relaxed', False): pivots=   79  signals=  11  n=   8  IS %PF=4.035   [OOS signals=21]
+   (3.0, 'relaxed', True): pivots=   79  signals=   4  n=   3  IS %PF=3.014   [OOS signals=11]
+   (5.0, 'strict', False): pivots=   35  signals=   1  n=   1  IS %PF=0.000   [OOS signals=3]
+   (5.0, 'strict', True): pivots=   35  signals=   1  n=   1  IS %PF=0.000   [OOS signals=1]
+   (5.0, 'relaxed', False): pivots=   35  signals=   4  n=   4  IS %PF=0.570   [OOS signals=6]
+   (5.0, 'relaxed', True): pivots=   35  signals=   3  n=   3  IS %PF=0.514   [OOS signals=3]
+0/12 combos had IS n>=100; 0 have IS %PF > 1.0
+(audit-only combo, NOT a frozen winner: (2.0, 'relaxed', False), the max-IS-trade combo, IS n=19)
+  lookahead audit [REAL]: structural asserts OK; truncation test on 49 signals -> signal mismatches=0, pivot-prefix mismatches=0 (PASS - no future dependence)
+  positive control (DELIBERATELY LEAKY: enter at P5's own pivot bar): IS n=21 IS %PF=6.605  <- what a pivot-confirmation leak would look like
+  lookahead audit [LEAKY control (must FAIL)]: structural asserts OK; truncation test on 51 signals -> signal mismatches=51, pivot-prefix mismatches=0 (FAIL - LOOKAHEAD)
+  RESAMPLE truncation audit: 49 signals, M15 cut at the signal bar's close clock, HTF bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS - no future M15 data used)
+  RESAMPLE positive control (forming-bar bug, clock strictly inside bar i, no completeness filter): detected as mismatch in 49/49 cases; with the filter ON bar i is correctly ABSENT in 49/49 cases
+  knowability check on 49 signals (5 short windows: early close / missing final M15 slots, known only at the window-end clock): end-time lookup errors=0; CLAUDE.md searchsorted(htf_time, t+15m, 'right')-2 at the last M15 close -> leaky=0, one-bar-conservative=15 (window closed before a session gap / short window)
+NO combo reached IS n>=100 (max IS n=19) -> INSUFFICIENT DATA for a meaningful verdict at D1. The threshold is NOT lowered; OOS performance is not examined.
+
+==========================================================================================
+SILVER: no SILVER data of any timeframe in this environment -> NOT RUN (no verdict).
+
+==========================================================================================
+BTCUSD H4 (resampled from M15, closed bars only) -- Mechanical Elliott 5-wave impulse -> fade into ABC
+BTCUSD: n=17276 bars 2017-07-03 00:00:00 -> 2026-09-27 08:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 20:00:00 (5866 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 08:00:00 (6003 bars, untouched)
+point=0.01 (from CSV meta header); median M15 bars per H4 bar=16 (nominal 16); H4 bars with < half the nominal M15 count: 9
+GRID K=12 per timeframe (same as M15); honest family K=36 (M15+H4+D1); selection = highest IS %PF with IS n>=100
+==========================================================================================
+all combos (IS): cfg -> confirmed pivots / valid-impulse signals / trades taken / IS %PF [OOS signal COUNT only, no OOS performance looked at]
+   (2.0, 'strict', False): pivots=  608  signals=  34  n=  33  IS %PF=0.483   [OOS signals=35]
+   (2.0, 'strict', True): pivots=  608  signals=  24  n=  24  IS %PF=0.381   [OOS signals=24]
+   (2.0, 'relaxed', False): pivots=  608  signals=  96  n=  88  IS %PF=0.809   [OOS signals=97]
+   (2.0, 'relaxed', True): pivots=  608  signals=  55  n=  55  IS %PF=0.765   [OOS signals=53]
+   (3.0, 'strict', False): pivots=  317  signals=  25  n=  25  IS %PF=0.331   [OOS signals=17]
+   (3.0, 'strict', True): pivots=  317  signals=  13  n=  13  IS %PF=0.189   [OOS signals=11]
+   (3.0, 'relaxed', False): pivots=  317  signals=  53  n=  42  IS %PF=0.240   [OOS signals=45]
+   (3.0, 'relaxed', True): pivots=  317  signals=  23  n=  22  IS %PF=0.173   [OOS signals=25]
+   (5.0, 'strict', False): pivots=  115  signals=  10  n=   9  IS %PF=0.979   [OOS signals=6]
+   (5.0, 'strict', True): pivots=  115  signals=   5  n=   5  IS %PF=0.577   [OOS signals=3]
+   (5.0, 'relaxed', False): pivots=  115  signals=  18  n=  17  IS %PF=0.993   [OOS signals=15]
+   (5.0, 'relaxed', True): pivots=  115  signals=  10  n=  10  IS %PF=0.620   [OOS signals=6]
+0/12 combos had IS n>=100; 0 have IS %PF > 1.0
+(audit-only combo, NOT a frozen winner: (2.0, 'relaxed', False), the max-IS-trade combo, IS n=88)
+  lookahead audit [REAL]: structural asserts OK; truncation test on 271 signals -> signal mismatches=0, pivot-prefix mismatches=0 (PASS - no future dependence)
+  positive control (DELIBERATELY LEAKY: enter at P5's own pivot bar): IS n=88 IS %PF=2.990  <- what a pivot-confirmation leak would look like
+  lookahead audit [LEAKY control (must FAIL)]: structural asserts OK; truncation test on 300 signals -> signal mismatches=300, pivot-prefix mismatches=0 (FAIL - LOOKAHEAD)
+  RESAMPLE truncation audit: 271 signals, M15 cut at the signal bar's close clock, HTF bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS - no future M15 data used)
+  RESAMPLE positive control (forming-bar bug, clock strictly inside bar i, no completeness filter): detected as mismatch in 269/271 cases; with the filter ON bar i is correctly ABSENT in 271/271 cases
+  knowability check on 271 signals (0 short windows: early close / missing final M15 slots, known only at the window-end clock): end-time lookup errors=0; CLAUDE.md searchsorted(htf_time, t+15m, 'right')-2 at the last M15 close -> leaky=0, one-bar-conservative=6 (window closed before a session gap / short window)
+NO combo reached IS n>=100 (max IS n=88) -> INSUFFICIENT DATA for a meaningful verdict at H4. The threshold is NOT lowered; OOS performance is not examined.
+
+==========================================================================================
+BTCUSD D1 (resampled from M15, closed bars only) -- Mechanical Elliott 5-wave impulse -> fade into ABC
+BTCUSD: n=2886 bars 2017-07-03 00:00:00 -> 2026-09-26 00:00:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 00:00:00 (978 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-26 00:00:00 (1000 bars, untouched)
+point=0.01 (from CSV meta header); median M15 bars per D1 bar=96 (nominal 96); D1 bars with < half the nominal M15 count: 4
+GRID K=12 per timeframe (same as M15); honest family K=36 (M15+H4+D1); selection = highest IS %PF with IS n>=100
+==========================================================================================
+all combos (IS): cfg -> confirmed pivots / valid-impulse signals / trades taken / IS %PF [OOS signal COUNT only, no OOS performance looked at]
+   (2.0, 'strict', False): pivots=   93  signals=  10  n=   8  IS %PF=0.580   [OOS signals=4]
+   (2.0, 'strict', True): pivots=   93  signals=   5  n=   5  IS %PF=0.559   [OOS signals=3]
+   (2.0, 'relaxed', False): pivots=   93  signals=  20  n=  16  IS %PF=0.866   [OOS signals=12]
+   (2.0, 'relaxed', True): pivots=   93  signals=  11  n=  10  IS %PF=0.607   [OOS signals=7]
+   (3.0, 'strict', False): pivots=   47  signals=   5  n=   4  IS %PF=0.317   [OOS signals=5]
+   (3.0, 'strict', True): pivots=   47  signals=   3  n=   3  IS %PF=0.486   [OOS signals=4]
+   (3.0, 'relaxed', False): pivots=   47  signals=   7  n=   6  IS %PF=0.713   [OOS signals=10]
+   (3.0, 'relaxed', True): pivots=   47  signals=   3  n=   3  IS %PF=0.486   [OOS signals=7]
+   (5.0, 'strict', False): pivots=   18  signals=   3  n=   3  IS %PF=1.319   [OOS signals=2]
+   (5.0, 'strict', True): pivots=   18  signals=   2  n=   2  IS %PF=2.589   [OOS signals=1]
+   (5.0, 'relaxed', False): pivots=   18  signals=   5  n=   4  IS %PF=1.013   [OOS signals=5]
+   (5.0, 'relaxed', True): pivots=   18  signals=   3  n=   3  IS %PF=1.627   [OOS signals=4]
+0/12 combos had IS n>=100; 0 have IS %PF > 1.0
+(audit-only combo, NOT a frozen winner: (2.0, 'relaxed', False), the max-IS-trade combo, IS n=16)
+  lookahead audit [REAL]: structural asserts OK; truncation test on 53 signals -> signal mismatches=0, pivot-prefix mismatches=0 (PASS - no future dependence)
+  positive control (DELIBERATELY LEAKY: enter at P5's own pivot bar): IS n=17 IS %PF=3.352  <- what a pivot-confirmation leak would look like
+  lookahead audit [LEAKY control (must FAIL)]: structural asserts OK; truncation test on 56 signals -> signal mismatches=56, pivot-prefix mismatches=0 (FAIL - LOOKAHEAD)
+  RESAMPLE truncation audit: 53 signals, M15 cut at the signal bar's close clock, HTF bars rebuilt -> bar mismatches=0, signal mismatches=0 (PASS - no future M15 data used)
+  RESAMPLE positive control (forming-bar bug, clock strictly inside bar i, no completeness filter): detected as mismatch in 53/53 cases; with the filter ON bar i is correctly ABSENT in 53/53 cases
+  knowability check on 53 signals (0 short windows: early close / missing final M15 slots, known only at the window-end clock): end-time lookup errors=0; CLAUDE.md searchsorted(htf_time, t+15m, 'right')-2 at the last M15 close -> leaky=0, one-bar-conservative=7 (window closed before a session gap / short window)
+NO combo reached IS n>=100 (max IS n=16) -> INSUFFICIENT DATA for a meaningful verdict at D1. The threshold is NOT lowered; OOS performance is not examined.
+
+SUMMARY
+  {'label': 'GOLD H4', 'K': 12, 'cfg': (2.0, 'relaxed', False), 'is_n': 143, 'is_pf': 1.042, 'oos_n': 140, 'oos_pf': 1.09, 'p_is_k': 0.991, 'pctile': 70.3, 'p1': 0.297, 'pK': 0.984, 'pFamily': 1.0, 'p1_dir': 0.279, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'GOLD D1', 'K': 12, 'max_is_n': 19, 'verdict': 'INSUFFICIENT DATA (no combo reaches IS n>=100) - no verdict either way'}
+  {'label': 'SILVER', 'verdict': 'NOT RUN (no data)'}
+  {'label': 'BTCUSD H4', 'K': 12, 'max_is_n': 88, 'verdict': 'INSUFFICIENT DATA (no combo reaches IS n>=100) - no verdict either way'}
+  {'label': 'BTCUSD D1', 'K': 12, 'max_is_n': 16, 'verdict': 'INSUFFICIENT DATA (no combo reaches IS n>=100) - no verdict either way'}
