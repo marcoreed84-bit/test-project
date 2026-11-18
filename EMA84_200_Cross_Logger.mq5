@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.15"
+#property version   "1.16"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -176,7 +176,7 @@ int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                       StringFormat("EMA%d/%d Cross Logger v1.15", InpFastPeriod, InpSlowPeriod));
+                       StringFormat("EMA%d/%d Cross Logger v1.16", InpFastPeriod, InpSlowPeriod));
    g_firstCalc = true;
    g_lastBarTime = 0;
 
@@ -192,7 +192,7 @@ int OnInit()
    //--- draw on any chart, on any timeframe. _Period is the predefined
    //--- variable holding the chart's REAL timeframe.
    for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
-   PrintFormat("EMA Cross Logger v1.15: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+   PrintFormat("EMA Cross Logger v1.16: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
                EnumToString(_Period), g_chartTfSlot,
                g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
@@ -396,7 +396,16 @@ void BuildHistoricalMarkers()
       bool closeAboveFast = px > ef[j];
       if(posOpen)
         {
-         bool exitNow = (posDir == "UP" && !closeAboveFast) || (posDir == "DOWN" && closeAboveFast);
+         //--- v1.16: same LT-Trend-flip exit as the live tracker.
+         bool exitNow;
+         if(InpUseLTTrendFilter)
+           {
+            bool got; double raw;
+            bool ltStillAgrees = LTTrendAgreesDbg(lh, need - j, posDir == "UP", got, raw);
+            exitNow = got && !ltStillAgrees;
+           }
+         else
+           exitNow = (posDir == "UP" && !closeAboveFast) || (posDir == "DOWN" && closeAboveFast);
          if(exitNow)
            {
             double mv = (px - entryPx) * (posDir == "UP" ? 1.0 : -1.0);
@@ -430,7 +439,7 @@ void BuildHistoricalMarkers()
    //--- active - fixed, per direct report "still no change" with no way
    //--- to verify from the log what was actually running.
    PrintFormat("EMA Cross Logger v%s: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars, min gap %.2fxATR)",
-               "1.15", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
+               "1.16", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
                InpMinSlopeATR, InpSlopeLookbackBars, InpMinGapATR);
   }
 
@@ -617,10 +626,25 @@ void CheckTimeframe(const int k)
       //--- favor of the (unchanged) regime. ASSUMPTION per the file header:
       //--- no VWAP/EMA200 "rejection" condition is checked here, only the
       //--- EMA84 close-cross itself.
+      //--- v1.16: per direct instruction - "the LT could be a potential
+      //--- exit instead... the exit would be when the LT trend is broken".
+      //--- When InpUseLTTrendFilter is on, the exit trigger becomes LT
+      //--- Trend's OWN flip instead of the EMA84 recross - LT/SuperTrend is
+      //--- slower and more stable than a raw EMA84 recross, so this rides
+      //--- through local chop instead of getting whipsawed out on every
+      //--- small pullback. With the filter off, behavior is unchanged.
       bool closeAboveFast = px > ef[j];
       if(g_posOpen[k])
         {
-         bool exitNow = (g_posDir[k] == "UP" && !closeAboveFast) || (g_posDir[k] == "DOWN" && closeAboveFast);
+         bool exitNow;
+         if(InpUseLTTrendFilter)
+           {
+            bool got; double raw;
+            bool ltStillAgrees = LTTrendAgreesDbg(g_ltTrendHandle[k], need - j, g_posDir[k] == "UP", got, raw);
+            exitNow = got && !ltStillAgrees;   // not got = can't confirm -> stay in, don't exit on missing data
+           }
+         else
+           exitNow = (g_posDir[k] == "UP" && !closeAboveFast) || (g_posDir[k] == "DOWN" && closeAboveFast);
          if(exitNow)
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
