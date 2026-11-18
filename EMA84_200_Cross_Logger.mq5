@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.08"
+#property version   "1.09"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -82,20 +82,21 @@ input double InpArrowGapATR           = 1.0;   // v1.07: arrows offset this many
                                                 // same fix already applied to SuperTrend_MTF earlier.
 
 input group "=== Trend-strength filter (no trades while EMA84 is sideways) ==="
-input int    InpSlopeLookbackBars     = 20;    // v1.08: 10->20 - raised alongside the threshold below,
-                                                // per direct visual confirmation (a real chop stretch
-                                                // where 0.15xATR/10bar still let 5 losing entries fire
-                                                // right through it) - a longer lookback is less fooled
-                                                // by one noisy bar inside an otherwise flat range.
-input double InpMinSlopeATR           = 0.40;  // v1.06/v1.08: a NEW position (entry OR re-entry) only
-                                                // opens if EMA84 moved at least this many ATR(14) over
+input int    InpSlopeLookbackBars     = 80;    // v1.09: 20->80 - per direct report "still there" after
+                                                // v1.08. Root cause wasn't the threshold value, it was
+                                                // the WINDOW being too short: a 20-bar (5h on M15) slope
+                                                // check can be satisfied by a small sub-swing INSIDE a
+                                                // much wider range that's obviously sideways when you
+                                                // look at the whole stretch - raising the threshold alone
+                                                // (v1.08) barely helped because it didn't fix that. 80
+                                                // bars = ~20h on M15, closer to the timespan a human eye
+                                                // actually judges "has this been ranging" over.
+input double InpMinSlopeATR           = 0.40;  // a NEW position (entry OR re-entry) only opens if EMA84
+                                                // moved at least this many ATR(14) over
                                                 // InpSlopeLookbackBars bars; otherwise EMA84 is judged
-                                                // "sideways" and no trade is taken. Raised 0.15->0.40
-                                                // after direct visual confirmation that 0.15 still let
-                                                // -$10.04/-$4.25/-$14.01/-$3.74/-$10.79 fire through a
-                                                // clearly flat/choppy stretch. Existing open positions
-                                                // are NOT force-closed just because the slope flattens
-                                                // mid-trade - this only gates NEW entries.
+                                                // "sideways" and no trade is taken. Existing open
+                                                // positions are NOT force-closed just because the slope
+                                                // flattens mid-trade - this only gates NEW entries.
 
 input group "=== Panel ==="
 input bool   InpShowPanel        = true;
