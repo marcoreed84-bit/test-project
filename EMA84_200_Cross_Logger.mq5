@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.14"
+#property version   "1.15"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -176,7 +176,7 @@ int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                       StringFormat("EMA%d/%d Cross Logger v1.14", InpFastPeriod, InpSlowPeriod));
+                       StringFormat("EMA%d/%d Cross Logger v1.15", InpFastPeriod, InpSlowPeriod));
    g_firstCalc = true;
    g_lastBarTime = 0;
 
@@ -192,7 +192,7 @@ int OnInit()
    //--- draw on any chart, on any timeframe. _Period is the predefined
    //--- variable holding the chart's REAL timeframe.
    for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
-   PrintFormat("EMA Cross Logger v1.14: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+   PrintFormat("EMA Cross Logger v1.15: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
                EnumToString(_Period), g_chartTfSlot,
                g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
@@ -430,7 +430,7 @@ void BuildHistoricalMarkers()
    //--- active - fixed, per direct report "still no change" with no way
    //--- to verify from the log what was actually running.
    PrintFormat("EMA Cross Logger v%s: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars, min gap %.2fxATR)",
-               "1.14", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
+               "1.15", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
                InpMinSlopeATR, InpSlopeLookbackBars, InpMinGapATR);
   }
 
@@ -495,11 +495,23 @@ bool IsTrending(const double &ef[], const double &es[], const double &atrArr[], 
 //--- default as every other warm-up gate in this file.
 bool LTTrendAgrees(const int handle, const int shift, const bool wantBull, bool &ok)
   {
+   double raw;
+   return(LTTrendAgreesDbg(handle, shift, wantBull, ok, raw));
+  }
+
+//--- v1.15: debug variant exposing the raw buffer value, per direct report
+//--- "still gives sell signals when the LT is showing green for buy" - need
+//--- hard evidence (not another guess) of what LT Trend's buffer actually
+//--- said at the exact bar/timeframe a signal fired or was skipped.
+bool LTTrendAgreesDbg(const int handle, const int shift, const bool wantBull, bool &ok, double &raw)
+  {
    ok = false;
+   raw = 0.0;
    if(handle == INVALID_HANDLE) return(false);
    double buf[];
    ArraySetAsSeries(buf, true);
    if(CopyBuffer(handle, 8, shift, 1, buf) < 1) return(false);
+   raw = buf[0];
    if(buf[0] == EMPTY_VALUE) return(false);
    ok = true;
    return((buf[0] > 0.0) == wantBull);
@@ -583,7 +595,14 @@ void CheckTimeframe(const int k)
          //--- the slope condition is met, same as any other re-entry).
          //--- v1.14: also require LT Trend agreement if the filter is on.
          bool ltOk1 = true;
-         if(InpUseLTTrendFilter) { bool got; ltOk1 = LTTrendAgrees(g_ltTrendHandle[k], need - j, regimeUp, got); if(!got) ltOk1 = false; }
+         if(InpUseLTTrendFilter)
+           {
+            bool got; double raw;
+            ltOk1 = LTTrendAgreesDbg(g_ltTrendHandle[k], need - j, regimeUp, got, raw);
+            if(!got) ltOk1 = false;
+            PrintFormat("EMA Cross Logger: LT Trend check (regime flip) %s %s wantBull=%s raw=%.5f got=%s agrees=%s",
+                        _Symbol, EnumToString(tf), regimeUp ? "true" : "false", raw, got ? "true" : "false", ltOk1 ? "true" : "false");
+           }
          if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars) && ltOk1)
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
@@ -616,7 +635,13 @@ void CheckTimeframe(const int k)
          bool reenterDn = (g_lastDir[k] == "DOWN" && !closeAboveFast);
          bool ltOk2 = true;
          if(InpUseLTTrendFilter && (reenterUp || reenterDn))
-           { bool got; ltOk2 = LTTrendAgrees(g_ltTrendHandle[k], need - j, reenterUp, got); if(!got) ltOk2 = false; }
+           {
+            bool got; double raw;
+            ltOk2 = LTTrendAgreesDbg(g_ltTrendHandle[k], need - j, reenterUp, got, raw);
+            if(!got) ltOk2 = false;
+            PrintFormat("EMA Cross Logger: LT Trend check (re-entry) %s %s wantBull=%s raw=%.5f got=%s agrees=%s",
+                        _Symbol, EnumToString(tf), reenterUp ? "true" : "false", raw, got ? "true" : "false", ltOk2 ? "true" : "false");
+           }
          if((reenterUp || reenterDn) && IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars) && ltOk2)
            {
             string dir = reenterUp ? "UP" : "DOWN";
