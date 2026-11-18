@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.09"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -97,6 +97,11 @@ input double InpMinSlopeATR           = 0.40;  // a NEW position (entry OR re-en
                                                 // "sideways" and no trade is taken. Existing open
                                                 // positions are NOT force-closed just because the slope
                                                 // flattens mid-trade - this only gates NEW entries.
+input double InpMinGapATR             = 1.0;   // v1.10: EMA84 must also sit at least this many ATR(14)
+                                                // away from EMA200 - per direct confirmation "when it's
+                                                // flat it is near the 200ema" / a real trend needs EMA84
+                                                // to have pulled away again, not just be moving locally.
+                                                // Required ALONGSIDE the slope check, not instead of it.
 
 input group "=== Panel ==="
 input bool   InpShowPanel        = true;
@@ -341,7 +346,7 @@ void BuildHistoricalMarkers()
            }
          regimeDir = newDir;
          //--- v1.06: same sideways gate as the live tracker.
-         if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+         if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
            {
             DrawMarker(t, px, true, regimeUp, 0.0, atrArr[j]);
             posOpen = true; posDir = newDir; entryTime = t; entryPx = px;
@@ -368,7 +373,7 @@ void BuildHistoricalMarkers()
          bool reenterDn = (regimeDir == "DOWN" && !closeAboveFast);
          if(reenterUp || reenterDn)
            {
-            if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+            if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
               {
                string dir = reenterUp ? "UP" : "DOWN";
                DrawMarker(t, px, true, reenterUp, 0.0, atrArr[j]);
@@ -419,12 +424,21 @@ void LogPosition(const datetime t, const string sym, const string per,
 //--- Gates NEW entries only (both the regime-flip entry and a re-entry) -
 //--- an already-open position is not force-closed just because the slope
 //--- flattens mid-trade.
-bool IsTrending(const double &ef[], const double &atrArr[], const int j, const int lookback)
+//--- v1.10: second required condition, per direct confirmation - during a
+//--- real trend EMA84 pulls AWAY from EMA200 (the gap widens, same idea as
+//--- a MACD line expanding); during chop it flattens back toward EMA200
+//--- (gap narrows, often hugging it). Both this gap check AND the slope
+//--- check above must pass for a new entry - slope alone can be fooled by
+//--- a brief sub-swing even while the two EMAs are still sitting close
+//--- together (not genuinely separated into a real trend).
+bool IsTrending(const double &ef[], const double &es[], const double &atrArr[], const int j, const int lookback)
   {
    if(j < lookback) return(false);
    if(!(atrArr[j] > 0.0)) return(false);
    double slope = MathAbs(ef[j] - ef[j - lookback]);
-   return(slope >= InpMinSlopeATR * atrArr[j]);
+   if(slope < InpMinSlopeATR * atrArr[j]) return(false);
+   double gap = MathAbs(ef[j] - es[j]);
+   return(gap >= InpMinGapATR * atrArr[j]);
   }
 
 void CheckTimeframe(const int k)
@@ -501,7 +515,7 @@ void CheckTimeframe(const int k)
          //--- EMA84 is actually trending on this bar - otherwise stay flat
          //--- (the re-entry branch below will open it on a later bar once
          //--- the slope condition is met, same as any other re-entry).
-         if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+         if(IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
             if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0, atrArr[j]);
@@ -531,7 +545,7 @@ void CheckTimeframe(const int k)
         {
          bool reenterUp = (g_lastDir[k] == "UP" && closeAboveFast);
          bool reenterDn = (g_lastDir[k] == "DOWN" && !closeAboveFast);
-         if((reenterUp || reenterDn) && IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+         if((reenterUp || reenterDn) && IsTrending(ef, es, atrArr, j, InpSlopeLookbackBars))
            {
             string dir = reenterUp ? "UP" : "DOWN";
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", dir, px);
