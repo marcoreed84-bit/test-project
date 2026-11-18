@@ -1,0 +1,74 @@
+
+[GOLD contamination filter] dropped 9802 pre-2014-06-13 01:30:00 rows (daily/hourly bars mislabeled M15) BEFORE computing ATR/ZigZag
+
+==========================================================================================
+GOLD M15 -- Mechanical Elliott 5-wave impulse -> fade into ABC (ZZ_ATR_MULT, W4_RULE, REQ_W5_BEYOND_W3)
+GOLD: n=290054 bars 2014-06-13 01:30:00 -> 2026-09-25 23:45:00 | IS 2014-06-13 01:30:00 -> 2020-12-31 18:45:00 (154599 bars) | OOS 2021-01-04 01:00:00 -> 2026-09-25 23:45:00 (135455 bars, untouched)
+point=0.01 (from CSV meta header)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+all combos (IS): cfg -> confirmed pivots / valid-impulse signals / trades taken / IS %PF
+   (2.0, 'strict', False): pivots= 17403  signals= 1003  n=  951  IS %PF=0.836
+   (2.0, 'strict', True): pivots= 17403  signals=  643  n=  637  IS %PF=0.872
+   (2.0, 'relaxed', False): pivots= 17403  signals= 2706  n= 2220  IS %PF=0.825
+   (2.0, 'relaxed', True): pivots= 17403  signals= 1507  n= 1390  IS %PF=0.882
+   (3.0, 'strict', False): pivots=  8026  signals=  510  n=  478  IS %PF=0.908
+   (3.0, 'strict', True): pivots=  8026  signals=  310  n=  304  IS %PF=0.911
+   (3.0, 'relaxed', False): pivots=  8026  signals= 1215  n=  998  IS %PF=0.943
+   (3.0, 'relaxed', True): pivots=  8026  signals=  664  n=  626  IS %PF=0.974
+   (5.0, 'strict', False): pivots=  3106  signals=  194  n=  185  IS %PF=0.782
+   (5.0, 'strict', True): pivots=  3106  signals=  133  n=  130  IS %PF=0.812
+   (5.0, 'relaxed', False): pivots=  3106  signals=  423  n=  368  IS %PF=0.959
+   (5.0, 'relaxed', True): pivots=  3106  signals=  237  n=  226  IS %PF=1.065
+12/12 combos had IS n>=100; 1 have IS %PF > 1.0
+FROZEN WINNER (IS only): (5.0, 'relaxed', True)  IS n=226  IS %PF=1.065
+  lookahead audit [REAL]: structural asserts OK; truncation test on 300 signals -> signal mismatches=0, pivot-prefix mismatches=0 (PASS - no future dependence)
+  positive control (DELIBERATELY LEAKY: enter at P5's own pivot bar): IS n=233 IS %PF=5.940  <- what a pivot-confirmation leak would look like
+  lookahead audit [LEAKY control (must FAIL)]: structural asserts OK; truncation test on 300 signals -> signal mismatches=300, pivot-prefix mismatches=0 (FAIL - LOOKAHEAD)
+IS sanity: random-timing IS pool median=0.936; IS winner vs best-of-12 random (median 1.220): p=0.9628
+OOS (untouched): n=190  win%=49.5  %PF=0.869  sum%=-9.1  long%=43 (long %PF=1.329 n=81, short %PF=0.585 n=109)  median stop=5.12 ATR, median target_r=1.20
+  ABC diagnostic IS (descriptive, NOT a signal input): textbook ABC follows a valid impulse 36.3% of 237 vs 31.9% after ANY confirmed pivot (base rate, n=3106)
+  ABC diagnostic OOS (descriptive, NOT a signal input): textbook ABC follows a valid impulse 35.6% of 194 vs 32.1% after ANY confirmed pivot (base rate, n=2620)
+random-timing OOS null (1000 draws, p_fire=0.00160, mean n=192 vs real 190; same _run_one exit, real spread, (stop,target_r) pairs from real OOS trades): median=0.979  p95=1.362
+REAL OOS %PF=0.869 -> 26.5th percentile; p(K=1)=0.7350 [DOES NOT SURVIVE]; p(K=12)=1.0000 (best-of-K median 1.333) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.43): median=0.966  p(K=1)=0.7040
+
+==========================================================================================
+SILVER: SILVER_M15_native.csv NOT PRESENT in /tmp/claude-0/-home-user-test-project/0bd2ac72-7526-55cb-84f6-d8ea842f8c5b/scratchpad/data -> NOT RUN (no verdict).
+
+==========================================================================================
+BTCUSD M15 -- Mechanical Elliott 5-wave impulse -> fade into ABC (ZZ_ATR_MULT, W4_RULE, REQ_W5_BEYOND_W3)
+BTCUSD: n=275838 bars 2017-07-03 00:00:00 -> 2026-09-27 12:15:00 | IS 2021-01-04 00:00:00 -> 2023-12-31 23:45:00 (93731 bars) | OOS 2024-01-01 00:00:00 -> 2026-09-27 12:15:00 (95889 bars, untouched)
+point=0.01 (from CSV meta header)
+GRID K=12 (literal grid size); selection = highest IS %PF with IS n>=100
+==========================================================================================
+all combos (IS): cfg -> confirmed pivots / valid-impulse signals / trades taken / IS %PF
+   (2.0, 'strict', False): pivots= 10174  signals=  536  n=  503  IS %PF=0.647
+   (2.0, 'strict', True): pivots= 10174  signals=  336  n=  327  IS %PF=0.680
+   (2.0, 'relaxed', False): pivots= 10174  signals= 1660  n= 1305  IS %PF=0.667
+   (2.0, 'relaxed', True): pivots= 10174  signals=  851  n=  786  IS %PF=0.751
+   (3.0, 'strict', False): pivots=  4906  signals=  243  n=  228  IS %PF=0.687
+   (3.0, 'strict', True): pivots=  4906  signals=  148  n=  146  IS %PF=0.699
+   (3.0, 'relaxed', False): pivots=  4906  signals=  760  n=  607  IS %PF=0.651
+   (3.0, 'relaxed', True): pivots=  4906  signals=  364  n=  343  IS %PF=0.698
+   (5.0, 'strict', False): pivots=  1862  signals=  103  n=   96  IS %PF=0.523
+   (5.0, 'strict', True): pivots=  1862  signals=   60  n=   60  IS %PF=0.455
+   (5.0, 'relaxed', False): pivots=  1862  signals=  266  n=  230  IS %PF=0.607
+   (5.0, 'relaxed', True): pivots=  1862  signals=  142  n=  139  IS %PF=0.559
+10/12 combos had IS n>=100; 0 have IS %PF > 1.0
+FROZEN WINNER (IS only): (2.0, 'relaxed', True)  IS n=786  IS %PF=0.751
+  lookahead audit [REAL]: structural asserts OK; truncation test on 300 signals -> signal mismatches=0, pivot-prefix mismatches=0 (PASS - no future dependence)
+  positive control (DELIBERATELY LEAKY: enter at P5's own pivot bar): IS n=736 IS %PF=1.772  <- what a pivot-confirmation leak would look like
+  lookahead audit [LEAKY control (must FAIL)]: structural asserts OK; truncation test on 300 signals -> signal mismatches=300, pivot-prefix mismatches=0 (FAIL - LOOKAHEAD)
+IS sanity: random-timing IS pool median=0.683; IS winner vs best-of-12 random (median 0.806): p=0.9112
+OOS (untouched): n=870  win%=45.6  %PF=0.633  sum%=-143.4  long%=47 (long %PF=0.596 n=412, short %PF=0.675 n=458)  median stop=2.25 ATR, median target_r=0.96
+  ABC diagnostic IS (descriptive, NOT a signal input): textbook ABC follows a valid impulse 34.3% of 851 vs 32.0% after ANY confirmed pivot (base rate, n=10174)
+  ABC diagnostic OOS (descriptive, NOT a signal input): textbook ABC follows a valid impulse 30.4% of 936 vs 32.1% after ANY confirmed pivot (base rate, n=10721)
+random-timing OOS null (1000 draws, p_fire=0.01121, mean n=896 vs real 870; same _run_one exit, real spread, (stop,target_r) pairs from real OOS trades): median=0.762  p95=0.881
+REAL OOS %PF=0.633 -> 2.2th percentile; p(K=1)=0.9780 [DOES NOT SURVIVE]; p(K=12)=1.0000 (best-of-K median 0.877) [DOES NOT SURVIVE]
+supplementary direction-matched null (p_long=0.47): median=0.763  p(K=1)=0.9780
+
+SUMMARY
+  {'label': 'GOLD', 'K': 12, 'cfg': (5.0, 'relaxed', True), 'is_n': 226, 'is_pf': np.float64(1.065), 'oos_n': 190, 'oos_pf': 0.869, 'p_is_k': 0.9628, 'pctile': np.float64(26.5), 'p1': 0.735, 'pK': 1.0, 'p1_dir': 0.704, 'verdict': 'DOES NOT SURVIVE'}
+  {'label': 'SILVER', 'verdict': 'NOT RUN (data file absent)'}
+  {'label': 'BTCUSD', 'K': 12, 'cfg': (2.0, 'relaxed', True), 'is_n': 786, 'is_pf': np.float64(0.751), 'oos_n': 870, 'oos_pf': 0.633, 'p_is_k': 0.9112, 'pctile': np.float64(2.2), 'p1': 0.978, 'pK': 1.0, 'p1_dir': 0.978, 'verdict': 'DOES NOT SURVIVE'}
