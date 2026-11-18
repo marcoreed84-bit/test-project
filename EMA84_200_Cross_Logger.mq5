@@ -1,30 +1,47 @@
 //+------------------------------------------------------------------+
 //|                                  EMA84_200_Cross_Logger.mq5      |
 //|  Forward-tracking logger, NOT a trading EA - places no real       |
-//|  orders, risks no money. Tracks EMA(84)/EMA(200) crossovers on    |
-//|  the CLOSED bar across up to 4 timeframes from a SINGLE chart     |
-//|  attachment, logs every new cross to a shared CSV the moment it   |
-//|  happens, and shows a live panel of each timeframe's last cross   |
-//|  and the SIMULATED position it implies (entry at the cross, held  |
-//|  until the next opposite cross - same exit rule tested in         |
-//|  research/silver_btc/ema84_200_crossover_search.py) - so it can   |
-//|  be scored later against genuinely unseen future data, settling   |
-//|  "does this actually work" the only way a backtest never can.     |
+//|  orders, risks no money.                                          |
+//|                                                                    |
+//|  REGIME: EMA(84) vs EMA(200) on the closed bar, as before - a      |
+//|  cross defines/flips the regime direction and is still logged to  |
+//|  EMA84_200_CrossLog.csv.                                          |
+//|                                                                    |
+//|  v1.02 POSITION RULE (per direct instruction, 2026-11-18, "waiting|
+//|  for the opposite cross is pointless... has to be sooner... trade |
+//|  again when it... closes back below the 84 to go further down"):  |
+//|  within an unchanged regime, EXIT the simulated position the      |
+//|  moment price closes back across EMA(84) AGAINST it (tighter than |
+//|  waiting for the full 84/200 cross), then RE-ENTER the moment     |
+//|  price closes back across EMA(84) IN FAVOR of the regime again -  |
+//|  repeating, possibly several times, until the regime itself flips.|
+//|  ASSUMPTION (stated explicitly, confirm/correct if wrong): the     |
+//|  "rejects VWAP/200ema" part is read as the usual PLACE this        |
+//|  happens, not a hard condition checked in code - the actual        |
+//|  mechanical trigger implemented is just "closes back across        |
+//|  EMA84", nothing else gates it.                                    |
+//|                                                                    |
+//|  Logs to TWO shared CSVs: EMA84_200_CrossLog.csv (raw regime       |
+//|  crosses, unchanged) and EMA84_200_PositionLog.csv (every          |
+//|  simulated ENTRY/EXIT under the v1.02 rule above) - across up to   |
+//|  4 timeframes from a SINGLE chart attachment, backfill-capable (no |
+//|  need to run MT5 24/7, see InpLookbackBars), with a live panel.    |
 //|                                                                    |
 //|  Attach ONCE to any chart (symbol only matters, timeframe of the  |
 //|  chart itself is irrelevant - all 4 tracked timeframes are read   |
 //|  via their own bounded recompute, same pattern as SuperTrend_MTF's|
 //|  dashboard rows). For a second instrument (e.g. Silver/BTC),      |
 //|  attach a second instance on that symbol's chart - all instances  |
-//|  share the same CSV log file.                                     |
+//|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.01"
+#property version   "1.02"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
 
 #define LOG_FILE "EMA84_200_CrossLog.csv"
+#define POS_LOG_FILE "EMA84_200_PositionLog.csv"
 #define PFX "EMA84200_"
 
 input group "=== EMA periods ==="
@@ -63,10 +80,18 @@ ENUM_TIMEFRAMES g_tf[4];
 int    g_fastHandle[4];
 int    g_slowHandle[4];
 datetime g_lastTfBarTime[4];
-string g_lastDir[4];      // "UP" / "DOWN" / "" (unknown yet)
+string g_lastDir[4];      // regime direction: "UP" / "DOWN" / "" (unknown yet)
 datetime g_lastCrossTime[4];
 double g_lastCrossPrice[4];
 bool   g_tfReady[4];
+
+//--- v1.02: inner simulated position state (independent of the regime
+//--- cross) - see the file header for the exact rule.
+bool     g_posOpen[4];
+string   g_posDir[4];          // "UP" / "DOWN" while g_posOpen[k]
+datetime g_posEntryTime[4];
+double   g_posEntryPrice[4];
+datetime g_lastProcessedBarTime[4];   // watermark so bars already scanned for pos events aren't rechecked
 
 int OnInit()
   {
@@ -86,6 +111,11 @@ int OnInit()
       g_lastCrossTime[k] = 0;
       g_lastCrossPrice[k] = 0.0;
       g_tfReady[k] = false;
+      g_posOpen[k] = false;
+      g_posDir[k] = "";
+      g_posEntryTime[k] = 0;
+      g_posEntryPrice[k] = 0.0;
+      g_lastProcessedBarTime[k] = 0;
      }
 
    if(!FileIsExist(LOG_FILE, FILE_COMMON))
@@ -95,6 +125,15 @@ int OnInit()
         {
          FileWrite(h, "datetime_utc", "symbol", "period", "direction", "close_price", "fast_ema", "slow_ema");
          FileClose(h);
+        }
+     }
+   if(!FileIsExist(POS_LOG_FILE, FILE_COMMON))
+     {
+      int h2 = FileOpen(POS_LOG_FILE, FILE_WRITE | FILE_READ | FILE_CSV | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE, ',');
+      if(h2 != INVALID_HANDLE)
+        {
+         FileWrite(h2, "datetime_utc", "symbol", "period", "event", "direction", "price");
+         FileClose(h2);
         }
      }
    return(INIT_SUCCEEDED);
@@ -121,6 +160,18 @@ void LogCross(const datetime t, const string sym, const string per,
    FileClose(h);
    PrintFormat("EMA Cross Logger: %s %s %s cross at %s (%.*f)",
                sym, per, dir, TimeToString(t, TIME_DATE | TIME_SECONDS), _Digits, price);
+  }
+
+void LogPosition(const datetime t, const string sym, const string per,
+                  const string event, const string dir, const double price)
+  {
+   int h = FileOpen(POS_LOG_FILE, FILE_WRITE | FILE_READ | FILE_CSV | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE, ',');
+   if(h == INVALID_HANDLE) { Print("EMA Cross Logger: PositionLog FileOpen failed, error ", GetLastError()); return; }
+   FileSeek(h, 0, SEEK_END);
+   FileWrite(h, TimeToString(t, TIME_DATE | TIME_SECONDS), sym, per, event, dir, DoubleToString(price, _Digits));
+   FileClose(h);
+   PrintFormat("EMA Position Log: %s %s %s %s %s at %.*f", sym, per, event, dir,
+               TimeToString(t, TIME_DATE | TIME_SECONDS), _Digits, price);
   }
 
 //--- v1.01: BACKFILL-CAPABLE, per direct constraint ("the trading platform
@@ -152,42 +203,78 @@ void CheckTimeframe(const int k)
    int need = InpLookbackBars + 2;
    if(BarsCalculated(g_fastHandle[k]) < need || BarsCalculated(g_slowHandle[k]) < need) return;
 
-   double ef[], es[];
-   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true);
+   double ef[], es[], cl[];
+   ArraySetAsSeries(ef, true); ArraySetAsSeries(es, true); ArraySetAsSeries(cl, true);
    //--- shift 1..InpLookbackBars+1 = CLOSED bars only (shift 0 would still
    //--- be forming) - oldest to newest once reversed below.
    if(CopyBuffer(g_fastHandle[k], 0, 1, need, ef) < need) return;
    if(CopyBuffer(g_slowHandle[k], 0, 1, need, es) < need) return;
-   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false);   // now index 0 = oldest in the window
+   if(CopyClose(_Symbol, tf, 1, need, cl) < need) return;
+   ArraySetAsSeries(ef, false); ArraySetAsSeries(es, false); ArraySetAsSeries(cl, false);   // index 0 = oldest
 
    if(freshTf)
      {
       //--- first time this TF is checked: just establish the current
-      //--- state, don't log a "cross" for state that already existed
-      //--- before this indicator was attached.
+      //--- regime, start FLAT (no backfilled position) - don't guess a
+      //--- position that existed before this indicator was attached.
       g_lastDir[k] = (ef[need - 1] > es[need - 1]) ? "UP" : "DOWN";
       g_tfReady[k] = true;
+      g_lastProcessedBarTime[k] = iTime(_Symbol, tf, 1);
       return;
      }
 
    for(int j = 1; j < need; j++)
      {
-      bool nowAbove = ef[j] > es[j];
-      bool wasAbove = ef[j - 1] > es[j - 1];
-      datetime barTime = iTime(_Symbol, tf, need - j);   // closed-bar shift matching ef[j]/es[j]
-      if(barTime <= g_lastCrossTime[k]) continue;         // already logged this bar's cross, if any
+      datetime barTime = iTime(_Symbol, tf, need - j);   // closed-bar shift matching ef[j]/es[j]/cl[j]
+      if(barTime <= g_lastProcessedBarTime[k]) continue;  // already scanned this bar
+      g_lastProcessedBarTime[k] = barTime;
 
-      if(nowAbove && !wasAbove)
+      bool regimeUp = ef[j] > es[j];
+      bool regimeUpPrev = ef[j - 1] > es[j - 1];
+      double px = cl[j];
+
+      if(regimeUp != regimeUpPrev)
         {
-         double px = iClose(_Symbol, tf, need - j);
-         LogCross(barTime, _Symbol, EnumToString(tf), "UP", px, ef[j], es[j]);
-         g_lastDir[k] = "UP"; g_lastCrossTime[k] = barTime; g_lastCrossPrice[k] = px;
+         //--- REGIME FLIP: log the raw cross (unchanged), force-close any
+         //--- open position and immediately open a new one in the new
+         //--- regime direction - same "entry on the cross" starting point
+         //--- as before, the v1.02 rule only changes what happens WITHIN
+         //--- a regime after this.
+         string newDir = regimeUp ? "UP" : "DOWN";
+         LogCross(barTime, _Symbol, EnumToString(tf), newDir, px, ef[j], es[j]);
+         if(g_posOpen[k])
+            LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
+         LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
+         g_lastDir[k] = newDir; g_lastCrossTime[k] = barTime; g_lastCrossPrice[k] = px;
+         g_posOpen[k] = true; g_posDir[k] = newDir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
+         continue;
         }
-      else if(!nowAbove && wasAbove)
+
+      //--- SAME REGIME: the v1.02 rule - exit on a close back across EMA84
+      //--- against the position, re-enter on a close back across EMA84 in
+      //--- favor of the (unchanged) regime. ASSUMPTION per the file header:
+      //--- no VWAP/EMA200 "rejection" condition is checked here, only the
+      //--- EMA84 close-cross itself.
+      bool closeAboveFast = px > ef[j];
+      if(g_posOpen[k])
         {
-         double px = iClose(_Symbol, tf, need - j);
-         LogCross(barTime, _Symbol, EnumToString(tf), "DOWN", px, ef[j], es[j]);
-         g_lastDir[k] = "DOWN"; g_lastCrossTime[k] = barTime; g_lastCrossPrice[k] = px;
+         bool exitNow = (g_posDir[k] == "UP" && !closeAboveFast) || (g_posDir[k] == "DOWN" && closeAboveFast);
+         if(exitNow)
+           {
+            LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
+            g_posOpen[k] = false;
+           }
+        }
+      else
+        {
+         bool reenterUp = (g_lastDir[k] == "UP" && closeAboveFast);
+         bool reenterDn = (g_lastDir[k] == "DOWN" && !closeAboveFast);
+         if(reenterUp || reenterDn)
+           {
+            string dir = reenterUp ? "UP" : "DOWN";
+            LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", dir, px);
+            g_posOpen[k] = true; g_posDir[k] = dir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
+           }
         }
      }
   }
@@ -244,41 +331,50 @@ void UpdatePanel()
       ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, lineH * totalLines + 12);
      }
 
-   PanelLabel("title", x, y, StringFormat("EMA%d/%d Cross Tracker (sim only)", InpFastPeriod, InpSlowPeriod),
+   PanelLabel("title", x, y, StringFormat("EMA%d/%d Tracker (sim only)", InpFastPeriod, InpSlowPeriod),
               InpPanelHeaderColor);
    y += lineH;
-   PanelLabel("hdr", x, y, "TF    POS   SINCE               HELD", InpPanelHeaderColor);
+   PanelLabel("hdr", x, y, "TF    REGIME  POSITION", InpPanelHeaderColor);
    y += lineH;
 
    for(int k = 0; k < 4; k++)
      {
       string tfName = StringSubstr(EnumToString(g_tf[k]), 7);
-      string posTxt = "n/a";
+      string regimeTxt = "n/a";
+      color regimeCol = InpPanelTextColor;
+      string posTxt = "-";
       color posCol = InpPanelTextColor;
-      string sinceTxt = "-";
-      string heldTxt = "-";
+      string infoTxt = "-";
 
       if(g_tfReady[k] && g_lastDir[k] != "")
         {
-         bool up = (g_lastDir[k] == "UP");
-         posTxt = up ? "LONG" : "SHORT";
-         posCol = up ? InpPanelUpColor : InpPanelDownColor;
-         if(g_lastCrossTime[k] > 0)
+         bool regimeUp = (g_lastDir[k] == "UP");
+         regimeTxt = regimeUp ? "BULL" : "BEAR";
+         regimeCol = regimeUp ? InpPanelUpColor : InpPanelDownColor;
+
+         if(g_posOpen[k])
            {
-            sinceTxt = TimeToString(g_lastCrossTime[k], TIME_DATE | TIME_MINUTES);
-            long heldSec = (long)(TimeCurrent() - g_lastCrossTime[k]);
+            bool posUp = (g_posDir[k] == "UP");
+            posTxt = posUp ? "LONG" : "SHORT";
+            posCol = posUp ? InpPanelUpColor : InpPanelDownColor;
+            long heldSec = (long)(TimeCurrent() - g_posEntryTime[k]);
             long heldH = heldSec / 3600;
-            if(heldH < 48) heldTxt = StringFormat("%dh", (int)heldH);
-            else           heldTxt = StringFormat("%.1fd", heldH / 24.0);
+            string heldTxt = (heldH < 48) ? StringFormat("%dh", (int)heldH) : StringFormat("%.1fd", heldH / 24.0);
+            infoTxt = "since " + TimeToString(g_posEntryTime[k], TIME_DATE | TIME_MINUTES) + " (" + heldTxt + ")";
            }
          else
-            sinceTxt = "(pre-existing)";
+           {
+            posTxt = "FLAT";
+            posCol = InpPanelTextColor;
+            infoTxt = "waiting to re-enter " + (regimeUp ? "LONG" : "SHORT");
+           }
         }
 
       PanelLabel("tf" + IntegerToString(k) + "_name", x, y, tfName, InpPanelTextColor);
-      PanelLabel("tf" + IntegerToString(k) + "_pos", x + 40, y, posTxt, posCol);
+      PanelLabel("tf" + IntegerToString(k) + "_regime", x + 40, y, regimeTxt, regimeCol);
+      PanelLabel("tf" + IntegerToString(k) + "_pos", x + 100, y, posTxt, posCol);
       y += lineH;
-      PanelLabel("tf" + IntegerToString(k) + "_info", x + 10, y, sinceTxt + "   held " + heldTxt, InpPanelTextColor);
+      PanelLabel("tf" + IntegerToString(k) + "_info", x + 10, y, infoTxt, InpPanelTextColor);
       y += lineH;
      }
 
