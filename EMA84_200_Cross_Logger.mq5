@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.10"
+#property version   "1.11"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -147,7 +147,7 @@ int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
    IndicatorSetString(INDICATOR_SHORTNAME,
-                       StringFormat("EMA%d/%d Cross Logger", InpFastPeriod, InpSlowPeriod));
+                       StringFormat("EMA%d/%d Cross Logger v1.11", InpFastPeriod, InpSlowPeriod));
    g_firstCalc = true;
    g_lastBarTime = 0;
 
@@ -163,7 +163,7 @@ int OnInit()
    //--- draw on any chart, on any timeframe. _Period is the predefined
    //--- variable holding the chart's REAL timeframe.
    for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
-   PrintFormat("EMA Cross Logger: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+   PrintFormat("EMA Cross Logger v1.11: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
                EnumToString(_Period), g_chartTfSlot,
                g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
@@ -386,8 +386,13 @@ void BuildHistoricalMarkers()
      }
 
    g_markersBuilt = true;
-   PrintFormat("EMA Cross Logger: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars)",
-               _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways, InpMinSlopeATR, InpSlopeLookbackBars);
+   //--- v1.11: the gap condition (v1.10) was never added to this Print,
+   //--- so the log gave no way to confirm whether that change was even
+   //--- active - fixed, per direct report "still no change" with no way
+   //--- to verify from the log what was actually running.
+   PrintFormat("EMA Cross Logger v%s: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars, min gap %.2fxATR)",
+               "1.11", _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways,
+               InpMinSlopeATR, InpSlopeLookbackBars, InpMinGapATR);
   }
 
 void LogPosition(const datetime t, const string sym, const string per,
