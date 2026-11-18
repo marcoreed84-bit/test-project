@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.04"
+#property version   "1.05"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -123,7 +123,19 @@ int OnInit()
 
    g_tf[0] = InpTF1; g_tf[1] = InpTF2; g_tf[2] = InpTF3; g_tf[3] = InpTF4;
    g_chartTfSlot = -1;
-   for(int s = 0; s < 4; s++) if(g_tf[s] == PERIOD_CURRENT) { g_chartTfSlot = s; break; }
+   //--- v1.05 FIX (real bug, per direct report "still no signals printed"):
+   //--- PERIOD_CURRENT is a SENTINEL value (literally 0), meant only to be
+   //--- PASSED to functions like iMA()/iTime() meaning "use the chart's own
+   //--- period" - it is NOT equal to the chart's actual ENUM_TIMEFRAMES
+   //--- value. Comparing g_tf[s] (a real period like PERIOD_M15=15) against
+   //--- PERIOD_CURRENT (0) could never match, so g_chartTfSlot was ALWAYS
+   //--- -1 regardless of the v1.04 fix - markers never had a chance to
+   //--- draw on any chart, on any timeframe. _Period is the predefined
+   //--- variable holding the chart's REAL timeframe.
+   for(int s = 0; s < 4; s++) if(g_tf[s] == _Period) { g_chartTfSlot = s; break; }
+   PrintFormat("EMA Cross Logger: chart period=%s, chartTfSlot=%d (%s) - markers will draw only if this is >= 0",
+               EnumToString(_Period), g_chartTfSlot,
+               g_chartTfSlot >= 0 ? EnumToString(g_tf[g_chartTfSlot]) : "NONE - no tracked TF matches this chart");
    g_markersBuilt = false;
    g_markerSeq = 0;
    for(int k = 0; k < 4; k++)
@@ -318,6 +330,7 @@ void BuildHistoricalMarkers()
      }
 
    g_markersBuilt = true;
+   PrintFormat("EMA Cross Logger: historical markers built for %s %s, scanned %d bars", _Symbol, EnumToString(tf), need - startIdx);
   }
 
 void LogPosition(const datetime t, const string sym, const string per,
