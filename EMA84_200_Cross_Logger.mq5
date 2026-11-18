@@ -35,7 +35,7 @@
 //|  share the same CSV log files.                                    |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.06"
+#property version   "1.07"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -73,10 +73,13 @@ input int    InpHistoricalMarkerBars  = 2000;  // how far back (in this chart's 
                                                 // freeze bugs from indicators creating too many chart
                                                 // objects at once, so "all history" is not the default.
 input int    InpArrowSize             = 1;
-input int    InpArrowGapPoints        = 150;   // v1.06: arrows now offset this many points away from
-                                                // the candle (below for a bullish/UP marker, above for
-                                                // a bearish/DOWN one) instead of sitting on the close -
-                                                // per direct report "over the candles"
+input double InpArrowGapATR           = 1.0;   // v1.07: arrows offset this many ATR(14) away from the
+                                                // candle (below for a bullish/UP marker, above for a
+                                                // bearish/DOWN one) - v1.06's fixed-points offset
+                                                // (150 pts = $1.50 on Gold) was tiny next to a typical
+                                                // candle's actual range and barely moved at all; ATR-
+                                                // relative scales correctly across instruments/timeframes,
+                                                // same fix already applied to SuperTrend_MTF earlier.
 
 input group "=== Trend-strength filter (no trades while EMA84 is sideways) ==="
 input int    InpSlopeLookbackBars     = 10;    // EMA84's slope is measured over this many bars back
@@ -221,17 +224,17 @@ void LogCross(const datetime t, const string sym, const string per,
 //--- (g_markerSeq) so nothing here is ever re-touched/animated, it's a
 //--- one-shot draw per historical event, cheap and not a per-tick cost.
 void DrawMarker(const datetime t, const double price, const bool isEntry, const bool isUp,
-                 const double dollarMove)
+                 const double dollarMove, const double atrHere)
   {
    g_markerSeq++;
    string nm = PFX + "mk_" + IntegerToString(g_markerSeq);
    int code = isEntry ? (isUp ? 233 : 234) : 251;   // 233=up arrow, 234=down arrow, 251=small x (exit)
    color col = isUp ? InpPanelUpColor : InpPanelDownColor;
 
-   //--- v1.06: offset away from the candle (below for UP, above for DOWN)
-   //--- instead of sitting exactly on the close - per direct report
-   //--- "over the candles".
-   double gap = InpArrowGapPoints * _Point;
+   //--- v1.07: ATR-relative offset away from the candle (below for UP,
+   //--- above for DOWN) - v1.06's fixed-points gap was too small to be
+   //--- visible next to a typical candle's real range (see input comment).
+   double gap = (atrHere > 0.0 ? atrHere : SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100) * InpArrowGapATR;
    double drawPrice = isUp ? price - gap : price + gap;
 
    ObjectCreate(0, nm, OBJ_ARROW, 0, t, drawPrice);
@@ -311,6 +314,7 @@ void BuildHistoricalMarkers()
 
    bool posOpen = false; string posDir = ""; datetime entryTime = 0; double entryPx = 0.0;
    string regimeDir = (ef[startIdx - 1] > es[startIdx - 1]) ? "UP" : "DOWN";
+   int entriesDrawn = 0, entriesSkippedSideways = 0;   // v1.07: proof the sideways filter actually ran
 
    for(int j = startIdx; j < need; j++)
      {
@@ -325,16 +329,18 @@ void BuildHistoricalMarkers()
          if(posOpen)
            {
             double mv = (px - entryPx) * (posDir == "UP" ? 1.0 : -1.0);
-            DrawMarker(t, px, false, posDir == "UP", mv);
+            DrawMarker(t, px, false, posDir == "UP", mv, atrArr[j]);
             posOpen = false;
            }
          regimeDir = newDir;
          //--- v1.06: same sideways gate as the live tracker.
          if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
            {
-            DrawMarker(t, px, true, regimeUp, 0.0);
+            DrawMarker(t, px, true, regimeUp, 0.0, atrArr[j]);
             posOpen = true; posDir = newDir; entryTime = t; entryPx = px;
+            entriesDrawn++;
            }
+         else entriesSkippedSideways++;
          continue;
         }
 
@@ -345,7 +351,7 @@ void BuildHistoricalMarkers()
          if(exitNow)
            {
             double mv = (px - entryPx) * (posDir == "UP" ? 1.0 : -1.0);
-            DrawMarker(t, px, false, posDir == "UP", mv);
+            DrawMarker(t, px, false, posDir == "UP", mv, atrArr[j]);
             posOpen = false;
            }
         }
@@ -353,17 +359,23 @@ void BuildHistoricalMarkers()
         {
          bool reenterUp = (regimeDir == "UP" && closeAboveFast);
          bool reenterDn = (regimeDir == "DOWN" && !closeAboveFast);
-         if((reenterUp || reenterDn) && IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+         if(reenterUp || reenterDn)
            {
-            string dir = reenterUp ? "UP" : "DOWN";
-            DrawMarker(t, px, true, reenterUp, 0.0);
-            posOpen = true; posDir = dir; entryTime = t; entryPx = px;
+            if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
+              {
+               string dir = reenterUp ? "UP" : "DOWN";
+               DrawMarker(t, px, true, reenterUp, 0.0, atrArr[j]);
+               posOpen = true; posDir = dir; entryTime = t; entryPx = px;
+               entriesDrawn++;
+              }
+            else entriesSkippedSideways++;
            }
         }
      }
 
    g_markersBuilt = true;
-   PrintFormat("EMA Cross Logger: historical markers built for %s %s, scanned %d bars", _Symbol, EnumToString(tf), need - startIdx);
+   PrintFormat("EMA Cross Logger: historical markers built for %s %s, scanned %d bars - %d entries drawn, %d skipped as sideways (min slope %.2fxATR over %d bars)",
+               _Symbol, EnumToString(tf), need - startIdx, entriesDrawn, entriesSkippedSideways, InpMinSlopeATR, InpSlopeLookbackBars);
   }
 
 void LogPosition(const datetime t, const string sym, const string per,
@@ -474,7 +486,7 @@ void CheckTimeframe(const int k)
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
             if(k == g_chartTfSlot && g_markersBuilt)
-               DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0));
+               DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0), atrArr[j]);
             g_posOpen[k] = false;
            }
          g_lastDir[k] = newDir; g_lastCrossTime[k] = barTime; g_lastCrossPrice[k] = px;
@@ -485,7 +497,7 @@ void CheckTimeframe(const int k)
          if(IsTrending(ef, atrArr, j, InpSlopeLookbackBars))
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", newDir, px);
-            if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0);
+            if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, regimeUp, 0.0, atrArr[j]);
             g_posOpen[k] = true; g_posDir[k] = newDir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
            }
          continue;
@@ -504,7 +516,7 @@ void CheckTimeframe(const int k)
            {
             LogPosition(barTime, _Symbol, EnumToString(tf), "EXIT", g_posDir[k], px);
             if(k == g_chartTfSlot && g_markersBuilt)
-               DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0));
+               DrawMarker(barTime, px, false, g_posDir[k] == "UP", (px - g_posEntryPrice[k]) * (g_posDir[k] == "UP" ? 1.0 : -1.0), atrArr[j]);
             g_posOpen[k] = false;
            }
         }
@@ -516,7 +528,7 @@ void CheckTimeframe(const int k)
            {
             string dir = reenterUp ? "UP" : "DOWN";
             LogPosition(barTime, _Symbol, EnumToString(tf), "ENTRY", dir, px);
-            if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, reenterUp, 0.0);
+            if(k == g_chartTfSlot && g_markersBuilt) DrawMarker(barTime, px, true, reenterUp, 0.0, atrArr[j]);
             g_posOpen[k] = true; g_posDir[k] = dir; g_posEntryTime[k] = barTime; g_posEntryPrice[k] = px;
            }
         }
