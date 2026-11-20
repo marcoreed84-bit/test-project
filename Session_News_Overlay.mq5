@@ -50,7 +50,7 @@
 //|     the honest caveat on how rough that heuristic is.             |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.07"
+#property version   "1.08"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -74,17 +74,20 @@ input bool   InpShowAsian            = true;
 //--- of "doesn't overpower" is z-order (see DrawSessionBlock) - once the
 //--- blocks stop being re-created every bar they stay underneath other
 //--- indicators' background objects instead of painting over them.
-//--- v1.07: CORRECTION - v1.06's reduction (26,28,42 etc) made these
-//--- DARKER (dimmer, closer to black), which was the wrong direction for
-//--- "lighter" - on a black chart, "light/pale" means brighter and closer
-//--- to white, not dimmer. These are genuinely pale/pastel tints now.
-input color  InpAsianColor           = C'150,158,205';   // pale lavender-blue
+//--- v1.08: CORRECTION - v1.07's bright pastels (150-205 range) were
+//--- called out as "sucks, too bold". The earlier v1.04-era tones
+//--- (58,62,95 etc - "pale slate blue" etc) were already liked; these are
+//--- THOSE colours scaled down ~30% (fainter, same hue character), not the
+//--- v1.06 near-black values and not v1.07's brightened pastels - neither
+//--- end of that back-and-forth was right, this is a toned-down version
+//--- of the one that was actually good.
+input color  InpAsianColor           = C'41,43,67';   // pale slate blue, fainter
 input bool   InpShowLondon           = true;
-input color  InpLondonColor          = C'155,205,165';   // pale mint green
+input color  InpLondonColor          = C'41,63,45';   // pale sage green, fainter
 input bool   InpShowNewYork          = true;
-input color  InpNewYorkColor         = C'205,155,155';   // pale salmon/rose
+input color  InpNewYorkColor         = C'67,43,43';   // pale dusty rose, fainter
 input bool   InpShowOverlap          = true;      // London/NY overlap - historically the highest-volume window
-input color  InpOverlapColor         = C'205,200,150';   // pale cream/sand
+input color  InpOverlapColor         = C'67,63,41';   // pale sand, fainter
 input int    InpDaysBack             = 6;         // how many past calendar days to shade
 input int    InpDaysForward          = 1;
 
@@ -148,7 +151,7 @@ bool     g_sessChanged = false;           // set when any block was actually (re
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.07");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.08");
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
