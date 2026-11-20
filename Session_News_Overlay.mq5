@@ -24,9 +24,33 @@
 //|   - Colours: lighter but desaturated tints (no alpha in MT5 fills).|
 //|   - News text: per-event floating OBJ_TEXT labels removed; events |
 //|     are listed in a stacked top-right corner panel instead.       |
+//|                                                                    |
+//|  v1.06 (direct requests):                                         |
+//|   - Asian session switched from true JST local hours to a plain   |
+//|     00:00-09:00 UTC window - true Tokyo hours actually fall in    |
+//|     the SAST EVENING, not morning; 00:00-09:00 UTC is the common  |
+//|     retail-trading convention and matches "Asia = morning SAST".  |
+//|   - Colours lightened further (still MT5-fill-opaque, see above). |
+//|   - Z-ORDER, "news above sessions" FIXED FOR REAL: the first      |
+//|     RebuildNews() call used to run in OnInit, BEFORE sessions     |
+//|     existed - since MT5 paints BACK objects oldest-first, that    |
+//|     made news sit BEHIND sessions. Deferred to the first          |
+//|     OnCalculate pass, after sessions are created.                 |
+//|   - "far background, everything else on top": z-order in MT5 is   |
+//|     PURELY creation order, there is no code-level "always at the  |
+//|     very back" switch - the best available guarantee is creating  |
+//|     this indicator's objects once, early, and never recreating    |
+//|     them (already true here). If another indicator is attached    |
+//|     to the SAME chart AFTER this one and also uses background     |
+//|     objects, attach THIS indicator first for the most reliable    |
+//|     ordering.                                                     |
+//|   - News lines/markers coloured green/red for good/bad-for-Gold,  |
+//|     via MT5's own calendar impact classification inverted as a    |
+//|     Gold proxy - see InpColorNewsByGoldImpact's own comment for    |
+//|     the honest caveat on how rough that heuristic is.             |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.05"
+#property version   "1.06"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -50,13 +74,13 @@ input bool   InpShowAsian            = true;
 //--- of "doesn't overpower" is z-order (see DrawSessionBlock) - once the
 //--- blocks stop being re-created every bar they stay underneath other
 //--- indicators' background objects instead of painting over them.
-input color  InpAsianColor           = C'58,62,95';   // pale slate blue
+input color  InpAsianColor           = C'26,28,42';   // pale slate blue, lightened again per direct request
 input bool   InpShowLondon           = true;
-input color  InpLondonColor          = C'58,90,64';   // pale sage green
+input color  InpLondonColor          = C'26,40,29';   // pale sage green
 input bool   InpShowNewYork          = true;
-input color  InpNewYorkColor         = C'95,62,62';   // pale dusty rose
+input color  InpNewYorkColor         = C'42,28,28';   // pale dusty rose
 input bool   InpShowOverlap          = true;      // London/NY overlap - historically the highest-volume window
-input color  InpOverlapColor         = C'95,90,58';   // pale sand
+input color  InpOverlapColor         = C'42,40,26';   // pale sand
 input int    InpDaysBack             = 6;         // how many past calendar days to shade
 input int    InpDaysForward          = 1;
 
@@ -68,7 +92,22 @@ input group "=== News (MT5 Economic Calendar) ==="
 input bool   InpShowNews             = true;
 input string InpNewsCurrencies       = "USD";      // comma-separated, e.g. "USD,EUR"
 input int    InpNewsMinImportance    = 2;          // 0=low 1=medium 2=high
-input color  InpNewsColor            = clrOrange;
+input color  InpNewsColor            = clrOrange;   // neutral/unclassified events
+input bool   InpColorNewsByGoldImpact = true;   // v1.06: per direct request - colour each news line by
+                                                 // whether the release was good or bad for Gold.
+                                                 // HONEST CAVEAT: this uses MT5's own calendar
+                                                 // impact_type field, which classifies whether the
+                                                 // actual print was good/bad for THAT EVENT'S OWN
+                                                 // currency (e.g. good for USD) - it does NOT know
+                                                 // about Gold specifically. The proxy used here is
+                                                 // "good for USD -> usually Gold-bearish (inverse
+                                                 // correlation), bad for USD -> usually Gold-bullish".
+                                                 // That inverse relationship holds often but NOT
+                                                 // always (e.g. a risk-off reaction can send both USD
+                                                 // and Gold up together) - treat the colour as a rough
+                                                 // heuristic, not a verified fundamental call.
+input color  InpNewsGoodForGoldColor = clrLime;
+input color  InpNewsBadForGoldColor  = clrRed;
 input int    InpNewsRefreshMinutes   = 15;
 input int    InpNewsWindowDaysBack   = 1;
 input int    InpNewsWindowDaysFwd    = 5;
@@ -84,6 +123,7 @@ double g_dummy[];
 datetime g_lastSessionBar = 0;
 datetime g_lastNewsRefresh = 0;
 bool g_firstCalc = true;
+bool g_newsFirstBuilt = false;   // v1.06: deferred first news build, see OnInit
 int  g_newsMarkersPrev = 0;   // v1.04: marker count from the last refresh, to prune leftovers
 bool   g_panelCreated[SN_PANEL_MAX];   // v1.04: corner-panel row cache (DashLabel idiom)
 string g_panelText[SN_PANEL_MAX];
@@ -104,7 +144,7 @@ bool     g_sessChanged = false;           // set when any block was actually (re
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.05");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.06");
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
@@ -118,11 +158,17 @@ int OnInit()
    ArrayResize(g_blkTop, slots);    ArrayResize(g_blkBot, slots); ArrayResize(g_blkCol, slots);
    for(int i = 0; i < slots; i++) { g_blkExists[i] = false; g_blkT1[i] = 0; g_blkT2[i] = 0; g_blkTop[i] = 0.0; g_blkBot[i] = 0.0; g_blkCol[i] = clrNONE; }
    g_covTop = 0.0; g_covBot = 0.0; g_blkVerifiedDay = 0;
-   if(InpShowNews)
-     {
-      EventSetTimer(MathMax(60, InpNewsRefreshMinutes * 60));
-      RebuildNews();   // v1.03: don't make the user wait InpNewsRefreshMinutes for the first status
-     }
+   //--- v1.06 FIX (real bug, per direct report "news layers need to be
+   //--- above the session layers"): RebuildNews() used to be called HERE,
+   //--- in OnInit - before RebuildSessions() ever runs (that only happens
+   //--- from OnCalculate, which fires later). Since MT5 paints BACK objects
+   //--- in CREATION order (oldest furthest back - see the z-order note a
+   //--- few lines down), that made the news markers OLDER than the session
+   //--- blocks, i.e. BEHIND them - backwards from what was wanted. Fixed:
+   //--- the first news build is now deferred to the first OnCalculate pass,
+   //--- right after RebuildSessions() has already created its objects.
+   if(InpShowNews) EventSetTimer(MathMax(60, InpNewsRefreshMinutes * 60));
+   g_newsFirstBuilt = false;
    return(INIT_SUCCEEDED);
   }
 
@@ -175,6 +221,14 @@ bool IsEuDst(const datetime t)
 //--- UTC, for the calendar day that dayStartUtc (00:00 UTC) falls on.
 datetime LocalHourToUtc(const datetime dayStartUtc, const int localHour, const string zone)
   {
+   //--- v1.06: "UTC" is a literal fixed-hour window, no zone conversion at
+   //--- all - per direct correction: true Tokyo local hours (00:00-09:00
+   //--- JST) actually fall in the SAST EVENING (17:00 prev day - 02:00
+   //--- SAST), not morning, which is what "the Asian session" usually means
+   //--- in retail trading material - that's commonly just 00:00-09:00
+   //--- UTC/GMT quoted directly, not true Tokyo local time. Switched Asia
+   //--- to this.
+   if(zone == "UTC") return(dayStartUtc + (datetime)(localHour * 3600));
    if(zone == "JST") return(dayStartUtc + (datetime)((localHour - 9) * 3600));
    if(zone == "UK")
      {
@@ -295,8 +349,8 @@ void RebuildSessions()
       datetime dayStartUtc = todayUtc + (datetime)(dOff * 86400);
       string tag = IntegerToString(dOff);
 
-      datetime asianStart = LocalHourToUtc(dayStartUtc, 0, "JST");
-      datetime asianEnd   = LocalHourToUtc(dayStartUtc, 9, "JST");
+      datetime asianStart = LocalHourToUtc(dayStartUtc, 0, "UTC");
+      datetime asianEnd   = LocalHourToUtc(dayStartUtc, 9, "UTC");
       datetime londonStart = LocalHourToUtc(dayStartUtc, 8, "UK");
       datetime londonEnd   = LocalHourToUtc(dayStartUtc, 17, "UK");
       datetime nyStart = LocalHourToUtc(dayStartUtc, 8, "US_EASTERN");
@@ -474,6 +528,7 @@ void RebuildNews()
    string dows[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
    datetime pTime[];
    string   pText[];
+   color    pCol[];
    int      pCount = 0;
 
    int shown = 0;
@@ -491,6 +546,19 @@ void RebuildNews()
       datetime t2 = t1 + 900;   // a 15-minute-wide marker, not a single line - easier to see at a glance
       string nm = SN_PFX + "news_" + IntegerToString(shown);
 
+      //--- v1.06: good/bad-for-Gold colour, per direct request. Uses MT5's
+      //--- own calendar impact_type (whether the actual print was good/bad
+      //--- for THIS EVENT'S OWN currency) and inverts it as a Gold proxy -
+      //--- see the InpColorNewsByGoldImpact input comment for the honest
+      //--- caveat on how rough this heuristic is. Only meaningful once the
+      //--- actual value has been released (impact_type is NA beforehand).
+      color evColor = InpNewsColor;
+      if(InpColorNewsByGoldImpact)
+        {
+         if(values[i].impact_type == CALENDAR_IMPACT_POSITIVE) evColor = InpNewsBadForGoldColor;    // good for the currency -> proxy: bad for Gold
+         else if(values[i].impact_type == CALENDAR_IMPACT_NEGATIVE) evColor = InpNewsGoodForGoldColor; // bad for the currency -> proxy: good for Gold
+        }
+
       //--- created once per slot, moved in place afterwards (z-order, see above)
       if(ObjectFind(0, nm) < 0)
         {
@@ -505,7 +573,7 @@ void RebuildNews()
       ObjectSetDouble(0, nm, OBJPROP_PRICE, 0, priceMax + pad);
       ObjectSetInteger(0, nm, OBJPROP_TIME, 1, t2);
       ObjectSetDouble(0, nm, OBJPROP_PRICE, 1, priceMin - pad);
-      ObjectSetInteger(0, nm, OBJPROP_COLOR, InpNewsColor);
+      ObjectSetInteger(0, nm, OBJPROP_COLOR, evColor);
       ObjectSetString(0, nm, OBJPROP_TOOLTIP, country.currency + " " + ev.name + "  " + TimeToString(t1, TIME_DATE | TIME_MINUTES));
       shown++;
 
@@ -517,8 +585,10 @@ void RebuildNews()
          MqlDateTime d; TimeToStruct(t1, d);
          ArrayResize(pTime, pCount + 1, 64);
          ArrayResize(pText, pCount + 1, 64);
+         ArrayResize(pCol, pCount + 1, 64);
          pTime[pCount] = t1;
          pText[pCount] = StringFormat("%s %02d:%02d  %s  %s", dows[d.day_of_week], d.hour, d.min, country.currency, evName);
+         pCol[pCount] = evColor;
          pCount++;
         }
      }
@@ -528,10 +598,10 @@ void RebuildNews()
    //--- small insertion sort (at most a few hundred items, once per refresh)
    for(int a = 1; a < pCount; a++)
      {
-      datetime kt = pTime[a]; string ks = pText[a];
+      datetime kt = pTime[a]; string ks = pText[a]; color kc = pCol[a];
       int b = a - 1;
-      while(b >= 0 && pTime[b] > kt) { pTime[b + 1] = pTime[b]; pText[b + 1] = pText[b]; b--; }
-      pTime[b + 1] = kt; pText[b + 1] = ks;
+      while(b >= 0 && pTime[b] > kt) { pTime[b + 1] = pTime[b]; pText[b + 1] = pText[b]; pCol[b + 1] = pCol[b]; b--; }
+      pTime[b + 1] = kt; pText[b + 1] = ks; pCol[b + 1] = kc;
      }
 
    NewsPanelRow(0, StringFormat("NEWS (%s, server time)%s", InpNewsCurrencies,
@@ -540,7 +610,12 @@ void RebuildNews()
    for(int r = 0; r < SN_PANEL_MAX - 1; r++)
      {
       if(r < panelRows && r < pCount)
-         NewsPanelRow(r + 1, pText[r], pTime[r] < TimeCurrent() ? clrGray : InpNewsColor);   // released = grey
+        {
+         bool released = pTime[r] < TimeCurrent();
+         bool classified = InpColorNewsByGoldImpact && pCol[r] != InpNewsColor;
+         color rowCol = classified ? pCol[r] : (released ? clrGray : InpNewsColor);   // released+unclassified = grey
+         NewsPanelRow(r + 1, pText[r], rowCol);
+        }
       else if(g_panelCreated[r + 1])
          NewsPanelRow(r + 1, "", InpNewsPanelColor);   // blank leftover rows, don't leave stale text
      }
@@ -567,6 +642,14 @@ int OnCalculate(const int rates_total, const int prev_calculated, const datetime
       g_sessChanged = false;
       RebuildSessions();
       g_lastSessionBar = lastBar;
+      //--- v1.06: first news build happens HERE, after sessions already
+      //--- exist - see the OnInit comment for why the ordering matters.
+      if(g_firstCalc && InpShowNews && !g_newsFirstBuilt)
+        {
+         RebuildNews();
+         g_newsFirstBuilt = true;
+         g_sessChanged = true;   // force the redraw below to pick up the news objects too
+        }
       g_firstCalc = false;
       if(g_sessChanged) ChartRedraw(0);
      }
