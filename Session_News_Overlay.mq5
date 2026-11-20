@@ -50,7 +50,7 @@
 //|     the honest caveat on how rough that heuristic is.             |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.06"
+#property version   "1.07"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -74,13 +74,17 @@ input bool   InpShowAsian            = true;
 //--- of "doesn't overpower" is z-order (see DrawSessionBlock) - once the
 //--- blocks stop being re-created every bar they stay underneath other
 //--- indicators' background objects instead of painting over them.
-input color  InpAsianColor           = C'26,28,42';   // pale slate blue, lightened again per direct request
+//--- v1.07: CORRECTION - v1.06's reduction (26,28,42 etc) made these
+//--- DARKER (dimmer, closer to black), which was the wrong direction for
+//--- "lighter" - on a black chart, "light/pale" means brighter and closer
+//--- to white, not dimmer. These are genuinely pale/pastel tints now.
+input color  InpAsianColor           = C'150,158,205';   // pale lavender-blue
 input bool   InpShowLondon           = true;
-input color  InpLondonColor          = C'26,40,29';   // pale sage green
+input color  InpLondonColor          = C'155,205,165';   // pale mint green
 input bool   InpShowNewYork          = true;
-input color  InpNewYorkColor         = C'42,28,28';   // pale dusty rose
+input color  InpNewYorkColor         = C'205,155,155';   // pale salmon/rose
 input bool   InpShowOverlap          = true;      // London/NY overlap - historically the highest-volume window
-input color  InpOverlapColor         = C'42,40,26';   // pale sand
+input color  InpOverlapColor         = C'205,200,150';   // pale cream/sand
 input int    InpDaysBack             = 6;         // how many past calendar days to shade
 input int    InpDaysForward          = 1;
 
@@ -144,7 +148,7 @@ bool     g_sessChanged = false;           // set when any block was actually (re
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.06");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.07");
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
