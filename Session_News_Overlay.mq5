@@ -50,7 +50,7 @@
 //|     the honest caveat on how rough that heuristic is.             |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.08"
+#property version   "1.09"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -88,6 +88,9 @@ input bool   InpShowNewYork          = true;
 input color  InpNewYorkColor         = C'67,43,43';   // pale dusty rose, fainter
 input bool   InpShowOverlap          = true;      // London/NY overlap - historically the highest-volume window
 input color  InpOverlapColor         = C'67,63,41';   // pale sand, fainter
+input bool   InpShowAsiaLondonOverlap = true;   // v1.09: Asia/London genuinely overlap ~1-2h, same
+                                                 // treatment as the London/NY overlap above
+input color  InpAsiaLondonOverlapColor = C'67,55,63';   // pale mauve, fainter
 input int    InpDaysBack             = 6;         // how many past calendar days to shade
 input int    InpDaysForward          = 1;
 
@@ -151,7 +154,7 @@ bool     g_sessChanged = false;           // set when any block was actually (re
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.08");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.09");
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
@@ -160,7 +163,7 @@ int OnInit()
    //--- while OnDeinit has deleted the objects - reset the panel cache so
    //--- every row is re-created, not skipped as "unchanged".
    for(int i = 0; i < SN_PANEL_MAX; i++) { g_panelCreated[i] = false; g_panelText[i] = ""; g_panelColor[i] = clrNONE; }
-   int slots = (MathMax(0, InpDaysBack) + MathMax(0, InpDaysForward) + 1) * 4;
+   int slots = (MathMax(0, InpDaysBack) + MathMax(0, InpDaysForward) + 1) * 5;
    ArrayResize(g_blkExists, slots); ArrayResize(g_blkT1, slots); ArrayResize(g_blkT2, slots);
    ArrayResize(g_blkTop, slots);    ArrayResize(g_blkBot, slots); ArrayResize(g_blkCol, slots);
    for(int i = 0; i < slots; i++) { g_blkExists[i] = false; g_blkT1[i] = 0; g_blkT2[i] = 0; g_blkTop[i] = 0.0; g_blkBot[i] = 0.0; g_blkCol[i] = clrNONE; }
@@ -368,7 +371,7 @@ void RebuildSessions()
       bool brokerDst = InpServerFollowsDST && IsUsDst(dayStartUtc);
       int brokerOffsetSec = (InpServerUtcOffsetHours + (brokerDst ? 1 : 0)) * 3600;
 
-      int slot0 = (dOff + InpDaysBack) * 4;
+      int slot0 = (dOff + InpDaysBack) * 5;
       if(InpShowAsian)
          DrawSessionBlock(slot0 + 0, SN_PFX + "sess_asia_" + tag, asianStart + brokerOffsetSec,
                            asianEnd + brokerOffsetSec, g_covTop, g_covBot, InpAsianColor);
@@ -386,6 +389,19 @@ void RebuildSessions()
          //--- the range is empty) so no stale in-place block can linger
          DrawSessionBlock(slot0 + 3, SN_PFX + "sess_ovlp_" + tag, ovStart + brokerOffsetSec,
                            ovEnd + brokerOffsetSec, g_covTop, g_covBot, InpOverlapColor);
+        }
+      //--- v1.09: per direct report - Asia (00:00-09:00 UTC) and London
+      //--- (08:00-17:00 UK local) genuinely overlap by ~1-2h (DST-
+      //--- dependent), and since MT5 fills are fully opaque, that hour
+      //--- was just whichever rectangle happened to be drawn on top -
+      //--- not a deliberate colour, same issue the existing London/NY
+      //--- overlap block already solves properly. Same treatment here.
+      if(InpShowAsiaLondonOverlap)
+        {
+         datetime ovStart2 = (datetime)MathMax((long)asianStart, (long)londonStart);
+         datetime ovEnd2   = (datetime)MathMin((long)asianEnd, (long)londonEnd);
+         DrawSessionBlock(slot0 + 4, SN_PFX + "sess_alov_" + tag, ovStart2 + brokerOffsetSec,
+                           ovEnd2 + brokerOffsetSec, g_covTop, g_covBot, InpAsiaLondonOverlapColor);
         }
      }
   }
