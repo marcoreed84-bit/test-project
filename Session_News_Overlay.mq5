@@ -50,7 +50,7 @@
 //|     the honest caveat on how rough that heuristic is.             |
 //+------------------------------------------------------------------+
 #property copyright "Internal"
-#property version   "1.09"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_plots 0
 #property indicator_buffers 1
@@ -81,16 +81,16 @@ input bool   InpShowAsian            = true;
 //--- v1.06 near-black values and not v1.07's brightened pastels - neither
 //--- end of that back-and-forth was right, this is a toned-down version
 //--- of the one that was actually good.
-input color  InpAsianColor           = C'41,43,67';   // pale slate blue, fainter
+input color  InpAsianColor           = C'21,22,34';   // pale slate blue, fainter
 input bool   InpShowLondon           = true;
-input color  InpLondonColor          = C'41,63,45';   // pale sage green, fainter
+input color  InpLondonColor          = C'21,32,23';   // pale sage green, fainter
 input bool   InpShowNewYork          = true;
-input color  InpNewYorkColor         = C'67,43,43';   // pale dusty rose, fainter
+input color  InpNewYorkColor         = C'34,22,22';   // pale dusty rose, fainter
 input bool   InpShowOverlap          = true;      // London/NY overlap - historically the highest-volume window
-input color  InpOverlapColor         = C'67,63,41';   // pale sand, fainter
+input color  InpOverlapColor         = C'34,32,21';   // pale sand, fainter
 input bool   InpShowAsiaLondonOverlap = true;   // v1.09: Asia/London genuinely overlap ~1-2h, same
                                                  // treatment as the London/NY overlap above
-input color  InpAsiaLondonOverlapColor = C'67,55,63';   // pale mauve, fainter
+input color  InpAsiaLondonOverlapColor = C'34,28,32';   // pale mauve, fainter
 input int    InpDaysBack             = 6;         // how many past calendar days to shade
 input int    InpDaysForward          = 1;
 
@@ -154,7 +154,7 @@ bool     g_sessChanged = false;           // set when any block was actually (re
 int OnInit()
   {
    SetIndexBuffer(0, g_dummy, INDICATOR_CALCULATIONS);
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.09");
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session/News Overlay v1.10");
    g_firstCalc = true;
    g_lastSessionBar = 0;
    g_lastNewsRefresh = 0;
